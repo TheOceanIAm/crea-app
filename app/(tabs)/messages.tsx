@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Image } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 
 type Convo = { id: string; name: string; avatar: string; lastMessage: string; time: string; unread: boolean }
@@ -16,6 +17,7 @@ function timeAgo(str: string) {
 }
 
 export default function MessagesScreen() {
+  const router = useRouter()
   const [convos, setConvos] = useState<Convo[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -66,7 +68,11 @@ export default function MessagesScreen() {
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.card} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.card}
+            activeOpacity={0.7}
+            onPress={() => router.push(`/conversation/${item.id}`)}
+          >
             <View style={styles.avatarWrap}>
               {item.avatar
                 ? <Image source={{ uri: item.avatar }} style={styles.avatar} />

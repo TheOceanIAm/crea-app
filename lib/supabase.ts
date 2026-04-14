@@ -53,15 +53,21 @@ class LargeSecureStore {
   }
 }
 
-export const supabase = createClient(
-  process.env.EXPO_PUBLIC_SUPABASE_URL!,
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-  {
-    auth: {
-      storage: new LargeSecureStore(),
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: false,
-    },
-  }
-)
+const supabaseUrl = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim()
+const supabaseAnonKey = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim()
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    'Crea: EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY are missing. ' +
+      'Use .env.local for local dev; for EAS builds set them under build.*.env in eas.json or Expo project environment variables.'
+  )
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    storage: new LargeSecureStore(),
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+})

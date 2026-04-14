@@ -54,6 +54,7 @@ SQL_FILES=(
   ceo_dashboard_rpc.sql
   ceo_admin_rpcs.sql
   ceo_list_rpc_hide_login_emails.sql
+  extend_profile_public_features.sql
   public_share_rpcs.sql
 )
 

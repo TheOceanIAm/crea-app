@@ -1,4 +1,11 @@
-export type PortfolioProject = { title: string; client: string; link: string; role?: string }
+export type PortfolioProject = {
+  title: string
+  client: string
+  link: string
+  role?: string
+  /** Optional thumbnail for web/app portfolio grid */
+  image_url?: string
+}
 
 export type NotificationDigest = 'none' | 'daily' | 'weekly'
 
@@ -78,11 +85,15 @@ export function parsePortfolioProjects(raw: unknown): PortfolioProject[] {
     if (!p || typeof p !== 'object') continue
     const r = p as Record<string, unknown>
     const roleRaw = r.role
+    const imgRaw = r.image_url ?? r.thumbnail_url ?? r.image
+    const imageUrl =
+      typeof imgRaw === 'string' && /^https?:\/\//i.test(imgRaw.trim()) ? imgRaw.trim() : undefined
     out.push({
       title: String(r.title ?? ''),
       client: String(r.client ?? ''),
       link: String(r.link ?? ''),
       role: typeof roleRaw === 'string' && roleRaw.trim() ? roleRaw.trim() : undefined,
+      image_url: imageUrl,
     })
   }
   return out

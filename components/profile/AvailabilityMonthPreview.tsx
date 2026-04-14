@@ -69,7 +69,11 @@ export function AvailabilityMonthPreview({ calendar, anchor }: Props) {
     <View style={styles.wrap}>
       <Text style={styles.title}>Availability</Text>
       <Text style={styles.sub}>
-        {availableCount > 0 ? `${availableCount} day${availableCount === 1 ? '' : 's'} available` : 'Calendar'}
+        {availableCount > 0
+          ? `${availableCount} day${availableCount === 1 ? '' : 's'} free`
+          : bookedCount > 0
+            ? 'Calendar'
+            : 'Availability'}
         {bookedCount > 0 ? ` · ${bookedCount} booked` : ''}
       </Text>
       <Text style={styles.month}>{monthLabel}</Text>

@@ -1,18 +1,37 @@
 {
   "cli": {
     "version": ">= 18.6.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "remote",
+    "promptToConfigurePushNotifications": false
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://trcjalnzuzpgygxtncvp.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyY2phbG56dXpwZ3lneHRuY3ZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NzA4NzksImV4cCI6MjA4OTI0Njg3OX0.-FoFuIqE4_u8sC0TcKqaLFg0V2YDeAk_uAoNnHaCfZs",
+        "EXPO_PUBLIC_CREA_WEB_URL": "https://www.creaservices.de"
+      }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://trcjalnzuzpgygxtncvp.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyY2phbG56dXpwZ3lneHRuY3ZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NzA4NzksImV4cCI6MjA4OTI0Njg3OX0.-FoFuIqE4_u8sC0TcKqaLFg0V2YDeAk_uAoNnHaCfZs",
+        "EXPO_PUBLIC_CREA_WEB_URL": "https://www.creaservices.de"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "ios": {
+        "image": "latest"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://trcjalnzuzpgygxtncvp.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyY2phbG56dXpwZ3lneHRuY3ZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NzA4NzksImV4cCI6MjA4OTI0Njg3OX0.-FoFuIqE4_u8sC0TcKqaLFg0V2YDeAk_uAoNnHaCfZs",
+        "EXPO_PUBLIC_CREA_WEB_URL": "https://www.creaservices.de"
+      }
     }
   },
   "submit": {

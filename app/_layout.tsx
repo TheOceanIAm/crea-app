@@ -41,6 +41,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="jobs/[id]" />
         <Stack.Screen name="profile/[userId]" />
+        <Stack.Screen name="conversation/[id]" />
         <Stack.Screen name="project" options={{ headerShown: false }} />
       </Stack>
     </>

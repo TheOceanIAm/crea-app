@@ -7,11 +7,11 @@ import {
   Briefcase,
   ChevronLeft,
   ClipboardList,
-  LayoutGrid,
   MessageCircle,
   PlusCircle,
   Receipt,
   Settings2,
+  Users,
 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
@@ -39,10 +39,10 @@ const TOOLS: ToolRow[] = [
     href: '/(tabs)/company-applications',
   },
   {
-    label: 'Job feed',
-    sub: 'Browse what other companies have posted.',
-    icon: LayoutGrid,
-    href: '/(tabs)/jobs',
+    label: 'Talent pool',
+    sub: 'Browse freelancers on Crea and open public profiles.',
+    icon: Users,
+    href: '/(tabs)/talent-pool',
   },
   {
     label: 'Invoices',

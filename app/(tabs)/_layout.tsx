@@ -137,6 +137,13 @@ export default function TabLayout() {
           title: 'Applications',
         }}
       />
+      <Tabs.Screen
+        name="talent-pool"
+        options={{
+          href: null,
+          title: 'Talent pool',
+        }}
+      />
     </Tabs>
   )
 }

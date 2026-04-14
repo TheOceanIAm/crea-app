@@ -64,7 +64,13 @@ as $$
       p.rates_currency,
       p.availability_calendar,
       p.availability_status,
-      p.availability_details
+      p.availability_details,
+      coalesce(p.open_to_remote, false) as open_to_remote,
+      coalesce(p.open_to_travel, false) as open_to_travel,
+      p.years_experience,
+      p.public_rating,
+      (select count(*)::int from public.projects j where j.freelancer_id = p.id) as workspace_projects_count,
+      coalesce(jsonb_array_length(coalesce(p.portfolio_projects, '[]'::jsonb)), 0) as portfolio_items_count
     from public.profiles p
     where p.id = profile_id
     limit 1

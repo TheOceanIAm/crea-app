@@ -8,6 +8,7 @@ import {
   Image,
   Linking,
   TouchableOpacity,
+  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
@@ -18,6 +19,7 @@ import {
   ChevronLeft,
   Globe,
   MapPin,
+  MessageCircle,
   Palette,
   Share2,
   Video,
@@ -40,6 +42,7 @@ import { isCeoProfile, isFreelancerProfile } from '@/lib/profileRole'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
 import { parsePublicProfileWidgets } from '@/lib/publicProfileWidgets'
 import { profileShareUrl } from '@/lib/shareLinks'
+import { findOrCreateDirectConversation } from '@/lib/directConversation'
 
 type ProfilePayload = {
   id: string
@@ -64,6 +67,12 @@ type ProfilePayload = {
   availability_calendar?: unknown
   availability_status?: string | null
   availability_details?: string | null
+  open_to_remote?: boolean | null
+  open_to_travel?: boolean | null
+  years_experience?: number | null
+  public_rating?: number | null
+  workspace_projects_count?: number | null
+  portfolio_items_count?: number | null
 }
 
 function strTrim(v: string | null | undefined): string {
@@ -98,6 +107,11 @@ export default function PublicProfileShareScreen() {
   const [error, setError] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [portfolioFilter, setPortfolioFilter] = useState<string>('All')
+  const [authUserId, setAuthUserId] = useState<string | null>(null)
+
+  useEffect(() => {
+    void supabase.auth.getUser().then(({ data }) => setAuthUserId(data.user?.id ?? null))
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -139,24 +153,31 @@ export default function PublicProfileShareScreen() {
     [profile]
   )
 
-  const clientFilters = useMemo(() => {
+  /** Web-style filters: unique client labels and role labels (e.g. DOP, Direction). */
+  const workFilterTags = useMemo(() => {
     const set = new Set<string>()
     for (const p of projects) {
       const c = strTrim(p.client)
+      const r = strTrim(p.role)
       if (c) set.add(c)
+      if (r) set.add(r)
     }
-    return Array.from(set).sort()
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [projects])
 
   useEffect(() => {
-    if (portfolioFilter !== 'All' && !clientFilters.includes(portfolioFilter)) {
+    if (portfolioFilter !== 'All' && !workFilterTags.includes(portfolioFilter)) {
       setPortfolioFilter('All')
     }
-  }, [clientFilters, portfolioFilter])
+  }, [workFilterTags, portfolioFilter])
 
   const filteredProjects = useMemo(() => {
     if (portfolioFilter === 'All') return projects
-    return projects.filter((p) => strTrim(p.client) === portfolioFilter)
+    return projects.filter((p) => {
+      const c = strTrim(p.client)
+      const r = strTrim(p.role)
+      return c === portfolioFilter || r === portfolioFilter
+    })
   }, [projects, portfolioFilter])
 
   const calendar = useMemo(
@@ -260,6 +281,31 @@ export default function PublicProfileShareScreen() {
   const availabilityStatus = freelancer ? strTrim(profile.availability_status) : ''
   const availabilityDetails = freelancer ? strTrim(profile.availability_details) : ''
   const shareMessage = `${name} — view on Crea`
+  const viewingOwn = Boolean(authUserId && userId && typeof userId === 'string' && authUserId === userId)
+
+  const onMessagePress = async () => {
+    if (!userId || typeof userId !== 'string') return
+    if (!authUserId) {
+      router.push('/login')
+      return
+    }
+    if (isCeoProfile(profile.role)) {
+      Alert.alert('Messages', 'Direct messages to this account are not available.')
+      return
+    }
+    const r = await findOrCreateDirectConversation(userId)
+    if (r.ok === false) {
+      const msg =
+        r.error === 'not_authenticated'
+          ? 'Please sign in.'
+          : r.error === 'self'
+            ? 'You cannot message yourself.'
+            : r.error
+      Alert.alert('Could not open chat', msg)
+      return
+    }
+    router.push(`/conversation/${r.conversationId}`)
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -317,6 +363,62 @@ export default function PublicProfileShareScreen() {
               </View>
             ) : null}
           </View>
+          {freelancer ? (
+            <View style={styles.statsRow}>
+              <View style={styles.statCell}>
+                <Text style={styles.statValue}>
+                  {(profile.workspace_projects_count ?? 0) > 0
+                    ? String(profile.workspace_projects_count)
+                    : String(profile.portfolio_items_count ?? 0)}
+                </Text>
+                <Text style={styles.statLabel}>PROJECTS</Text>
+              </View>
+              <View style={styles.statCell}>
+                <Text style={styles.statValue}>
+                  {profile.years_experience != null ? String(profile.years_experience) : '—'}
+                </Text>
+                <Text style={styles.statLabel}>YEARS</Text>
+              </View>
+              <View style={styles.statCell}>
+                <Text style={styles.statValue}>
+                  {profile.public_rating != null ? String(profile.public_rating) : '—'}
+                </Text>
+                <Text style={styles.statLabel}>RATING</Text>
+              </View>
+            </View>
+          ) : null}
+          {freelancer && (profile.open_to_remote || profile.open_to_travel) ? (
+            <View style={[styles.pillRow, styles.pillRowSpaced]}>
+              {profile.open_to_remote ? (
+                <View style={[styles.rolePill, styles.tagPill]}>
+                  <Text style={styles.tagPillText}>OPEN TO REMOTE</Text>
+                </View>
+              ) : null}
+              {profile.open_to_travel ? (
+                <View style={[styles.rolePill, styles.tagPill]}>
+                  <Text style={styles.tagPillText}>OPEN TO TRAVEL</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+          {freelancer ? (
+            <View style={styles.quickActions}>
+              {authUserId && !viewingOwn && !isCeoProfile(profile.role) ? (
+                <TouchableOpacity
+                  style={styles.quickActionBtn}
+                  onPress={() => void onMessagePress()}
+                  activeOpacity={0.85}
+                >
+                  <MessageCircle size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                  <Text style={styles.quickActionText}>Send message</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity style={styles.quickActionBtn} onPress={() => setShareOpen(true)} activeOpacity={0.85}>
+                <Share2 size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                <Text style={styles.quickActionText}>Share profile</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
 
         {freelancer && (dayRate != null || halfDay != null) ? (
@@ -390,7 +492,7 @@ export default function PublicProfileShareScreen() {
         {filteredProjects.length > 0 ? (
           <View style={styles.block}>
             <Text style={styles.blockTitle}>Work</Text>
-            {clientFilters.length > 0 ? (
+            {workFilterTags.length > 0 ? (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -403,28 +505,53 @@ export default function PublicProfileShareScreen() {
                 >
                   <Text style={[styles.filterChipText, portfolioFilter === 'All' && styles.filterChipTextOn]}>All</Text>
                 </TouchableOpacity>
-                {clientFilters.map((c) => (
+                {workFilterTags.map((c) => (
                   <TouchableOpacity
                     key={c}
                     onPress={() => setPortfolioFilter(c)}
                     style={[styles.filterChip, portfolioFilter === c && styles.filterChipOn]}
                   >
                     <Text style={[styles.filterChipText, portfolioFilter === c && styles.filterChipTextOn]}>
-                      {c}
+                      {c.toUpperCase()}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
             ) : null}
-            {filteredProjects.map((proj: PortfolioProject, i: number) => {
-              const sub = projectSubtitle(proj)
-              return (
-                <View key={`${proj.title}-${i}`} style={styles.projectCard}>
-                  <Text style={styles.projectTitle}>{proj.title}</Text>
-                  {sub ? <Text style={styles.projectClient}>{sub}</Text> : null}
-                </View>
-              )
-            })}
+            <View style={styles.workGrid}>
+              {filteredProjects.map((proj: PortfolioProject, i: number) => {
+                const sub = projectSubtitle(proj)
+                const openProject = () => {
+                  const u = strTrim(proj.link)
+                  if (u) Linking.openURL(u).catch(() => {})
+                }
+                return (
+                  <TouchableOpacity
+                    key={`${proj.title}-${i}`}
+                    style={styles.workTile}
+                    activeOpacity={0.85}
+                    onPress={openProject}
+                    disabled={!strTrim(proj.link)}
+                  >
+                    {proj.image_url ? (
+                      <Image source={{ uri: proj.image_url }} style={styles.workThumb} />
+                    ) : (
+                      <View style={styles.workThumbPlaceholder}>
+                        <Text style={styles.workThumbLetter}>{proj.title.charAt(0).toUpperCase() || '•'}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.workTileTitle} numberOfLines={2}>
+                      {proj.title}
+                    </Text>
+                    {sub ? (
+                      <Text style={styles.workTileSub} numberOfLines={1}>
+                        {sub}
+                      </Text>
+                    ) : null}
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
           </View>
         ) : null}
 
@@ -521,6 +648,44 @@ const styles = StyleSheet.create({
   },
   location: { fontSize: 13, color: 'rgba(255,255,255,0.4)', textAlign: 'center' },
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 14 },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  statCell: { alignItems: 'center', minWidth: 72 },
+  statValue: { fontSize: 20, fontWeight: '800', color: '#fff' },
+  statLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.35)',
+    marginTop: 4,
+    letterSpacing: 1,
+  },
+  pillRowSpaced: { marginTop: 10, justifyContent: 'center' },
+  tagPill: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  tagPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.85)',
+    letterSpacing: 1,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+    marginTop: 16,
+    flexWrap: 'wrap',
+  },
+  quickActionBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  quickActionText: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.7)' },
   rolePill: {
     paddingHorizontal: 12,
     paddingVertical: 5,
@@ -593,16 +758,37 @@ const styles = StyleSheet.create({
   },
   filterChipText: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.5)' },
   filterChipTextOn: { color: '#FFDC00' },
-  projectCard: {
-    backgroundColor: '#141414',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+  workGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    justifyContent: 'space-between',
   },
-  projectTitle: { fontSize: 16, fontWeight: '700', color: '#ffffff', marginBottom: 4 },
-  projectClient: { fontSize: 13, color: 'rgba(255,255,255,0.4)' },
+  workTile: {
+    width: '48%',
+    marginBottom: 8,
+  },
+  workThumb: {
+    width: '100%',
+    aspectRatio: 16 / 10,
+    borderRadius: 10,
+    backgroundColor: '#222',
+    marginBottom: 8,
+  },
+  workThumbPlaceholder: {
+    width: '100%',
+    aspectRatio: 16 / 10,
+    borderRadius: 10,
+    backgroundColor: '#222',
+    marginBottom: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  workThumbLetter: { fontSize: 28, fontWeight: '800', color: 'rgba(255,255,255,0.2)' },
+  workTileTitle: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  workTileSub: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
   cta: {
     marginTop: 8,
     backgroundColor: '#FFDC00',

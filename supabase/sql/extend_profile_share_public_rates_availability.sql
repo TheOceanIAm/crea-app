@@ -1,5 +1,5 @@
--- Adds day rates + availability to public profile payload (same data the web profile can show).
--- Run in Supabase SQL Editor after public_share_rpcs.sql and rate/availability migrations.
+-- Standalone: redefine profile_share_public (keep in sync with public_share_rpcs.sql).
+-- Run after extend_profile_public_features.sql if columns open_to_remote etc. exist.
 
 create or replace function public.profile_share_public(profile_id uuid)
 returns jsonb
@@ -31,7 +31,13 @@ as $$
       p.rates_currency,
       p.availability_calendar,
       p.availability_status,
-      p.availability_details
+      p.availability_details,
+      coalesce(p.open_to_remote, false) as open_to_remote,
+      coalesce(p.open_to_travel, false) as open_to_travel,
+      p.years_experience,
+      p.public_rating,
+      (select count(*)::int from public.projects j where j.freelancer_id = p.id) as workspace_projects_count,
+      coalesce(jsonb_array_length(coalesce(p.portfolio_projects, '[]'::jsonb)), 0) as portfolio_items_count
     from public.profiles p
     where p.id = profile_id
     limit 1
