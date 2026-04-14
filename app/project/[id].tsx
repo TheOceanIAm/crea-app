@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   TextInput,
   Alert,
-  Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
@@ -23,7 +22,11 @@ import {
 import type { LucideIcon } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
-import { getCreaWebBaseUrl, openProjectOnWeb } from '@/lib/creaWeb'
+import { ProjectMilestonesTab } from '@/components/project/ProjectMilestonesTab'
+import { ProjectMessagesTab } from '@/components/project/ProjectMessagesTab'
+import { ProjectCrewTab } from '@/components/project/ProjectCrewTab'
+import { ProjectFilesTab } from '@/components/project/ProjectFilesTab'
+import { ProjectFrameIoTab } from '@/components/project/ProjectFrameIoTab'
 
 type TabId =
   | 'overview'
@@ -47,15 +50,17 @@ type ProjectRow = {
   milestones_completed: number
   milestones_total: number
   brief_ai_context: string | null
+  frame_io_url: string | null
+  brief_ai_outputs: Record<string, string> | null
 }
 
-const TABS: { id: TabId; label: string; web?: boolean }[] = [
+const TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'milestones', label: 'Milestones' },
   { id: 'crew', label: 'Crew' },
   { id: 'messages', label: 'Messages' },
   { id: 'files', label: 'Files' },
-  { id: 'frameio', label: 'Frame.io', web: true },
+  { id: 'frameio', label: 'Frame.io' },
   { id: 'brief', label: 'Brief AI' },
 ]
 
@@ -72,6 +77,7 @@ export default function ProjectWorkspaceScreen() {
   const [loading, setLoading] = useState(true)
   const [forbidden, setForbidden] = useState(false)
   const [project, setProject] = useState<ProjectRow | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
   const [applicants, setApplicants] = useState(0)
   const [tab, setTab] = useState<TabId>('brief')
   const [tool, setTool] = useState<string>('tasks')
@@ -84,12 +90,15 @@ export default function ProjectWorkspaceScreen() {
       setLoading(false)
       return
     }
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     if (!user) {
       setForbidden(true)
       setLoading(false)
       return
     }
+    setUserId(user.id)
 
     const { data: row, error } = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
     if (error || !row) {
@@ -100,13 +109,6 @@ export default function ProjectWorkspaceScreen() {
     }
 
     const p = row as ProjectRow
-    if (p.company_id !== user.id && p.freelancer_id !== user.id) {
-      setForbidden(true)
-      setProject(null)
-      setLoading(false)
-      return
-    }
-
     setProject(p)
     setBriefText(p.brief_ai_context ?? '')
     setForbidden(false)
@@ -128,6 +130,11 @@ export default function ProjectWorkspaceScreen() {
     load()
   }, [load])
 
+  const canManageCrew = useMemo(() => {
+    if (!project || !userId) return false
+    return project.company_id === userId || project.freelancer_id === userId
+  }, [project, userId])
+
   const budgetLine = useMemo(() => {
     if (!project?.budget_amount) return '—'
     const n = project.budget_amount.toLocaleString('en-US')
@@ -135,13 +142,15 @@ export default function ProjectWorkspaceScreen() {
     return `${n} ${t}`
   }, [project])
 
+  const currentOutput = project?.brief_ai_outputs?.[tool] ?? ''
+
   const saveBrief = async () => {
     if (!project) return
     setSavingBrief(true)
-    const { error } = await supabase
-      .from('projects')
-      .update({ brief_ai_context: briefText.trim() || null, updated_at: new Date().toISOString() })
-      .eq('id', project.id)
+    const { error } = await supabase.rpc('project_update_brief', {
+      p_project_id: project.id,
+      p_context: briefText,
+    })
     setSavingBrief(false)
     if (error) {
       Alert.alert('Save failed', error.message)
@@ -151,33 +160,62 @@ export default function ProjectWorkspaceScreen() {
   }
 
   const onGenerate = async () => {
-    const web = getCreaWebBaseUrl()
     if (!project) return
     setGenerating(true)
-    await saveBrief()
-    setGenerating(false)
-    if (web) {
-      openProjectOnWeb(project.id, '?tool=brief')
-      Alert.alert(
-        'Continue on web',
-        'Full AI generation runs in the Crea web app. We opened it in your browser.'
-      )
-    } else {
-      Alert.alert(
-        'Web workspace',
-        'Add EXPO_PUBLIC_CREA_WEB_URL to your .env to open the web Brief AI workspace.'
-      )
-    }
-  }
-
-  const openWebTab = (kind: string) => {
-    if (!project) return
-    const base = getCreaWebBaseUrl()
-    if (!base) {
-      Alert.alert('Web URL missing', 'Set EXPO_PUBLIC_CREA_WEB_URL in .env.')
+    const { error: saveErr } = await supabase.rpc('project_update_brief', {
+      p_project_id: project.id,
+      p_context: briefText,
+    })
+    if (saveErr) {
+      setGenerating(false)
+      Alert.alert('Save failed', saveErr.message)
       return
     }
-    Linking.openURL(`${base}/projects/${project.id}?view=${encodeURIComponent(kind)}`).catch(() => {})
+    setProject((prev) => (prev ? { ...prev, brief_ai_context: briefText.trim() || null } : prev))
+
+    const { data, error } = await supabase.functions.invoke<{ content?: string; error?: string; hint?: string }>(
+      'brief-ai',
+      { body: { projectId: project.id, tool, context: briefText } }
+    )
+    setGenerating(false)
+
+    if (error) {
+      Alert.alert(
+        'Generation failed',
+        `${error.message}\n\nDeploy the brief-ai Edge Function and set OPENAI_API_KEY if you have not yet.`
+      )
+      return
+    }
+
+    if (data && typeof data === 'object' && 'error' in data && data.error) {
+      Alert.alert('Brief AI', String(data.error))
+      return
+    }
+
+    const content = data?.content
+    if (typeof content !== 'string' || !content.trim()) {
+      Alert.alert('Brief AI', 'No content returned. Check function logs and OpenAI billing.')
+      return
+    }
+
+    const { error: mergeErr } = await supabase.rpc('project_merge_brief_output', {
+      p_project_id: project.id,
+      p_tool: tool,
+      p_content: content,
+    })
+    if (mergeErr) {
+      Alert.alert('Could not save output', mergeErr.message)
+      return
+    }
+
+    setProject((prev) =>
+      prev
+        ? {
+            ...prev,
+            brief_ai_outputs: { ...(prev.brief_ai_outputs ?? {}), [tool]: content },
+          }
+        : prev
+    )
   }
 
   if (loading) {
@@ -188,7 +226,7 @@ export default function ProjectWorkspaceScreen() {
     )
   }
 
-  if (forbidden || !project) {
+  if (forbidden || !project || !userId) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
@@ -201,6 +239,37 @@ export default function ProjectWorkspaceScreen() {
       </SafeAreaView>
     )
   }
+
+  const statsRow = (
+    <View style={styles.statsRow}>
+      <View style={styles.statCard}>
+        <Text style={styles.statLabel}>Applicants</Text>
+        <Text style={styles.statValue}>{applicants}</Text>
+        <Text style={styles.statSub}>in crew pipeline</Text>
+      </View>
+      <View style={styles.statCard}>
+        <Text style={styles.statLabel}>Milestones</Text>
+        <Text style={styles.statValue}>
+          {project.milestones_completed}/{project.milestones_total}
+        </Text>
+        <Text style={styles.statSub}>completed</Text>
+      </View>
+      <View style={styles.statCard}>
+        <Text style={styles.statLabel}>Budget</Text>
+        <Text style={styles.statValue} numberOfLines={1}>
+          {budgetLine}
+        </Text>
+        <Text style={styles.statSub}>total</Text>
+      </View>
+      <View style={styles.statCard}>
+        <Text style={styles.statLabel}>Status</Text>
+        <Text style={styles.statValueSmall}>{project.status.toUpperCase()}</Text>
+        <Text style={styles.statSub}>{project.location || '—'}</Text>
+      </View>
+    </View>
+  )
+
+  const needsFlexTab = tab === 'messages' || tab === 'milestones' || tab === 'crew' || tab === 'files'
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -222,10 +291,7 @@ export default function ProjectWorkspaceScreen() {
             return (
               <TouchableOpacity
                 key={t.id}
-                onPress={() => {
-                  setTab(t.id)
-                  if (t.web && project) openWebTab(t.id)
-                }}
+                onPress={() => setTab(t.id)}
                 style={[styles.tab, active && styles.tabActive]}
               >
                 {isBrief ? (
@@ -242,126 +308,115 @@ export default function ProjectWorkspaceScreen() {
         </View>
       </ScrollView>
 
-      <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Applicants</Text>
-            <Text style={styles.statValue}>{applicants}</Text>
-            <Text style={styles.statSub}>in crew pipeline</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Milestones</Text>
-            <Text style={styles.statValue}>
-              {project.milestones_completed}/{project.milestones_total}
-            </Text>
-            <Text style={styles.statSub}>completed</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Budget</Text>
-            <Text style={styles.statValue} numberOfLines={1}>
-              {budgetLine}
-            </Text>
-            <Text style={styles.statSub}>total</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Status</Text>
-            <Text style={styles.statValueSmall}>{project.status.toUpperCase()}</Text>
-            <Text style={styles.statSub}>{project.location || '—'}</Text>
-          </View>
-        </View>
-
-        {tab === 'overview' && (
-          <Text style={styles.para}>
-            Use the tabs above for milestones, crew chat, files, and Frame.io. Brief AI and deep document tools sync
-            with the Crea web workspace when EXPO_PUBLIC_CREA_WEB_URL is set.
-          </Text>
-        )}
-
-        {(tab === 'messages' || tab === 'files' || tab === 'milestones' || tab === 'crew') && (
-          <View style={styles.webCallout}>
-            <Text style={styles.para}>
-              {tab === 'messages' && 'Threaded project chat is available in the web app.'}
-              {tab === 'files' && 'Upload and version files in the web workspace.'}
-              {tab === 'milestones' && 'Edit milestone boards on the web; counts sync here.'}
-              {tab === 'crew' && 'Manage crew roles and invites on the web.'}
-            </Text>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={() => openWebTab(tab)}>
-              <Text style={styles.secondaryBtnText}>Open on web</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {tab === 'brief' && (
-          <>
-            <Text style={styles.sectionLabel}>Production documents</Text>
-            <View style={styles.toolGrid}>
-              {TOOLS.map((x) => {
-                const Icon = x.icon
-                const active = tool === x.id
-                return (
-                  <TouchableOpacity
-                    key={x.id}
-                    style={[styles.toolCard, active && styles.toolCardActive]}
-                    onPress={() => setTool(x.id)}
-                  >
-                    <Icon size={26} color="#ffffff" strokeWidth={ICON_STROKE} />
-                    <Text style={styles.toolTitle}>{x.title}</Text>
-                    <Text style={styles.toolSub}>{x.sub}</Text>
-                  </TouchableOpacity>
-                )
-              })}
+      <View style={styles.bodyWrap}>
+        {needsFlexTab ? (
+          <View style={styles.flexFill}>
+            {statsRow}
+            <View style={styles.flexTabInner}>
+              {tab === 'messages' && <ProjectMessagesTab projectId={project.id} userId={userId} />}
+              {tab === 'milestones' && (
+                <ProjectMilestonesTab projectId={project.id} onCountsChanged={load} />
+              )}
+              {tab === 'crew' && <ProjectCrewTab projectId={project.id} canManage={canManageCrew} />}
+              {tab === 'files' && <ProjectFilesTab projectId={project.id} />}
             </View>
+          </View>
+        ) : (
+          <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
+            {statsRow}
 
-            <TouchableOpacity
-              style={[styles.secondaryBtn, styles.toolWebBtn]}
-              onPress={() => openWebTab(`tool-${tool}`)}
-            >
-              <Text style={styles.secondaryBtnText}>
-                Open “{TOOLS.find((t) => t.id === tool)?.title ?? 'Tool'}” on web
+            {tab === 'overview' && (
+              <Text style={styles.para}>
+                This workspace runs in the app: milestones, crew, chat, files, review links, and Brief AI are synced via
+                Supabase for everyone on the project.
               </Text>
-            </TouchableOpacity>
+            )}
 
-            <Text style={styles.contextLabel}>
-              ADDITIONAL CONTEXT <Text style={styles.optional}>(optional)</Text>
-            </Text>
-            <TextInput
-              style={styles.briefInput}
-              multiline
-              placeholder="Describe creative direction, references, deliverables, schedule…"
-              placeholderTextColor="rgba(255,255,255,0.25)"
-              value={briefText}
-              onChangeText={setBriefText}
-              textAlignVertical="top"
-            />
-            <View style={styles.briefActions}>
-              <TouchableOpacity
-                style={[styles.saveBtn, savingBrief && styles.btnDim]}
-                onPress={saveBrief}
-                disabled={savingBrief}
-              >
-                <Text style={styles.saveBtnText}>{savingBrief ? 'Saving…' : 'Save context'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.genBtn, generating && styles.btnDim]}
-                onPress={onGenerate}
-                disabled={generating}
-              >
-                {generating ? (
-                  <ActivityIndicator color="#0a0a0a" />
-                ) : (
-                  <Text style={styles.genBtnText}>Generate on web</Text>
+            {tab === 'frameio' && (
+              <ProjectFrameIoTab
+                projectId={project.id}
+                frameIoUrl={project.frame_io_url}
+                canEdit={canManageCrew}
+                onSaved={(url) => setProject((prev) => (prev ? { ...prev, frame_io_url: url } : prev))}
+              />
+            )}
+
+            {tab === 'brief' && (
+              <>
+                <Text style={styles.sectionLabel}>Production documents</Text>
+                <View style={styles.toolGrid}>
+                  {TOOLS.map((x) => {
+                    const Icon = x.icon
+                    const active = tool === x.id
+                    return (
+                      <TouchableOpacity
+                        key={x.id}
+                        style={[styles.toolCard, active && styles.toolCardActive]}
+                        onPress={() => setTool(x.id)}
+                      >
+                        <Icon size={26} color="#ffffff" strokeWidth={ICON_STROKE} />
+                        <Text style={styles.toolTitle}>{x.title}</Text>
+                        <Text style={styles.toolSub}>{x.sub}</Text>
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+
+                {!!currentOutput && (
+                  <View style={styles.outputBox}>
+                    <Text style={styles.outputLabel}>Generated · {TOOLS.find((t) => t.id === tool)?.title}</Text>
+                    <Text style={styles.outputText} selectable>
+                      {currentOutput}
+                    </Text>
+                  </View>
                 )}
-              </TouchableOpacity>
-            </View>
-          </>
+
+                <Text style={styles.contextLabel}>
+                  ADDITIONAL CONTEXT <Text style={styles.optional}>(optional)</Text>
+                </Text>
+                <TextInput
+                  style={styles.briefInput}
+                  multiline
+                  placeholder="Describe creative direction, references, deliverables, schedule…"
+                  placeholderTextColor="rgba(255,255,255,0.25)"
+                  value={briefText}
+                  onChangeText={setBriefText}
+                  textAlignVertical="top"
+                />
+                <View style={styles.briefActions}>
+                  <TouchableOpacity
+                    style={[styles.saveBtn, savingBrief && styles.btnDim]}
+                    onPress={saveBrief}
+                    disabled={savingBrief}
+                  >
+                    <Text style={styles.saveBtnText}>{savingBrief ? 'Saving…' : 'Save context'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.genBtn, generating && styles.btnDim]}
+                    onPress={onGenerate}
+                    disabled={generating}
+                  >
+                    {generating ? (
+                      <ActivityIndicator color="#0a0a0a" />
+                    ) : (
+                      <Text style={styles.genBtnText}>Generate in app</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </ScrollView>
         )}
-      </ScrollView>
+      </View>
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
+  bodyWrap: { flex: 1, paddingHorizontal: 16 },
+  flexFill: { flex: 1 },
+  flexTabInner: { flex: 1, minHeight: 0 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 16 },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 12 },
@@ -382,7 +437,7 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.55)' },
   tabTextActive: { color: '#0a0a0a' },
   body: { flex: 1 },
-  bodyContent: { paddingHorizontal: 16, paddingBottom: 40 },
+  bodyContent: { paddingBottom: 40 },
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
   statCard: {
     width: '48%',
@@ -424,6 +479,22 @@ const styles = StyleSheet.create({
   toolCardActive: { borderColor: 'rgba(255,220,0,0.55)' },
   toolTitle: { fontSize: 15, fontWeight: '700', color: '#fff' },
   toolSub: { fontSize: 12, color: 'rgba(255,255,255,0.35)', lineHeight: 16 },
+  outputBox: {
+    backgroundColor: '#111',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 20,
+  },
+  outputLabel: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.35)',
+    letterSpacing: 1.2,
+    marginBottom: 10,
+    textTransform: 'uppercase',
+  },
+  outputText: { fontSize: 14, color: 'rgba(255,255,255,0.88)', lineHeight: 20 },
   contextLabel: {
     fontSize: 10,
     color: 'rgba(255,255,255,0.35)',
@@ -463,23 +534,5 @@ const styles = StyleSheet.create({
   genBtnText: { color: '#0a0a0a', fontWeight: '800' },
   btnDim: { opacity: 0.6 },
   para: { fontSize: 14, color: 'rgba(255,255,255,0.45)', lineHeight: 20, marginBottom: 12 },
-  webCallout: {
-    padding: 16,
-    borderRadius: 14,
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  toolWebBtn: { marginBottom: 20 },
-  secondaryBtn: {
-    marginTop: 8,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,220,0,0.35)',
-  },
-  secondaryBtnText: { color: '#FFDC00', fontWeight: '700' },
   miss: { color: 'rgba(255,255,255,0.5)', textAlign: 'center' },
 })

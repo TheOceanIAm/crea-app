@@ -250,17 +250,55 @@ export default function DashboardScreen() {
 
   if (isCeoProfile(role)) {
     const snap = ceoSnap ?? parseCeoSnapshot(null)
-    const statDefs: { label: string; value: string; sub: string; Icon: LucideIcon }[] = [
-      { label: 'All users', value: String(snap.all_users), sub: 'With login', Icon: Users },
-      { label: 'New users', value: String(snap.new_users), sub: 'Last 7 days', Icon: UserPlus },
-      { label: 'Active jobs', value: String(snap.active_jobs), sub: 'Open listings', Icon: Briefcase },
-      { label: 'Completed jobs', value: String(snap.completed_jobs), sub: 'Closed / filled', Icon: CircleCheck },
+    const statDefs: {
+      label: string
+      value: string
+      sub: string
+      Icon: LucideIcon
+      onPress: () => void
+    }[] = [
+      {
+        label: 'All users',
+        value: String(snap.all_users),
+        sub: 'With login',
+        Icon: Users,
+        onPress: () => router.push('/(tabs)/ceo-users' as Href),
+      },
+      {
+        label: 'New users',
+        value: String(snap.new_users),
+        sub: 'Last 7 days',
+        Icon: UserPlus,
+        onPress: () =>
+          router.push({
+            pathname: '/(tabs)/ceo-users',
+            params: { view: 'recent' },
+          } as Href),
+      },
+      {
+        label: 'Active jobs',
+        value: String(snap.active_jobs),
+        sub: 'Open listings',
+        Icon: Briefcase,
+        onPress: () => router.navigate('/(tabs)/jobs'),
+      },
+      {
+        label: 'Completed jobs',
+        value: String(snap.completed_jobs),
+        sub: 'Closed / filled',
+        Icon: CircleCheck,
+        onPress: () => router.navigate('/(tabs)/jobs'),
+      },
     ]
     const first = name.split(' ')[0] || name || 'there'
 
     return (
-      <SafeAreaView style={styles.safe}>
-        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.header}>
             <View style={styles.ceoHeaderText}>
               <Text style={styles.ceoKicker}>WELCOME BACK</Text>
@@ -301,14 +339,21 @@ export default function DashboardScreen() {
             {statDefs.map((s) => {
               const Icon = s.Icon
               return (
-                <View key={s.label} style={styles.ceoStatTile}>
+                <TouchableOpacity
+                  key={s.label}
+                  style={styles.ceoStatTile}
+                  activeOpacity={0.75}
+                  onPress={s.onPress}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${s.label}: ${s.value}. ${s.sub}. Tap to open.`}
+                >
                   <View style={styles.ceoStatIconWrap}>
                     <Icon size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
                   </View>
                   <Text style={styles.ceoStatLabel}>{s.label}</Text>
                   <Text style={styles.ceoStatValue}>{s.value}</Text>
                   <Text style={styles.ceoStatSub}>{s.sub}</Text>
-                </View>
+                </TouchableOpacity>
               )
             })}
           </View>
@@ -323,7 +368,14 @@ export default function DashboardScreen() {
                 const show = /^https?:\/\//i.test(uri)
                 const initial = (u.name || '?').trim().charAt(0).toUpperCase() || '?'
                 return (
-                  <View key={u.id} style={styles.ceoRecentRow}>
+                  <TouchableOpacity
+                    key={u.id}
+                    style={styles.ceoRecentRow}
+                    activeOpacity={0.7}
+                    onPress={() => router.push(`/profile/${u.id}` as Href)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open public profile for ${u.name.trim() || 'user'}`}
+                  >
                     {show ? (
                       <Image source={{ uri }} style={styles.ceoRecentAvatar} />
                     ) : (
@@ -339,7 +391,7 @@ export default function DashboardScreen() {
                         {(u.role || '—').trim()}
                       </Text>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 )
               })
             )}
@@ -375,8 +427,12 @@ export default function DashboardScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Header */}
         <View style={styles.header}>
           <View>
@@ -479,7 +535,9 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
   loadingContainer: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center' },
-  scroll: { flex: 1, paddingHorizontal: 20 },
+  scroll: { flex: 1 },
+  /** Horizontal padding here so content + tab bar align; extra bottom so last row clears the tab bar. */
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 28 },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingTop: 20, paddingBottom: 28,

@@ -10,8 +10,10 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native'
+import * as Linking from 'expo-linking'
 import { router } from 'expo-router'
 import { supabase } from '@/lib/supabase'
+import { openPrivacy, openTerms } from '@/lib/creaLegal'
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('')
@@ -21,7 +23,12 @@ export default function RegisterScreen() {
   const handleRegister = async () => {
     if (!email || !password) return
     setLoading(true)
-    const { data, error } = await supabase.auth.signUp({ email, password })
+    const emailRedirectTo = Linking.createURL('auth/callback')
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo },
+    })
     setLoading(false)
     if (error) {
       Alert.alert('Error', error.message)
@@ -33,7 +40,7 @@ export default function RegisterScreen() {
     }
     Alert.alert(
       'Almost there',
-      'If email confirmation is enabled, open the link in your inbox, then log in.'
+      'Confirm your email via the link we sent you — it will open the Crea app when you tap it. Then you can log in.'
     )
     router.replace('/login')
   }
@@ -82,6 +89,18 @@ export default function RegisterScreen() {
           </TouchableOpacity>
         </View>
 
+        <Text style={styles.legalFooter}>
+          By signing up you agree to our{' '}
+          <Text style={styles.link} onPress={openTerms}>
+            Terms
+          </Text>{' '}
+          and{' '}
+          <Text style={styles.link} onPress={openPrivacy}>
+            Privacy Policy
+          </Text>
+          .
+        </Text>
+
         <Text style={styles.footer}>
           Already have an account?{' '}
           <Text style={styles.link} onPress={() => router.back()}>
@@ -129,6 +148,14 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.7 },
   buttonText: { color: '#0a0a0a', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
-  footer: { color: 'rgba(255,255,255,0.3)', fontSize: 13, textAlign: 'center', marginTop: 32 },
+  legalFooter: {
+    color: 'rgba(255,255,255,0.28)',
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: 20,
+    paddingHorizontal: 8,
+  },
+  footer: { color: 'rgba(255,255,255,0.3)', fontSize: 13, textAlign: 'center', marginTop: 16 },
   link: { color: '#FFDC00' },
 })

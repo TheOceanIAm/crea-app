@@ -10,21 +10,30 @@ import {
   ActivityIndicator,
   Alert,
   ScrollView,
+  Switch,
+  Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
-import { Briefcase, Building2, ChevronLeft } from 'lucide-react-native'
+import { Briefcase, Building2, Camera, ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { profileNeedsOnboarding } from '@/lib/onboardingGate'
+import { pickAndUploadAvatarOnly } from '@/lib/uploadProfileAvatar'
+import { openPrivacy, openTerms } from '@/lib/creaLegal'
 
 type RoleChoice = 'freelancer' | 'company'
 
 export default function OnboardingScreen() {
   const [checking, setChecking] = useState(true)
-  const [step, setStep] = useState<0 | 1>(0)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [step, setStep] = useState<0 | 1 | 2>(0)
   const [roleChoice, setRoleChoice] = useState<RoleChoice | null>(null)
   const [displayName, setDisplayName] = useState('')
   const [headline, setHeadline] = useState('')
+  const [avatarPublicUrl, setAvatarPublicUrl] = useState<string | null>(null)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [termsAccepted, setTermsAccepted] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const verifySession = useCallback(async () => {
@@ -33,6 +42,8 @@ export default function OnboardingScreen() {
       router.replace('/login')
       return
     }
+    setUserId(user.id)
+
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('onboarding_completed')
@@ -51,7 +62,7 @@ export default function OnboardingScreen() {
       }
     }
 
-    if (profile?.onboarding_completed === true) {
+    if (!profileNeedsOnboarding(profile)) {
       router.replace('/(tabs)/dashboard')
       return
     }
@@ -62,12 +73,35 @@ export default function OnboardingScreen() {
     verifySession()
   }, [verifySession])
 
+  const onPickAvatar = async () => {
+    if (!userId) return
+    setUploadingAvatar(true)
+    const res = await pickAndUploadAvatarOnly(userId)
+    setUploadingAvatar(false)
+    if (res.ok === false) {
+      if (!res.cancelled) {
+        Alert.alert('Photo', res.error)
+      }
+      return
+    }
+    setAvatarPublicUrl(res.publicUrl)
+  }
+
   const goNext = () => {
     if (step === 0 && roleChoice) {
       setStep(1)
       return
     }
     if (step === 1) {
+      const name = displayName.trim()
+      if (name.length < 2) {
+        Alert.alert('Name', 'Please enter at least 2 characters.')
+        return
+      }
+      setStep(2)
+      return
+    }
+    if (step === 2) {
       void completeOnboarding()
     }
   }
@@ -82,12 +116,18 @@ export default function OnboardingScreen() {
       Alert.alert('Name', 'Please enter at least 2 characters.')
       return
     }
+    if (!termsAccepted) {
+      Alert.alert('Terms', 'Please accept the Terms of Service and Privacy Policy to continue.')
+      return
+    }
 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       router.replace('/login')
       return
     }
+
+    const acceptedAt = new Date().toISOString()
 
     setSaving(true)
     const { error } = await supabase.from('profiles').upsert(
@@ -96,19 +136,36 @@ export default function OnboardingScreen() {
         name,
         role: roleChoice,
         headline: headline.trim() || null,
+        avatar_url: avatarPublicUrl,
         onboarding_completed: true,
+        terms_accepted_at: acceptedAt,
       },
       { onConflict: 'id' }
     )
     setSaving(false)
 
     if (error) {
-      Alert.alert('Could not save', error.message)
+      const em = error.message.toLowerCase()
+      if (em.includes('terms_accepted_at') || em.includes('column')) {
+        Alert.alert(
+          'Database update needed',
+          'Run supabase/sql/add_profile_terms_accepted.sql in the Supabase SQL Editor, then tap Finish again.'
+        )
+      } else {
+        Alert.alert('Could not save', error.message)
+      }
       return
     }
 
     router.replace('/(tabs)/dashboard')
   }
+
+  const goBack = () => {
+    if (step === 1) setStep(0)
+    else if (step === 2) setStep(1)
+  }
+
+  const showAvatarImage = avatarPublicUrl && /^https?:\/\//i.test(avatarPublicUrl.trim())
 
   if (checking) {
     return (
@@ -117,6 +174,18 @@ export default function OnboardingScreen() {
       </View>
     )
   }
+
+  const title =
+    step === 0 ? 'How will you use Crea?' : step === 1 ? 'Tell us about you' : 'Photo & agreements'
+
+  const sub =
+    step === 0
+      ? 'You can change details later in settings.'
+      : step === 1
+        ? roleChoice === 'company'
+          ? 'This is how you appear to freelancers.'
+          : 'This is how you appear on your public profile.'
+        : 'Profile photo is optional. You must accept our policies to finish.'
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -132,16 +201,8 @@ export default function OnboardingScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.kicker}>WELCOME TO CREA</Text>
-          <Text style={styles.title}>
-            {step === 0 ? 'How will you use Crea?' : 'Tell us about you'}
-          </Text>
-          <Text style={styles.sub}>
-            {step === 0
-              ? 'You can change details later in settings.'
-              : roleChoice === 'company'
-                ? 'This is how you appear to freelancers.'
-                : 'This is how you appear on your public profile.'}
-          </Text>
+          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.sub}>{sub}</Text>
 
           {step === 0 ? (
             <View style={styles.roleGrid}>
@@ -169,9 +230,11 @@ export default function OnboardingScreen() {
                 <Text style={styles.roleDesc}>Post roles, review applicants, pay invoices.</Text>
               </TouchableOpacity>
             </View>
-          ) : (
+          ) : null}
+
+          {step === 1 ? (
             <>
-              <TouchableOpacity style={styles.backRow} onPress={() => setStep(0)} hitSlop={12}>
+              <TouchableOpacity style={styles.backRow} onPress={goBack} hitSlop={12}>
                 <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
                 <Text style={styles.backText}>Back</Text>
               </TouchableOpacity>
@@ -203,25 +266,101 @@ export default function OnboardingScreen() {
                 placeholderTextColor="rgba(255,255,255,0.3)"
               />
             </>
-          )}
+          ) : null}
+
+          {step === 2 ? (
+            <>
+              <TouchableOpacity style={styles.backRow} onPress={goBack} hitSlop={12}>
+                <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                <Text style={styles.backText}>Back</Text>
+              </TouchableOpacity>
+
+              <Text style={styles.fieldLabel}>Profile photo (optional)</Text>
+              <TouchableOpacity
+                style={styles.avatarRow}
+                onPress={onPickAvatar}
+                disabled={uploadingAvatar}
+                activeOpacity={0.85}
+              >
+                <View style={styles.avatarCircle}>
+                  {showAvatarImage ? (
+                    <Image source={{ uri: avatarPublicUrl!.trim() }} style={styles.avatarImage} />
+                  ) : (
+                    <Camera size={28} color="rgba(255,220,0,0.5)" strokeWidth={ICON_STROKE} />
+                  )}
+                </View>
+                <View style={styles.avatarMeta}>
+                  <Text style={styles.avatarCta}>
+                    {uploadingAvatar ? 'Uploading…' : showAvatarImage ? 'Change photo' : 'Add photo'}
+                  </Text>
+                  <Text style={styles.avatarHint}>Square crop · shown on your profile</Text>
+                </View>
+              </TouchableOpacity>
+
+              <View style={styles.termsCard}>
+                <View style={styles.notifyBlock}>
+                  <View style={styles.notifyBlockText}>
+                    <Text style={styles.notifyBlockTitle}>Terms &amp; Privacy</Text>
+                    <Text style={styles.notifyBlockSub}>
+                      I agree to the{' '}
+                      <Text style={styles.linkInline} onPress={openTerms}>
+                        Terms of Service
+                      </Text>{' '}
+                      and{' '}
+                      <Text style={styles.linkInline} onPress={openPrivacy}>
+                        Privacy Policy
+                      </Text>
+                      .
+                    </Text>
+                  </View>
+                  <Switch
+                    value={termsAccepted}
+                    onValueChange={setTermsAccepted}
+                    trackColor={{ false: '#333', true: 'rgba(255,220,0,0.35)' }}
+                    thumbColor={termsAccepted ? '#FFDC00' : '#888'}
+                  />
+                </View>
+              </View>
+            </>
+          ) : null}
 
           <TouchableOpacity
             style={[
               styles.primaryBtn,
-              (step === 0 && !roleChoice) || saving ? styles.primaryBtnDisabled : null,
+              ((step === 0 && !roleChoice) ||
+                (step === 2 && (!termsAccepted || saving)) ||
+                saving) &&
+                styles.primaryBtnDisabled,
             ]}
             onPress={goNext}
-            disabled={(step === 0 && !roleChoice) || saving}
+            disabled={
+              (step === 0 && !roleChoice) || (step === 2 && (!termsAccepted || saving)) || saving
+            }
             activeOpacity={0.85}
           >
             {saving ? (
               <ActivityIndicator color="#0a0a0a" />
             ) : (
-              <Text style={styles.primaryBtnText}>{step === 0 ? 'Continue' : 'Finish'}</Text>
+              <Text style={styles.primaryBtnText}>
+                {step === 2 ? 'Finish' : 'Continue'}
+              </Text>
             )}
           </TouchableOpacity>
 
-          <Text style={styles.stepHint}>{step === 0 ? 'Step 1 of 2' : 'Step 2 of 2'}</Text>
+          <Text style={styles.stepHint}>
+            {step === 0 ? 'Step 1 of 3' : step === 1 ? 'Step 2 of 3' : 'Step 3 of 3'}
+          </Text>
+
+          <TouchableOpacity
+            style={styles.signOutRow}
+            onPress={async () => {
+              await supabase.auth.signOut()
+              router.replace('/login')
+            }}
+            hitSlop={12}
+          >
+            <Text style={styles.signOutText}>Use a different account</Text>
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -290,6 +429,53 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
   },
+  avatarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    backgroundColor: '#111111',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 20,
+  },
+  avatarCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(255,220,0,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: { width: 72, height: 72, borderRadius: 36 },
+  avatarMeta: { flex: 1 },
+  avatarCta: { fontSize: 16, fontWeight: '700', color: '#FFDC00', marginBottom: 4 },
+  avatarHint: { fontSize: 12, color: 'rgba(255,255,255,0.35)', lineHeight: 16 },
+  termsCard: {
+    backgroundColor: '#111111',
+    borderRadius: 16,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 8,
+  },
+  notifyBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    gap: 12,
+  },
+  notifyBlockText: { flex: 1 },
+  notifyBlockTitle: { fontSize: 15, fontWeight: '600', color: '#ffffff', marginBottom: 6 },
+  notifyBlockSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', lineHeight: 19 },
+  linkInline: { color: '#FFDC00', fontWeight: '700', textDecorationLine: 'underline' },
   primaryBtn: {
     backgroundColor: '#FFDC00',
     borderRadius: 100,
@@ -306,4 +492,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.25)',
     letterSpacing: 1,
   },
+  signOutRow: { alignSelf: 'center', marginTop: 20, paddingVertical: 8 },
+  signOutText: { fontSize: 14, color: 'rgba(255,255,255,0.35)', fontWeight: '600' },
 })

@@ -58,7 +58,13 @@ as $$
       p.portfolio_vimeo,
       p.portfolio_behance,
       p.portfolio_projects,
-      p.public_profile_widgets
+      p.public_profile_widgets,
+      p.day_rate_amount,
+      p.half_day_rate_amount,
+      p.rates_currency,
+      p.availability_calendar,
+      p.availability_status,
+      p.availability_details
     from public.profiles p
     where p.id = profile_id
     limit 1

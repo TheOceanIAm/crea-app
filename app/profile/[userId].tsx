@@ -10,20 +10,44 @@ import {
   TouchableOpacity,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useLocalSearchParams } from 'expo-router'
+import { useLocalSearchParams, useRouter } from 'expo-router'
+import type { LucideIcon } from 'lucide-react-native'
+import {
+  Briefcase,
+  Camera,
+  ChevronLeft,
+  Globe,
+  MapPin,
+  Palette,
+  Share2,
+  Video,
+} from 'lucide-react-native'
 import { CeoPublicProfileView } from '@/components/CeoPublicProfileView'
+import { AvailabilityMonthPreview } from '@/components/profile/AvailabilityMonthPreview'
+import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { supabase } from '@/lib/supabase'
-import { isCeoProfile } from '@/lib/profileRole'
+import { parseAvailabilityCalendar } from '@/lib/availabilityCalendar'
+import { ICON_STROKE } from '@/lib/iconTheme'
+import { money } from '@/lib/invoiceFormatting'
+import {
+  behanceUrl,
+  instagramUrl,
+  linkedinUrl,
+  normalizeExternalUrl,
+  vimeoUrl,
+} from '@/lib/profilePublicLinks'
+import { isCeoProfile, isFreelancerProfile } from '@/lib/profileRole'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
 import { parsePublicProfileWidgets } from '@/lib/publicProfileWidgets'
+import { profileShareUrl } from '@/lib/shareLinks'
 
 type ProfilePayload = {
   id: string
-  name: string
-  role: string
-  headline: string
-  location: string
-  bio: string
+  name: string | null
+  role: string | null
+  headline: string | null
+  location: string | null
+  bio: string | null
   avatar_url: string | null
   skills: unknown
   equipment: unknown
@@ -34,21 +58,46 @@ type ProfilePayload = {
   portfolio_behance: string | null
   portfolio_projects: unknown
   public_profile_widgets?: unknown
+  day_rate_amount?: number | null
+  half_day_rate_amount?: number | null
+  rates_currency?: string | null
+  availability_calendar?: unknown
+  availability_status?: string | null
+  availability_details?: string | null
 }
 
-function normalizeExternalUrl(raw: string): string | null {
-  const t = raw.trim()
-  if (!t) return null
-  if (/^https?:\/\//i.test(t)) return t
-  if (t.startsWith('//')) return `https:${t}`
-  return `https://${t.replace(/^\/+/, '')}`
+function strTrim(v: string | null | undefined): string {
+  if (v == null) return ''
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+function SocialButton({ icon: Icon, url }: { icon: LucideIcon; url: string | null }) {
+  if (!url) return null
+  return (
+    <TouchableOpacity
+      style={styles.socialBtn}
+      onPress={() => Linking.openURL(url).catch(() => {})}
+      accessibilityRole="link"
+    >
+      <Icon size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+    </TouchableOpacity>
+  )
+}
+
+function projectSubtitle(p: PortfolioProject): string {
+  const r = strTrim(p.role)
+  if (r) return r
+  return strTrim(p.client)
 }
 
 export default function PublicProfileShareScreen() {
+  const router = useRouter()
   const { userId } = useLocalSearchParams<{ userId: string }>()
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState<ProfilePayload | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [portfolioFilter, setPortfolioFilter] = useState<string>('All')
 
   useEffect(() => {
     let cancelled = false
@@ -84,8 +133,50 @@ export default function PublicProfileShareScreen() {
     [profile]
   )
 
-  const skills = useMemo(() => (Array.isArray(profile?.skills) ? profile!.skills as string[] : []), [profile])
-  const websiteUrl = profile?.portfolio_website ? normalizeExternalUrl(profile.portfolio_website) : null
+  const skills = useMemo(() => (Array.isArray(profile?.skills) ? (profile!.skills as string[]) : []), [profile])
+  const equipment = useMemo(
+    () => (Array.isArray(profile?.equipment) ? (profile!.equipment as string[]).filter((s) => strTrim(s)) : []),
+    [profile]
+  )
+
+  const clientFilters = useMemo(() => {
+    const set = new Set<string>()
+    for (const p of projects) {
+      const c = strTrim(p.client)
+      if (c) set.add(c)
+    }
+    return Array.from(set).sort()
+  }, [projects])
+
+  useEffect(() => {
+    if (portfolioFilter !== 'All' && !clientFilters.includes(portfolioFilter)) {
+      setPortfolioFilter('All')
+    }
+  }, [clientFilters, portfolioFilter])
+
+  const filteredProjects = useMemo(() => {
+    if (portfolioFilter === 'All') return projects
+    return projects.filter((p) => strTrim(p.client) === portfolioFilter)
+  }, [projects, portfolioFilter])
+
+  const calendar = useMemo(
+    () => (profile ? parseAvailabilityCalendar(profile.availability_calendar) : parseAvailabilityCalendar(null)),
+    [profile]
+  )
+
+  const socials = useMemo(() => {
+    if (!profile) return []
+    const entries = [
+      { icon: Globe, url: profile.portfolio_website ? normalizeExternalUrl(profile.portfolio_website) : null },
+      { icon: Camera, url: instagramUrl(profile.portfolio_instagram ?? '') },
+      { icon: Briefcase, url: linkedinUrl(profile.portfolio_linkedin ?? '') },
+      { icon: Video, url: vimeoUrl(profile.portfolio_vimeo ?? '') },
+      { icon: Palette, url: behanceUrl(profile.portfolio_behance ?? '') },
+    ]
+    return entries.filter((x): x is { icon: LucideIcon; url: string } => x.url != null)
+  }, [profile])
+
+  const shareUrl = useMemo(() => (userId && typeof userId === 'string' ? profileShareUrl(userId) : null), [userId])
 
   const openApp = () => {
     if (!userId || typeof userId !== 'string') return
@@ -128,7 +219,7 @@ export default function PublicProfileShareScreen() {
     )
   }
 
-  const name = profile.name.trim() || 'Crea member'
+  const name = strTrim(profile.name) || 'Crea member'
   const avatarUri = profile.avatar_url?.trim() ?? ''
   const ceo = isCeoProfile(profile.role)
   const widgets = parsePublicProfileWidgets(profile.public_profile_widgets)
@@ -159,9 +250,43 @@ export default function PublicProfileShareScreen() {
   const showImage = /^https?:\/\//i.test(avatarUri)
   const letter = name.charAt(0).toUpperCase() || '?'
   const roleLabel = profile.role === 'company' ? 'Company' : 'Freelancer'
+  const headlineDisplay = strTrim(profile.headline)
+  const locationDisplay = strTrim(profile.location)
+  const bioDisplay = strTrim(profile.bio)
+  const freelancer = isFreelancerProfile(profile.role)
+  const cur = profile.rates_currency ?? 'EUR'
+  const dayRate = freelancer ? profile.day_rate_amount ?? null : null
+  const halfDay = freelancer ? profile.half_day_rate_amount ?? null : null
+  const availabilityStatus = freelancer ? strTrim(profile.availability_status) : ''
+  const availabilityDetails = freelancer ? strTrim(profile.availability_details) : ''
+  const shareMessage = `${name} — view on Crea`
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <View style={styles.topBar}>
+        <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
+          <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+          <Text style={styles.backText}>Back</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.shareIconBtn}
+          onPress={() => setShareOpen(true)}
+          hitSlop={12}
+          accessibilityLabel="Share profile"
+        >
+          <Share2 size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+        </TouchableOpacity>
+      </View>
+
+      <ShareSheetModal
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        sheetTitle="Share profile"
+        shareMessage={shareMessage}
+        shareUrl={shareUrl}
+        mailSubject={`Crea profile: ${name}`}
+      />
+
       <ScrollView contentContainerStyle={styles.scrollPad} showsVerticalScrollIndicator={false}>
         <Text style={styles.brand}>Crea</Text>
         <Text style={styles.kicker}>Public profile</Text>
@@ -175,17 +300,54 @@ export default function PublicProfileShareScreen() {
             </View>
           )}
           <Text style={styles.name}>{name}</Text>
-          {profile.headline.trim() ? <Text style={styles.headline}>{profile.headline.trim()}</Text> : null}
-          {profile.location.trim() ? <Text style={styles.location}>{profile.location.trim()}</Text> : null}
-          <View style={styles.rolePill}>
-            <Text style={styles.rolePillText}>{roleLabel}</Text>
+          {headlineDisplay ? <Text style={styles.headline}>{headlineDisplay}</Text> : null}
+          {locationDisplay ? (
+            <View style={styles.locationRow}>
+              <MapPin size={16} color="rgba(255,255,255,0.4)" strokeWidth={ICON_STROKE} />
+              <Text style={styles.location}>{locationDisplay}</Text>
+            </View>
+          ) : null}
+          <View style={styles.pillRow}>
+            <View style={styles.rolePill}>
+              <Text style={styles.rolePillText}>{roleLabel}</Text>
+            </View>
+            {availabilityStatus ? (
+              <View style={[styles.rolePill, styles.availPill]}>
+                <Text style={styles.rolePillText}>{availabilityStatus}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
-        {profile.bio.trim() ? (
+        {freelancer && (dayRate != null || halfDay != null) ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>Rates</Text>
+            {dayRate != null ? (
+              <Text style={styles.rateMain}>
+                {money(dayRate, cur)} <Text style={styles.ratePer}>per day</Text>
+              </Text>
+            ) : null}
+            {halfDay != null ? (
+              <Text style={styles.rateSub}>
+                Half day: {money(halfDay, cur)}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {freelancer && availabilityDetails ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>Availability note</Text>
+            <Text style={styles.bio}>{availabilityDetails}</Text>
+          </View>
+        ) : null}
+
+        {freelancer ? <AvailabilityMonthPreview calendar={calendar} anchor={new Date()} /> : null}
+
+        {bioDisplay ? (
           <View style={styles.block}>
             <Text style={styles.blockTitle}>About</Text>
-            <Text style={styles.bio}>{profile.bio.trim()}</Text>
+            <Text style={styles.bio}>{bioDisplay}</Text>
           </View>
         ) : null}
 
@@ -202,21 +364,67 @@ export default function PublicProfileShareScreen() {
           </View>
         ) : null}
 
-        {websiteUrl ? (
-          <TouchableOpacity onPress={() => Linking.openURL(websiteUrl).catch(() => {})}>
-            <Text style={styles.link}>Website →</Text>
-          </TouchableOpacity>
-        ) : null}
-
-        {projects.length > 0 ? (
+        {freelancer && equipment.length > 0 ? (
           <View style={styles.block}>
-            <Text style={styles.blockTitle}>Portfolio</Text>
-            {projects.map((proj: PortfolioProject, i: number) => (
-              <View key={`${proj.title}-${i}`} style={styles.projectCard}>
-                <Text style={styles.projectTitle}>{proj.title}</Text>
-                {proj.client.trim() ? <Text style={styles.projectClient}>{proj.client.trim()}</Text> : null}
+            <Text style={styles.blockTitle}>Essentials</Text>
+            {equipment.map((item) => (
+              <View key={item} style={styles.essentialRow}>
+                <Text style={styles.essentialMark}>✓</Text>
+                <Text style={styles.essentialText}>{item}</Text>
               </View>
             ))}
+          </View>
+        ) : null}
+
+        {socials.length > 0 ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>Links</Text>
+            <View style={styles.socialRow}>
+              {socials.map((s, i) => (
+                <SocialButton key={i} icon={s.icon} url={s.url} />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {filteredProjects.length > 0 ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>Work</Text>
+            {clientFilters.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterScroll}
+                style={styles.filterBar}
+              >
+                <TouchableOpacity
+                  onPress={() => setPortfolioFilter('All')}
+                  style={[styles.filterChip, portfolioFilter === 'All' && styles.filterChipOn]}
+                >
+                  <Text style={[styles.filterChipText, portfolioFilter === 'All' && styles.filterChipTextOn]}>All</Text>
+                </TouchableOpacity>
+                {clientFilters.map((c) => (
+                  <TouchableOpacity
+                    key={c}
+                    onPress={() => setPortfolioFilter(c)}
+                    style={[styles.filterChip, portfolioFilter === c && styles.filterChipOn]}
+                  >
+                    <Text style={[styles.filterChipText, portfolioFilter === c && styles.filterChipTextOn]}>
+                      {c}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : null}
+            {filteredProjects.map((proj: PortfolioProject, i: number) => {
+              const sub = projectSubtitle(proj)
+              return (
+                <View key={`${proj.title}-${i}`} style={styles.projectCard}>
+                  <Text style={styles.projectTitle}>{proj.title}</Text>
+                  {sub ? <Text style={styles.projectClient}>{sub}</Text> : null}
+                </View>
+              )
+            })}
           </View>
         ) : null}
 
@@ -233,6 +441,20 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
   ceoSafe: { flex: 1, backgroundColor: '#000000' },
   center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center' },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 8,
+    maxWidth: 560,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  backRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  backText: { fontSize: 16, fontWeight: '600', color: '#FFDC00' },
+  shareIconBtn: { padding: 4 },
   scrollPad: { paddingHorizontal: 24, paddingBottom: 40, maxWidth: 560, alignSelf: 'center', width: '100%' },
   ceoScrollPad: {
     paddingHorizontal: 24,
@@ -291,9 +513,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '500',
   },
-  location: { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 8, textAlign: 'center' },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  location: { fontSize: 13, color: 'rgba(255,255,255,0.4)', textAlign: 'center' },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 14 },
   rolePill: {
-    marginTop: 14,
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 100,
@@ -301,7 +529,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,220,0,0.2)',
   },
+  availPill: {
+    backgroundColor: 'rgba(34,197,94,0.15)',
+    borderColor: 'rgba(34,197,94,0.35)',
+  },
   rolePillText: { fontSize: 10, fontWeight: '800', color: '#FFDC00', letterSpacing: 1 },
+  rateMain: { fontSize: 28, fontWeight: '800', color: '#FFDC00' },
+  ratePer: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.45)' },
+  rateSub: { marginTop: 8, fontSize: 14, color: 'rgba(255,255,255,0.55)' },
   block: { marginBottom: 22 },
   blockTitle: {
     fontSize: 11,
@@ -322,7 +557,42 @@ const styles = StyleSheet.create({
     backgroundColor: '#111',
   },
   chipText: { fontSize: 13, color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
-  link: { fontSize: 15, fontWeight: '600', color: '#FFDC00', marginBottom: 16 },
+  essentialRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 10 },
+  essentialMark: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFDC00',
+    marginTop: 1,
+    width: 18,
+  },
+  essentialText: { flex: 1, fontSize: 14, color: 'rgba(255,255,255,0.82)', lineHeight: 20 },
+  socialRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  socialBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#141414',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterBar: { marginBottom: 14, marginHorizontal: -4 },
+  filterScroll: { flexDirection: 'row', gap: 8, paddingHorizontal: 4 },
+  filterChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: '#111',
+  },
+  filterChipOn: {
+    borderColor: '#FFDC00',
+    backgroundColor: 'rgba(255,220,0,0.12)',
+  },
+  filterChipText: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.5)' },
+  filterChipTextOn: { color: '#FFDC00' },
   projectCard: {
     backgroundColor: '#141414',
     borderRadius: 12,

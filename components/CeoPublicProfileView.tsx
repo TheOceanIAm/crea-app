@@ -5,16 +5,19 @@ import type { PublicProfileWidgets } from '@/lib/publicProfileWidgets'
 
 type Props = {
   name: string
-  headline: string
-  location: string
-  bio: string
-  avatarUrl: string
+  headline?: string | null
+  location?: string | null
+  bio?: string | null
+  avatarUrl?: string | null
   widgets: PublicProfileWidgets
 }
 
 export function CeoPublicProfileView({ name, headline, location, bio, avatarUrl, widgets }: Props) {
   const displayName = name.trim() || 'Crea'
-  const uri = avatarUrl.trim()
+  const headlineT = (headline ?? '').trim()
+  const locationT = (location ?? '').trim()
+  const bioT = (bio ?? '').trim()
+  const uri = (avatarUrl ?? '').trim()
   const showImage = /^https?:\/\//i.test(uri)
   const letter = displayName.charAt(0).toUpperCase() || '?'
 
@@ -37,14 +40,14 @@ export function CeoPublicProfileView({ name, headline, location, bio, avatarUrl,
       </View>
 
       <Text style={styles.name}>{displayName.toUpperCase()}</Text>
-      {headline.trim() ? <Text style={styles.titleLine}>{headline.trim().toUpperCase()}</Text> : null}
-      {location.trim() ? (
+      {headlineT ? <Text style={styles.titleLine}>{headlineT.toUpperCase()}</Text> : null}
+      {locationT ? (
         <View style={styles.locRow}>
           <MapPin size={15} color="rgba(255,255,255,0.38)" strokeWidth={ICON_STROKE} />
-          <Text style={styles.location}>{location.trim()}</Text>
+          <Text style={styles.location}>{locationT}</Text>
         </View>
       ) : null}
-      {bio.trim() ? <Text style={styles.bio}>{bio.trim()}</Text> : null}
+      {bioT ? <Text style={styles.bio}>{bioT}</Text> : null}
 
       {sports ? (
         <View style={styles.card}>

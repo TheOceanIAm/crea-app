@@ -203,7 +203,7 @@ export default function JobDetailScreen() {
       return
     }
     setProjectId(inserted.id)
-    Alert.alert('Workspace ready', 'Open it to use production tools and Brief AI on the web.')
+    Alert.alert('Workspace ready', 'Open it to use milestones, crew chat, files, and Brief AI in the app.')
   }
 
   const openWorkspace = () => {

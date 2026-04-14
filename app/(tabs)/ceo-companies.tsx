@@ -10,7 +10,7 @@ import {
   Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useRouter, type Href } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -23,7 +23,6 @@ type CompanyRow = {
   avatar_url: string | null
   headline: string
   location: string
-  email: string
 }
 
 function parseCompaniesPayload(raw: unknown): { ok: boolean; companies: CompanyRow[] } {
@@ -42,7 +41,6 @@ function parseCompaniesPayload(raw: unknown): { ok: boolean; companies: CompanyR
         avatar_url: typeof av === 'string' ? av : null,
         headline: String(x.headline ?? ''),
         location: String(x.location ?? ''),
-        email: String(x.email ?? ''),
       }
     }),
   }
@@ -129,7 +127,7 @@ export default function CeoCompaniesScreen() {
         style={styles.search}
         value={search}
         onChangeText={setSearch}
-        placeholder="Search company, email, headline…"
+        placeholder="Search company, headline, location…"
         placeholderTextColor="rgba(255,255,255,0.28)"
         autoCapitalize="none"
         autoCorrect={false}
@@ -147,9 +145,11 @@ export default function CeoCompaniesScreen() {
         </View>
       ) : (
         <FlatList
+          style={styles.listFlex}
           data={rows}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
           onRefresh={() => load(true)}
           refreshing={refreshing}
           ListEmptyComponent={
@@ -160,7 +160,13 @@ export default function CeoCompaniesScreen() {
             const show = /^https?:\/\//i.test(uri)
             const initial = (item.name || '?').trim().charAt(0).toUpperCase() || '?'
             return (
-              <View style={styles.row}>
+              <TouchableOpacity
+                style={styles.row}
+                activeOpacity={0.7}
+                onPress={() => router.push(`/profile/${item.id}` as Href)}
+                accessibilityRole="button"
+                accessibilityLabel={`Open public profile for ${item.name.trim() || 'company'}`}
+              >
                 {show ? (
                   <Image source={{ uri }} style={styles.avatar} />
                 ) : (
@@ -171,9 +177,6 @@ export default function CeoCompaniesScreen() {
                 <View style={styles.rowBody}>
                   <Text style={styles.rowName} numberOfLines={1}>
                     {item.name.trim() || 'Unnamed'}
-                  </Text>
-                  <Text style={styles.rowEmail} numberOfLines={1}>
-                    {item.email || '—'}
                   </Text>
                   {item.location.trim() ? (
                     <Text style={styles.rowSub} numberOfLines={1}>
@@ -186,7 +189,7 @@ export default function CeoCompaniesScreen() {
                     </Text>
                   ) : null}
                 </View>
-              </View>
+              </TouchableOpacity>
             )
           }}
         />
@@ -229,6 +232,7 @@ const styles = StyleSheet.create({
   },
   hintText: { fontSize: 12, color: 'rgba(255,255,255,0.75)', lineHeight: 17 },
   listPad: { paddingVertical: 24 },
+  listFlex: { flex: 1 },
   listContent: { paddingBottom: 40 },
   empty: { color: 'rgba(255,255,255,0.35)', fontSize: 14, textAlign: 'center', marginTop: 24 },
   row: {
@@ -251,7 +255,6 @@ const styles = StyleSheet.create({
   avatarLetter: { fontSize: 18, fontWeight: '800', color: '#FFDC00' },
   rowBody: { flex: 1, minWidth: 0 },
   rowName: { fontSize: 16, fontWeight: '700', color: 'rgba(255,255,255,0.92)' },
-  rowEmail: { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginTop: 2 },
   rowSub: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 4 },
   deniedTitle: { fontSize: 18, fontWeight: '800', color: '#ffffff', marginBottom: 8 },
   deniedSub: { fontSize: 14, color: 'rgba(255,255,255,0.4)', textAlign: 'center' },

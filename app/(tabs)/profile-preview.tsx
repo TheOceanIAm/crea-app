@@ -31,6 +31,13 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile } from '@/lib/profileRole'
 import type { PublicProfileWidgets } from '@/lib/publicProfileWidgets'
 import { parsePublicProfileWidgets } from '@/lib/publicProfileWidgets'
+import {
+  behanceUrl,
+  instagramUrl,
+  linkedinUrl,
+  normalizeExternalUrl,
+  vimeoUrl,
+} from '@/lib/profilePublicLinks'
 import { profileShareUrl } from '@/lib/shareLinks'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
 
@@ -52,44 +59,6 @@ type ProfilePublic = {
   behance: string
   projects: PortfolioProject[]
   widgets: PublicProfileWidgets
-}
-
-function normalizeExternalUrl(raw: string): string | null {
-  const t = raw.trim()
-  if (!t) return null
-  if (/^https?:\/\//i.test(t)) return t
-  if (t.startsWith('//')) return `https:${t}`
-  return `https://${t.replace(/^\/+/, '')}`
-}
-
-function instagramUrl(raw: string): string | null {
-  const t = raw.trim()
-  if (!t) return null
-  if (/^https?:\/\//i.test(t)) return t
-  const h = t.startsWith('@') ? t.slice(1) : t
-  if (!h) return null
-  return `https://instagram.com/${h.replace(/^@/, '')}`
-}
-
-function linkedinUrl(raw: string): string | null {
-  const t = raw.trim()
-  if (!t) return null
-  if (/^https?:\/\//i.test(t)) return t
-  return `https://linkedin.com/in/${t.replace(/^\/+/, '')}`
-}
-
-function vimeoUrl(raw: string): string | null {
-  const t = raw.trim()
-  if (!t) return null
-  if (/^https?:\/\//i.test(t)) return t
-  return `https://vimeo.com/${t.replace(/^\/+/, '')}`
-}
-
-function behanceUrl(raw: string): string | null {
-  const t = raw.trim()
-  if (!t) return null
-  if (/^https?:\/\//i.test(t)) return t
-  return `https://behance.net/${t.replace(/^\/+/, '')}`
 }
 
 function PreviewChip({ label }: { label: string }) {

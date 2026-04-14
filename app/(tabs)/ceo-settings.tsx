@@ -77,15 +77,15 @@ function explainSettingsRpcError(raw: string): string {
     m.includes('schema cache')
   ) {
     return [
-      'Die Funktionen für Plattform-Einstellungen fehlen in Supabase oder der API-Cache ist veraltet.',
+      'Platform settings RPCs are missing in Supabase, or the API schema cache is stale.',
       '',
-      '1) Supabase → SQL Editor → gesamte Datei ausführen:',
+      '1) Supabase → SQL Editor → run the full file:',
       '   supabase/sql/ceo_platform_settings_install.sql',
-      '(Enthält Tabelle + RPCs; setzt voraus, dass _ceo_is_caller in ceo_admin_rpcs.sql schon existiert.)',
+      '(Creates the table + RPCs; requires _ceo_is_caller from ceo_admin_rpcs.sql.)',
       '',
-      '2) App neu laden (Pull-to-refresh auf diesem Screen).',
+      '2) Reload the app (pull to refresh on this screen).',
       '',
-      'Technische Meldung: ' + raw,
+      'Technical message: ' + raw,
     ].join('\n')
   }
   return raw
@@ -131,7 +131,7 @@ export default function CeoSettingsScreen() {
       }
       const p = parseSettings(data)
       if (!p.ok) {
-        setHint(p.hint || p.error || 'Einstellungen konnten nicht geladen werden.')
+        setHint(p.hint || p.error || 'Could not load settings.')
         setSettings(null)
         return
       }
@@ -149,12 +149,12 @@ export default function CeoSettingsScreen() {
     const { data, error } = await supabase.rpc('ceo_patch_platform_settings', { p_patch: patch })
     setSaving(false)
     if (error) {
-      Alert.alert('Speichern fehlgeschlagen', error.message)
+      Alert.alert('Save failed', error.message)
       return
     }
     const p = parseSettings(data)
     if (!p.ok) {
-      Alert.alert('Speichern fehlgeschlagen', p.hint || p.error || 'Unbekannter Fehler')
+      Alert.alert('Save failed', p.hint || p.error || 'Unknown error')
       return
     }
     applyParsed(p)
@@ -173,7 +173,7 @@ export default function CeoSettingsScreen() {
   const saveVat = () => {
     const rate = parsePercentInput(vatInput)
     if (rate === null) {
-      Alert.alert('MwSt.', 'Bitte eine Zahl zwischen 0 und 100 eingeben (z. B. 19).')
+      Alert.alert('VAT', 'Enter a number between 0 and 100 (e.g. 19).')
       return
     }
     patch({ display_vat_rate: rate })
@@ -185,7 +185,7 @@ export default function CeoSettingsScreen() {
 
   const openWeb = (path: string) => {
     if (!webBase) {
-      Alert.alert('Web-URL', 'EXPO_PUBLIC_CREA_WEB_URL in .env setzen.')
+      Alert.alert('Web URL', 'Set EXPO_PUBLIC_CREA_WEB_URL in your .env file.')
       return
     }
     const p = path.startsWith('/') ? path : `/${path}`
@@ -205,11 +205,11 @@ export default function CeoSettingsScreen() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-          <Text style={styles.backText}>Zurück</Text>
+          <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
         <View style={styles.center}>
-          <Text style={styles.deniedTitle}>Kein Zugriff</Text>
-          <Text style={styles.deniedSub}>Nur für CEO-Konten.</Text>
+          <Text style={styles.deniedTitle}>Access denied</Text>
+          <Text style={styles.deniedSub}>CEO accounts only.</Text>
         </View>
       </SafeAreaView>
     )
@@ -217,7 +217,7 @@ export default function CeoSettingsScreen() {
 
   const updatedLabel =
     settings?.updated_at != null
-      ? new Date(settings.updated_at).toLocaleString('de-DE', {
+      ? new Date(settings.updated_at).toLocaleString('en-US', {
           dateStyle: 'medium',
           timeStyle: 'short',
         })
@@ -231,10 +231,10 @@ export default function CeoSettingsScreen() {
       </TouchableOpacity>
 
       <Text style={styles.kicker}>PLATFORM</Text>
-      <Text style={styles.title}>Einstellungen</Text>
+      <Text style={styles.title}>Settings</Text>
       <Text style={styles.subtitle}>
-        Steuerung der Plattform — wie im Control Panel. Änderungen wirken nach Speichern in der Datenbank (App prüft
-        Flags bei Registrierung / Login erst, wenn ihr das im Client einbaut).
+        Platform controls — same as the control panel. Changes are stored when you save. The app only enforces flags
+        for registration or login once you wire that up in the client.
       </Text>
 
       {hint ? (
@@ -258,12 +258,12 @@ export default function CeoSettingsScreen() {
       >
         {settings?.ok ? (
           <>
-            <Text style={styles.sectionTitle}>Plattform</Text>
+            <Text style={styles.sectionTitle}>Platform</Text>
             <View style={styles.card}>
               <View style={styles.rowBetween}>
                 <View style={styles.rowText}>
-                  <Text style={styles.rowTitle}>Wartungsmodus</Text>
-                  <Text style={styles.rowSub}>Nutzer-Hinweis &amp; Login einschränken (im Client umsetzen).</Text>
+                  <Text style={styles.rowTitle}>Maintenance mode</Text>
+                  <Text style={styles.rowSub}>Show a notice and restrict sign-in (implement in the client).</Text>
                 </View>
                 <Switch
                   value={maintenance}
@@ -276,8 +276,8 @@ export default function CeoSettingsScreen() {
               <View style={styles.divider} />
               <View style={styles.rowBetween}>
                 <View style={styles.rowText}>
-                  <Text style={styles.rowTitle}>Registrierung offen</Text>
-                  <Text style={styles.rowSub}>Neue Accounts erlauben (dauerhaft in DB; Enforcement z. B. in Edge Function).</Text>
+                  <Text style={styles.rowTitle}>Registration open</Text>
+                  <Text style={styles.rowSub}>Allow new accounts (stored in the DB; enforce e.g. in an Edge Function).</Text>
                 </View>
                 <Switch
                   value={registrationOpen}
@@ -289,10 +289,10 @@ export default function CeoSettingsScreen() {
               </View>
             </View>
 
-            <Text style={styles.sectionTitle}>Steuern &amp; Anzeige</Text>
+            <Text style={styles.sectionTitle}>Tax &amp; display</Text>
             <View style={styles.card}>
-              <Text style={styles.fieldLabel}>MwSt.-Satz für Anzeigen (%)</Text>
-              <Text style={styles.fieldHint}>Wert 0–100, intern als Dezimal (z. B. 19 → 0,19) gespeichert.</Text>
+              <Text style={styles.fieldLabel}>VAT rate for display (%)</Text>
+              <Text style={styles.fieldHint}>Enter 0–100; stored internally as a decimal (e.g. 19 → 0.19).</Text>
               <TextInput
                 style={styles.input}
                 value={vatInput}
@@ -302,47 +302,57 @@ export default function CeoSettingsScreen() {
                 placeholderTextColor="rgba(255,255,255,0.28)"
               />
               <TouchableOpacity style={styles.primaryBtn} onPress={saveVat} disabled={saving} activeOpacity={0.85}>
-                <Text style={styles.primaryBtnText}>{saving ? 'Speichern…' : 'MwSt. speichern'}</Text>
+                <Text style={styles.primaryBtnText}>{saving ? 'Saving…' : 'Save VAT rate'}</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.sectionTitle}>Öffentliche Hinweise</Text>
+            <Text style={styles.sectionTitle}>Public notices</Text>
             <View style={styles.card}>
-              <Text style={styles.fieldLabel}>Hinweiszeile (optional)</Text>
-              <Text style={styles.fieldHint}>Kurzer Text für Banner in der App / auf der Webseite (Einbindung im Client).</Text>
+              <Text style={styles.fieldLabel}>Announcement line (optional)</Text>
+              <Text style={styles.fieldHint}>Short text for a banner in the app or website (wire up in the client).</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
                 value={announcementDraft}
                 onChangeText={setAnnouncementDraft}
-                placeholder="z. B. Geplante Wartung Sonntag 22–24 Uhr"
+                placeholder="e.g. Scheduled maintenance Sunday 10pm–midnight"
                 placeholderTextColor="rgba(255,255,255,0.28)"
                 multiline
               />
               <TouchableOpacity style={styles.secondaryBtn} onPress={saveAnnouncement} disabled={saving} activeOpacity={0.85}>
-                <Text style={styles.secondaryBtnText}>Hinweis speichern</Text>
+                <Text style={styles.secondaryBtnText}>Save announcement</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.sectionTitle}>Verknüpfungen</Text>
+            <Text style={styles.sectionTitle}>Links</Text>
             <View style={styles.card}>
               <LinkRow
-                label="Webseite / Admin"
-                sub={webBase || 'EXPO_PUBLIC_CREA_WEB_URL fehlt'}
+                label="Website / admin"
+                sub={webBase || 'EXPO_PUBLIC_CREA_WEB_URL is not set'}
                 onPress={() => (webBase ? Linking.openURL(webBase).catch(() => {}) : undefined)}
                 disabled={!webBase}
               />
               <View style={styles.divider} />
-              <LinkRow label="Datenschutz" sub={`${webBase || '…'}/datenschutz`} onPress={() => openWeb('/datenschutz')} disabled={!webBase} />
+              <LinkRow
+                label="Privacy policy"
+                sub={`${webBase || '…'}/datenschutz`}
+                onPress={() => openWeb('/datenschutz')}
+                disabled={!webBase}
+              />
               <View style={styles.divider} />
-              <LinkRow label="Impressum" sub={`${webBase || '…'}/impressum`} onPress={() => openWeb('/impressum')} disabled={!webBase} />
+              <LinkRow
+                label="Imprint"
+                sub={`${webBase || '…'}/impressum`}
+                onPress={() => openWeb('/impressum')}
+                disabled={!webBase}
+              />
             </View>
 
             {updatedLabel ? (
-              <Text style={styles.footerMeta}>Zuletzt geändert: {updatedLabel}</Text>
+              <Text style={styles.footerMeta}>Last updated: {updatedLabel}</Text>
             ) : null}
           </>
         ) : !loading ? (
-          <Text style={styles.empty}>Keine Einstellungen geladen.</Text>
+          <Text style={styles.empty}>No settings loaded.</Text>
         ) : null}
       </ScrollView>
     </SafeAreaView>

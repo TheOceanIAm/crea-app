@@ -1,4 +1,4 @@
-export type PortfolioProject = { title: string; client: string; link: string }
+export type PortfolioProject = { title: string; client: string; link: string; role?: string }
 
 export type NotificationDigest = 'none' | 'daily' | 'weekly'
 
@@ -77,10 +77,12 @@ export function parsePortfolioProjects(raw: unknown): PortfolioProject[] {
   for (const p of raw) {
     if (!p || typeof p !== 'object') continue
     const r = p as Record<string, unknown>
+    const roleRaw = r.role
     out.push({
       title: String(r.title ?? ''),
       client: String(r.client ?? ''),
       link: String(r.link ?? ''),
+      role: typeof roleRaw === 'string' && roleRaw.trim() ? roleRaw.trim() : undefined,
     })
   }
   return out

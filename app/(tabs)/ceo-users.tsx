@@ -10,7 +10,7 @@ import {
   Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -22,7 +22,6 @@ type UserRow = {
   role: string
   avatar_url: string | null
   headline: string
-  email: string
 }
 
 function parseUsersPayload(raw: unknown): { ok: boolean; users: UserRow[] } {
@@ -40,7 +39,6 @@ function parseUsersPayload(raw: unknown): { ok: boolean; users: UserRow[] } {
         role: String(x.role ?? ''),
         avatar_url: typeof av === 'string' ? av : null,
         headline: String(x.headline ?? ''),
-        email: String(x.email ?? ''),
       }
     }),
   }
@@ -48,6 +46,8 @@ function parseUsersPayload(raw: unknown): { ok: boolean; users: UserRow[] } {
 
 export default function CeoUsersScreen() {
   const router = useRouter()
+  const { view } = useLocalSearchParams<{ view?: string }>()
+  const recentView = view === 'recent'
   const { ready, allowed } = useCeoAccess()
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
@@ -123,11 +123,17 @@ export default function CeoUsersScreen() {
       <Text style={styles.kicker}>PLATFORM</Text>
       <Text style={styles.title}>Users</Text>
 
+      {recentView ? (
+        <Text style={styles.contextHint}>
+          Recent signups first (same order as “New users” on the dashboard). Open a row to view their public profile.
+        </Text>
+      ) : null}
+
       <TextInput
         style={styles.search}
         value={search}
         onChangeText={setSearch}
-        placeholder="Search name or email…"
+        placeholder="Search by name…"
         placeholderTextColor="rgba(255,255,255,0.28)"
         autoCapitalize="none"
         autoCorrect={false}
@@ -145,9 +151,11 @@ export default function CeoUsersScreen() {
         </View>
       ) : (
         <FlatList
+          style={styles.listFlex}
           data={rows}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
           refreshing={refreshing}
           onRefresh={() => load(true)}
           ListEmptyComponent={
@@ -158,7 +166,13 @@ export default function CeoUsersScreen() {
             const show = /^https?:\/\//i.test(uri)
             const initial = (item.name || '?').trim().charAt(0).toUpperCase() || '?'
             return (
-              <View style={styles.row}>
+              <TouchableOpacity
+                style={styles.row}
+                activeOpacity={0.7}
+                onPress={() => router.push(`/profile/${item.id}` as Href)}
+                accessibilityRole="button"
+                accessibilityLabel={`Open public profile for ${item.name.trim() || 'user'}`}
+              >
                 {show ? (
                   <Image source={{ uri }} style={styles.avatar} />
                 ) : (
@@ -170,9 +184,6 @@ export default function CeoUsersScreen() {
                   <Text style={styles.rowName} numberOfLines={1}>
                     {item.name.trim() || 'Unnamed'}
                   </Text>
-                  <Text style={styles.rowEmail} numberOfLines={1}>
-                    {item.email || '—'}
-                  </Text>
                   {item.headline.trim() ? (
                     <Text style={styles.rowSub} numberOfLines={1}>
                       {item.headline.trim()}
@@ -182,7 +193,7 @@ export default function CeoUsersScreen() {
                     <Text style={styles.rolePillText}>{item.role || '—'}</Text>
                   </View>
                 </View>
-              </View>
+              </TouchableOpacity>
             )
           }}
         />
@@ -204,6 +215,13 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   title: { fontSize: 26, fontWeight: '900', color: '#ffffff', marginBottom: 16 },
+  contextHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.42)',
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  listFlex: { flex: 1 },
   search: {
     backgroundColor: '#111',
     borderRadius: 12,
@@ -247,7 +265,6 @@ const styles = StyleSheet.create({
   avatarLetter: { fontSize: 18, fontWeight: '800', color: '#FFDC00' },
   rowBody: { flex: 1, minWidth: 0 },
   rowName: { fontSize: 16, fontWeight: '700', color: 'rgba(255,255,255,0.92)' },
-  rowEmail: { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginTop: 2 },
   rowSub: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 4 },
   rolePill: {
     alignSelf: 'flex-start',

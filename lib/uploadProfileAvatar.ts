@@ -8,10 +8,9 @@ export type AvatarUploadResult =
   | { ok: false; error: string; cancelled?: boolean }
 
 /**
- * Pick an image, upload to Storage bucket `avatars` at `{userId}/avatar.{ext}`,
- * then set `profiles.avatar_url`. Requires a public `avatars` bucket + RLS (see SQL).
+ * Pick + upload to Storage only (no `profiles` update). Use during onboarding, then set `avatar_url` in your upsert.
  */
-export async function pickAndUploadProfileAvatar(userId: string): Promise<AvatarUploadResult> {
+export async function pickAndUploadAvatarOnly(userId: string): Promise<AvatarUploadResult> {
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
   if (!perm.granted) {
     return { ok: false, error: 'Photo library access is required to change your photo.' }
@@ -63,14 +62,27 @@ export async function pickAndUploadProfileAvatar(userId: string): Promise<Avatar
   const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path)
   const publicUrl = `${pub.publicUrl}?t=${Date.now()}`
 
+  return { ok: true, publicUrl }
+}
+
+/**
+ * Pick an image, upload to Storage bucket `avatars` at `{userId}/avatar.{ext}`,
+ * then set `profiles.avatar_url`. Requires a public `avatars` bucket + RLS (see SQL).
+ */
+export async function pickAndUploadProfileAvatar(userId: string): Promise<AvatarUploadResult> {
+  const uploaded = await pickAndUploadAvatarOnly(userId)
+  if (!uploaded.ok) {
+    return uploaded
+  }
+
   const { error: dbErr } = await supabase
     .from('profiles')
-    .update({ avatar_url: publicUrl })
+    .update({ avatar_url: uploaded.publicUrl })
     .eq('id', userId)
 
   if (dbErr) {
     return { ok: false, error: dbErr.message }
   }
 
-  return { ok: true, publicUrl }
+  return { ok: true, publicUrl: uploaded.publicUrl }
 }

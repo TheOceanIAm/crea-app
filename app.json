@@ -4,7 +4,7 @@
     "slug": "crea-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/CREA_icon.jpg",
     "scheme": "crea",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0a0a0a",
@@ -16,7 +16,10 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "de.creaservices.app",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {

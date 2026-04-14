@@ -25,7 +25,7 @@ $$;
 revoke all on function public._ceo_is_caller() from public;
 
 -- ---------------------------------------------------------------------------
--- All profiles (search by name or email)
+-- All profiles (search by name or email server-side; login email never returned to clients)
 -- ---------------------------------------------------------------------------
 create or replace function public.ceo_list_users(p_search text default '', p_limit int default 120)
 returns jsonb
@@ -54,8 +54,7 @@ begin
               'name', coalesce(pr.name, ''),
               'role', coalesce(pr.role, ''),
               'avatar_url', pr.avatar_url,
-              'headline', coalesce(pr.headline, ''),
-              'email', u.email::text
+              'headline', coalesce(pr.headline, '')
             ) as obj,
             u.created_at as sort_ts
           from public.profiles pr
@@ -108,8 +107,7 @@ begin
               'role', coalesce(pr.role, ''),
               'avatar_url', pr.avatar_url,
               'headline', coalesce(pr.headline, ''),
-              'location', coalesce(pr.location, ''),
-              'email', u.email::text
+              'location', coalesce(pr.location, '')
             ) as obj,
             u.created_at as sort_ts
           from public.profiles pr
