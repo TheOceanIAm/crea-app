@@ -3,6 +3,7 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Image, Linking, 
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams } from 'expo-router'
 import { supabase } from '@/lib/supabase'
+import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 
 type JobPayload = {
   id: string
@@ -10,20 +11,13 @@ type JobPayload = {
   category: string
   budget_type: string
   budget_amount: number | null
+  budget_currency?: string | null
   location_type: string
   description: string | null
   status: string
   company_id: string | null
   company_name: string | null
   company_avatar_url: string | null
-}
-
-function budgetLabel(j: JobPayload) {
-  if (j.budget_type === 'negotiable') return 'Negotiable'
-  if (j.budget_type === 'day_rate') return j.budget_amount ? `€${j.budget_amount}/day` : 'Rate TBD'
-  if (j.budget_type === 'fixed')
-    return j.budget_amount ? `€${j.budget_amount.toLocaleString('en-US')} fixed` : 'Budget TBD'
-  return '—'
 }
 
 function companyInitial(name: string) {
@@ -133,7 +127,13 @@ export default function PublicJobShareScreen() {
         </View>
 
         <Text style={styles.jobTitle}>{job.title}</Text>
-        <Text style={styles.budget}>{budgetLabel(job)}</Text>
+        <Text style={styles.budget}>
+          {formatBudgetDisplay({
+            budget_type: job.budget_type,
+            budget_amount: job.budget_amount,
+            budget_currency: job.budget_currency,
+          })}
+        </Text>
         <Text style={styles.meta}>
           {job.category} · {job.location_type}
         </Text>

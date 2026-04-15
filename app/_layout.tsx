@@ -3,7 +3,10 @@ import { useEffect } from 'react'
 import { Linking, Alert } from 'react-native'
 import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
+import * as SplashScreen from 'expo-splash-screen'
 import { handleSupabaseAuthCallbackUrl } from '@/lib/authDeepLink'
+
+SplashScreen.preventAutoHideAsync().catch(() => {})
 
 function AuthDeepLinkBridge() {
   const router = useRouter()
@@ -30,7 +33,8 @@ export default function RootLayout() {
       <AuthDeepLinkBridge />
       <StatusBar style="light" backgroundColor="#0a0a0a" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
-        <Stack.Screen name="index" />
+        {/* Same yellow as app.json splash so nothing flashes black behind the native splash */}
+        <Stack.Screen name="index" options={{ contentStyle: { backgroundColor: '#FFDC00' } }} />
         <Stack.Screen name="login" />
         <Stack.Screen name="register" />
         <Stack.Screen name="auth/callback" />

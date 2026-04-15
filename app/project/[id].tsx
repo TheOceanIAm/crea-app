@@ -26,15 +26,25 @@ import { ProjectMilestonesTab } from '@/components/project/ProjectMilestonesTab'
 import { ProjectMessagesTab } from '@/components/project/ProjectMessagesTab'
 import { ProjectCrewTab } from '@/components/project/ProjectCrewTab'
 import { ProjectFilesTab } from '@/components/project/ProjectFilesTab'
-import { ProjectFrameIoTab } from '@/components/project/ProjectFrameIoTab'
+import { ProjectReviewTab } from '@/components/project/ProjectReviewTab'
+import { ProductionTab } from '@/app/components/project/[projectId]/ProductionTab'
+import { ProjectOverviewAbout } from '@/components/project/ProjectOverviewAbout'
+import { BriefAiFormattedOutput } from '@/components/project/BriefAiFormattedOutput'
+import { formatProjectBudgetLine } from '@/lib/budgetFormatting'
+import {
+  PROJECT_STATUS_PILL,
+  projectStatusDisplayLabel,
+  projectStatusVariant,
+} from '@/lib/projectStatusDisplay'
 
 type TabId =
   | 'overview'
   | 'milestones'
+  | 'production'
   | 'crew'
   | 'messages'
   | 'files'
-  | 'frameio'
+  | 'review'
   | 'brief'
 
 type ProjectRow = {
@@ -46,21 +56,24 @@ type ProjectRow = {
   status: string
   budget_amount: number | null
   budget_type: string | null
+  budget_currency: string | null
   location: string | null
   milestones_completed: number
   milestones_total: number
   brief_ai_context: string | null
   frame_io_url: string | null
+  picdrop_url: string | null
   brief_ai_outputs: Record<string, string> | null
 }
 
-const TABS: { id: TabId; label: string }[] = [
+const BASE_TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'milestones', label: 'Milestones' },
+  { id: 'production', label: 'Production' },
   { id: 'crew', label: 'Crew' },
   { id: 'messages', label: 'Messages' },
   { id: 'files', label: 'Files' },
-  { id: 'frameio', label: 'Frame.io' },
+  { id: 'review', label: 'Review' },
   { id: 'brief', label: 'Brief AI' },
 ]
 
@@ -84,7 +97,6 @@ export default function ProjectWorkspaceScreen() {
   const [briefText, setBriefText] = useState('')
   const [savingBrief, setSavingBrief] = useState(false)
   const [generating, setGenerating] = useState(false)
-
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
       setLoading(false)
@@ -130,16 +142,20 @@ export default function ProjectWorkspaceScreen() {
     load()
   }, [load])
 
+  const tabs = BASE_TABS
+
   const canManageCrew = useMemo(() => {
     if (!project || !userId) return false
     return project.company_id === userId || project.freelancer_id === userId
   }, [project, userId])
 
   const budgetLine = useMemo(() => {
-    if (!project?.budget_amount) return '—'
-    const n = project.budget_amount.toLocaleString('en-US')
-    const t = (project.budget_type || 'fixed').toUpperCase()
-    return `${n} ${t}`
+    if (!project) return '—'
+    return formatProjectBudgetLine({
+      budget_amount: project.budget_amount,
+      budget_type: project.budget_type,
+      budget_currency: project.budget_currency,
+    })
   }, [project])
 
   const currentOutput = project?.brief_ai_outputs?.[tool] ?? ''
@@ -240,6 +256,9 @@ export default function ProjectWorkspaceScreen() {
     )
   }
 
+  const statusKey = projectStatusVariant(project.status)
+  const pillTheme = PROJECT_STATUS_PILL[statusKey]
+
   const statsRow = (
     <View style={styles.statsRow}>
       <View style={styles.statCard}>
@@ -256,20 +275,36 @@ export default function ProjectWorkspaceScreen() {
       </View>
       <View style={styles.statCard}>
         <Text style={styles.statLabel}>Budget</Text>
-        <Text style={styles.statValue} numberOfLines={1}>
+        <Text style={styles.statValueBudget} numberOfLines={2}>
           {budgetLine}
         </Text>
         <Text style={styles.statSub}>total</Text>
       </View>
       <View style={styles.statCard}>
         <Text style={styles.statLabel}>Status</Text>
-        <Text style={styles.statValueSmall}>{project.status.toUpperCase()}</Text>
-        <Text style={styles.statSub}>{project.location || '—'}</Text>
+        <View
+          style={[
+            styles.statusPill,
+            {
+              backgroundColor: pillTheme.backgroundColor,
+              borderColor: pillTheme.borderColor,
+            },
+          ]}
+        >
+          <Text style={[styles.statusPillText, { color: pillTheme.color }]}>
+            {projectStatusDisplayLabel(project.status)}
+          </Text>
+        </View>
       </View>
     </View>
   )
 
-  const needsFlexTab = tab === 'messages' || tab === 'milestones' || tab === 'crew' || tab === 'files'
+  const needsFlexTab =
+    tab === 'messages' ||
+    tab === 'milestones' ||
+    tab === 'production' ||
+    tab === 'crew' ||
+    tab === 'files'
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -285,7 +320,7 @@ export default function ProjectWorkspaceScreen() {
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll}>
         <View style={styles.tabRow}>
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const active = tab === t.id
             const isBrief = t.id === 'brief'
             return (
@@ -311,11 +346,24 @@ export default function ProjectWorkspaceScreen() {
       <View style={styles.bodyWrap}>
         {needsFlexTab ? (
           <View style={styles.flexFill}>
-            {statsRow}
             <View style={styles.flexTabInner}>
               {tab === 'messages' && <ProjectMessagesTab projectId={project.id} userId={userId} />}
               {tab === 'milestones' && (
-                <ProjectMilestonesTab projectId={project.id} onCountsChanged={load} />
+                <ProjectMilestonesTab
+                  projectId={project.id}
+                  onCountsChanged={load}
+                  canManage={canManageCrew}
+                />
+              )}
+              {tab === 'production' && (
+                <ProductionTab
+                  projectId={project.id}
+                  userId={userId}
+                  projectTitle={project.title}
+                  projectLocation={project.location}
+                  companyId={project.company_id}
+                  briefContext={project.brief_ai_context}
+                />
               )}
               {tab === 'crew' && <ProjectCrewTab projectId={project.id} canManage={canManageCrew} />}
               {tab === 'files' && <ProjectFilesTab projectId={project.id} />}
@@ -323,21 +371,32 @@ export default function ProjectWorkspaceScreen() {
           </View>
         ) : (
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
-            {statsRow}
+            {tab === 'overview' ? statsRow : null}
 
             {tab === 'overview' && (
-              <Text style={styles.para}>
-                This workspace runs in the app: milestones, crew, chat, files, review links, and Brief AI are synced via
-                Supabase for everyone on the project.
-              </Text>
+              <>
+                <ProjectOverviewAbout
+                  title={project.title}
+                  location={project.location}
+                  status={project.status}
+                  briefContext={project.brief_ai_context}
+                />
+                <Text style={styles.para}>
+                  Milestones, crew, chat, files, Review (Frame.io + PicDrop), production tools, and Brief AI stay in sync
+                  via Supabase for everyone on this project.
+                </Text>
+              </>
             )}
 
-            {tab === 'frameio' && (
-              <ProjectFrameIoTab
+            {tab === 'review' && (
+              <ProjectReviewTab
                 projectId={project.id}
                 frameIoUrl={project.frame_io_url}
+                picdropUrl={project.picdrop_url ?? null}
                 canEdit={canManageCrew}
-                onSaved={(url) => setProject((prev) => (prev ? { ...prev, frame_io_url: url } : prev))}
+                onSaved={(next) =>
+                  setProject((prev) => (prev ? { ...prev, frame_io_url: next.frame_io_url, picdrop_url: next.picdrop_url } : prev))
+                }
               />
             )}
 
@@ -365,9 +424,7 @@ export default function ProjectWorkspaceScreen() {
                 {!!currentOutput && (
                   <View style={styles.outputBox}>
                     <Text style={styles.outputLabel}>Generated · {TOOLS.find((t) => t.id === tool)?.title}</Text>
-                    <Text style={styles.outputText} selectable>
-                      {currentOutput}
-                    </Text>
+                    <BriefAiFormattedOutput content={currentOutput} />
                   </View>
                 )}
 
@@ -456,7 +513,22 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   statValue: { fontSize: 22, fontWeight: '900', color: '#FFDC00' },
-  statValueSmall: { fontSize: 14, fontWeight: '900', color: '#FFDC00' },
+  statValueBudget: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFDC00',
+    lineHeight: 20,
+  },
+  statusPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 100,
+    borderWidth: 1,
+    marginTop: 2,
+    marginBottom: 2,
+  },
+  statusPillText: { fontSize: 12, fontWeight: '800', letterSpacing: 0.2 },
   statSub: { fontSize: 11, color: 'rgba(255,255,255,0.25)', marginTop: 4 },
   sectionLabel: {
     fontSize: 11,
@@ -494,7 +566,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textTransform: 'uppercase',
   },
-  outputText: { fontSize: 14, color: 'rgba(255,255,255,0.88)', lineHeight: 20 },
   contextLabel: {
     fontSize: 10,
     color: 'rgba(255,255,255,0.35)',

@@ -14,10 +14,11 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Share2 } from 'lucide-react-native'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { supabase } from '@/lib/supabase'
-import { isCompanyProfile, isFreelancerProfile } from '@/lib/profileRole'
+import { isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { getCreaWebBaseUrl, openProjectOnWeb } from '@/lib/creaWeb'
 import { jobShareUrl } from '@/lib/shareLinks'
+import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 
 type JobRow = {
   id: string
@@ -25,18 +26,11 @@ type JobRow = {
   category: string
   budget_type: string
   budget_amount: number | null
+  budget_currency: string | null
   location_type: string
   description: string | null
   company_id: string
   status: string
-}
-
-function budgetLabel(job: JobRow) {
-  if (job.budget_type === 'negotiable') return 'Negotiable'
-  if (job.budget_type === 'day_rate') return job.budget_amount ? `€${job.budget_amount}/day` : 'Rate TBD'
-  if (job.budget_type === 'fixed')
-    return job.budget_amount ? `€${job.budget_amount.toLocaleString('en-US')} fixed` : 'Budget TBD'
-  return '—'
 }
 
 function companyInitial(name: string) {
@@ -59,17 +53,21 @@ export default function JobDetailScreen() {
   const [companyName, setCompanyName] = useState('Company')
   const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
+  const [accessDenied, setAccessDenied] = useState(false)
 
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
       setLoading(false)
       return
     }
+    setAccessDenied(false)
     const { data: { user } } = await supabase.auth.getUser()
     setUid(user?.id ?? null)
 
+    let resolvedRole: string | null = null
     if (user) {
       const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+      resolvedRole = resolveAppRole(prof?.role, user)
       setRole(prof?.role ?? null)
     } else {
       setRole(null)
@@ -78,6 +76,7 @@ export default function JobDetailScreen() {
     const { data: row, error } = await supabase.from('jobs').select('*').eq('id', id).maybeSingle()
 
     if (error || !row) {
+      setAccessDenied(false)
       setJob(null)
       setCompanyName('Company')
       setCompanyLogoUrl(null)
@@ -85,6 +84,17 @@ export default function JobDetailScreen() {
       return
     }
 
+    const ownerId = String((row as JobRow).company_id || '').trim()
+    if (user && isCompanyProfile(resolvedRole) && ownerId && user.id !== ownerId) {
+      setAccessDenied(true)
+      setJob(null)
+      setCompanyName('Company')
+      setCompanyLogoUrl(null)
+      setLoading(false)
+      return
+    }
+
+    setAccessDenied(false)
     setJob(row as JobRow)
 
     const cid = String((row as JobRow).company_id || '').trim()
@@ -192,6 +202,7 @@ export default function JobDetailScreen() {
         status: 'active',
         budget_amount: job.budget_amount,
         budget_type: job.budget_type,
+        budget_currency: job.budget_currency ?? 'EUR',
         location: job.location_type,
       })
       .select('id')
@@ -215,6 +226,21 @@ export default function JobDetailScreen() {
       <View style={styles.center}>
         <ActivityIndicator color="#FFDC00" size="large" />
       </View>
+    )
+  }
+
+  if (accessDenied) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={12}>
+          <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+          <Text style={styles.backLabel}>Jobs</Text>
+        </TouchableOpacity>
+        <View style={styles.center}>
+          <Text style={styles.missTitle}>Not available</Text>
+          <Text style={styles.missSub}>You can only view jobs posted by your company.</Text>
+        </View>
+      </SafeAreaView>
     )
   }
 
@@ -281,7 +307,13 @@ export default function JobDetailScreen() {
             <Text style={styles.badgeText}>{job.status}</Text>
           </View>
         </View>
-        <Text style={styles.budget}>{budgetLabel(job)}</Text>
+        <Text style={styles.budget}>
+          {formatBudgetDisplay({
+            budget_type: job.budget_type,
+            budget_amount: job.budget_amount,
+            budget_currency: job.budget_currency,
+          })}
+        </Text>
         <Text style={styles.meta}>
           {job.category} · {job.location_type}
           {isOwner ? ' · Your listing' : ''}
@@ -459,4 +491,12 @@ const styles = StyleSheet.create({
   hint: { marginTop: 12, fontSize: 12, color: 'rgba(255,255,255,0.3)', lineHeight: 18 },
   btnDisabled: { opacity: 0.55 },
   missTitle: { color: '#ffffff', fontSize: 18, fontWeight: '700' },
+  missSub: {
+    marginTop: 10,
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: 24,
+  },
 })

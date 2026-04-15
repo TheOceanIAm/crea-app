@@ -37,6 +37,7 @@ export default function CompanyPostJobScreen() {
   const [category, setCategory] = useState<string>(CATEGORIES[0])
   const [budgetType, setBudgetType] = useState<(typeof BUDGET_TYPES)[number]['id']>('negotiable')
   const [budgetAmount, setBudgetAmount] = useState('')
+  const [budgetCurrency, setBudgetCurrency] = useState('EUR')
   const [locationType, setLocationType] = useState<(typeof LOCATIONS)[number]['id']>('hybrid')
   const [description, setDescription] = useState('')
 
@@ -85,12 +86,16 @@ export default function CompanyPostJobScreen() {
       amount = n
     }
 
+    const curRaw = budgetCurrency.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3)
+    const budget_currency = curRaw.length === 3 ? curRaw : 'EUR'
+
     setSaving(true)
     const { error } = await supabase.from('jobs').insert({
       title: t,
       category,
       budget_type: budgetType,
       budget_amount: amount,
+      budget_currency,
       location_type: locationType,
       description: description.trim() || null,
       company_id: user.id,
@@ -185,7 +190,17 @@ export default function CompanyPostJobScreen() {
         </View>
         {budgetType !== 'negotiable' ? (
           <>
-            <Text style={styles.label}>{budgetType === 'day_rate' ? 'Day rate (€)' : 'Fixed budget (€)'}</Text>
+            <Text style={styles.label}>Currency (ISO 4217)</Text>
+            <TextInput
+              style={styles.input}
+              value={budgetCurrency}
+              onChangeText={(x) => setBudgetCurrency(x.toUpperCase().replace(/[^A-Za-z]/g, '').slice(0, 3))}
+              placeholder="EUR"
+              placeholderTextColor="rgba(255,255,255,0.28)"
+              autoCapitalize="characters"
+              maxLength={3}
+            />
+            <Text style={styles.label}>{budgetType === 'day_rate' ? 'Day rate' : 'Fixed budget'}</Text>
             <TextInput
               style={styles.input}
               value={budgetAmount}

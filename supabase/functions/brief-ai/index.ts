@@ -75,6 +75,7 @@ Deno.serve(async (req) => {
       tasks: `You are a production coordinator. Output a phase-based task breakdown with owners (roles, not names) in Markdown for "${proj.title}".`,
       callsheet: `You are a 1st AD. Output a simplified one-day call sheet skeleton in Markdown for "${proj.title}" (sections: crew call, shoot windows, locations, key contacts placeholders).`,
       gear: `You are a camera department lead. Output an equipment list in Markdown categories (camera, lenses, lighting, grip, audio) for "${proj.title}".`,
+      production_report: `You are a production coordinator writing the end-of-day report for "${proj.title}". Output clear Markdown: summary of what was shot, open issues, tomorrow's priorities, and any safety or logistics notes. Be specific and professional; use bullet lists where helpful.`,
     }
 
     const sys = toolPrompts[tool] ?? toolPrompts.tasks

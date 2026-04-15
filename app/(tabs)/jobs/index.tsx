@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import {
   View,
   Text,
@@ -9,8 +9,12 @@ import {
   Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useFocusEffect, useRouter } from 'expo-router'
+import { PlusCircle } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
+import { ICON_STROKE } from '@/lib/iconTheme'
+import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 
 type Job = {
   id: string
@@ -18,17 +22,12 @@ type Job = {
   category: string
   budget_type: string
   budget_amount: number | null
+  budget_currency: string | null
   location_type: string
   company_id: string | null
   company_name: string
   company_logo_url: string | null
-}
-
-function budgetLabel(job: Job) {
-  if (job.budget_type === 'negotiable') return 'Negotiable'
-  if (job.budget_type === 'day_rate') return job.budget_amount ? `€${job.budget_amount}/day` : 'Rate TBD'
-  if (job.budget_type === 'fixed') return job.budget_amount ? `€${job.budget_amount.toLocaleString('en-US')}` : 'Budget TBD'
-  return '—'
+  status: string
 }
 
 function companyInitial(name: string) {
@@ -36,71 +35,98 @@ function companyInitial(name: string) {
   return t ? t.charAt(0).toUpperCase() : '?'
 }
 
+function jobStatusLabel(s: string) {
+  const t = (s || '').toLowerCase()
+  if (t === 'active') return 'Active'
+  if (t === 'closed' || t === 'filled') return 'Closed'
+  if (t === 'draft') return 'Draft'
+  return s ? s : '—'
+}
+
 export default function JobsListScreen() {
   const router = useRouter()
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
+  const [isCompanyUser, setIsCompanyUser] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      const { data: jobRows, error } = await supabase
-        .from('jobs')
-        .select('id, title, category, budget_type, budget_amount, location_type, company_id')
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(30)
-
-      if (cancelled) return
-
-      if (error || !jobRows?.length) {
-        setJobs([])
-        setLoading(false)
-        return
-      }
-
-      const ids = [
-        ...new Set(
-          jobRows.map((j) => j.company_id).filter((x): x is string => typeof x === 'string' && x.length > 0)
-        ),
-      ]
-
-      const companyById: Record<string, { name: string; avatar_url: string | null }> = {}
-      if (ids.length > 0) {
-        const { data: profiles } = await supabase.from('profiles').select('id, name, avatar_url').in('id', ids)
-        for (const p of profiles ?? []) {
-          const url = p.avatar_url?.trim()
-          companyById[p.id] = {
-            name: (p.name || 'Company').trim() || 'Company',
-            avatar_url: url && /^https?:\/\//i.test(url) ? url : null,
-          }
-        }
-      }
-
-      const list: Job[] = jobRows.map((j) => {
-        const cid = j.company_id as string | null
-        const c = cid ? companyById[cid] : undefined
-        return {
-          id: j.id,
-          title: j.title,
-          category: j.category,
-          budget_type: j.budget_type,
-          budget_amount: j.budget_amount,
-          location_type: j.location_type,
-          company_id: cid,
-          company_name: c?.name ?? 'Company',
-          company_logo_url: c?.avatar_url ?? null,
-        }
-      })
-
-      setJobs(list)
-      setLoading(false)
-    })()
-
-    return () => {
-      cancelled = true
+  const loadJobs = useCallback(async () => {
+    setLoading(true)
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    let role: string | null = null
+    if (user) {
+      const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+      role = resolveAppRole(prof?.role, user)
     }
+    const companyOnly = Boolean(user && isCompanyProfile(role))
+    setIsCompanyUser(companyOnly)
+
+    let q = supabase
+      .from('jobs')
+      .select('id, title, category, budget_type, budget_amount, budget_currency, location_type, company_id, status')
+      .order('created_at', { ascending: false })
+      .limit(companyOnly ? 100 : 30)
+
+    if (companyOnly) {
+      q = q.eq('company_id', user!.id)
+    } else {
+      q = q.eq('status', 'active')
+    }
+
+    const { data: jobRows, error } = await q
+
+    if (error || !jobRows?.length) {
+      setJobs([])
+      setLoading(false)
+      return
+    }
+
+    const ids = [
+      ...new Set(
+        jobRows.map((j) => j.company_id).filter((x): x is string => typeof x === 'string' && x.length > 0)
+      ),
+    ]
+
+    const companyById: Record<string, { name: string; avatar_url: string | null }> = {}
+    if (ids.length > 0) {
+      const { data: profiles } = await supabase.from('profiles').select('id, name, avatar_url').in('id', ids)
+      for (const p of profiles ?? []) {
+        const url = p.avatar_url?.trim()
+        companyById[p.id] = {
+          name: (p.name || 'Company').trim() || 'Company',
+          avatar_url: url && /^https?:\/\//i.test(url) ? url : null,
+        }
+      }
+    }
+
+    const list: Job[] = jobRows.map((j) => {
+      const cid = j.company_id as string | null
+      const c = cid ? companyById[cid] : undefined
+      return {
+        id: j.id as string,
+        title: String(j.title ?? ''),
+        category: String(j.category ?? ''),
+        budget_type: String(j.budget_type ?? ''),
+        budget_amount: typeof j.budget_amount === 'number' ? j.budget_amount : null,
+        budget_currency: typeof j.budget_currency === 'string' ? j.budget_currency : null,
+        location_type: String(j.location_type ?? ''),
+        company_id: cid,
+        company_name: c?.name ?? 'Company',
+        company_logo_url: c?.avatar_url ?? null,
+        status: String(j.status ?? ''),
+      }
+    })
+
+    setJobs(list)
+    setLoading(false)
   }, [])
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadJobs()
+    }, [loadJobs])
+  )
 
   if (loading) {
     return (
@@ -110,18 +136,32 @@ export default function JobsListScreen() {
     )
   }
 
+  const countLabel = isCompanyUser ? `${jobs.length} listing${jobs.length === 1 ? '' : 's'}` : `${jobs.length} open`
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Jobs</Text>
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>{jobs.length} open</Text>
+          <Text style={styles.badgeText}>{countLabel}</Text>
         </View>
       </View>
+
+      {isCompanyUser ? (
+        <TouchableOpacity
+          style={styles.postJobBtn}
+          activeOpacity={0.85}
+          onPress={() => router.push('/(tabs)/company-post-job')}
+        >
+          <PlusCircle size={22} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+          <Text style={styles.postJobBtnText}>Post job</Text>
+        </TouchableOpacity>
+      ) : null}
+
       <FlatList
         data={jobs}
         keyExtractor={(j) => j.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, jobs.length === 0 && styles.listEmpty]}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => (
           <TouchableOpacity
@@ -140,11 +180,22 @@ export default function JobsListScreen() {
               <Text style={styles.companyName} numberOfLines={1}>
                 {item.company_name}
               </Text>
+              {isCompanyUser ? (
+                <View style={styles.statusPill}>
+                  <Text style={styles.statusPillText}>{jobStatusLabel(item.status)}</Text>
+                </View>
+              ) : null}
             </View>
             <View style={styles.cardTop}>
               <Text style={styles.jobTitle}>{item.title}</Text>
               <View style={styles.budgetBadge}>
-                <Text style={styles.budgetText}>{budgetLabel(item)}</Text>
+                <Text style={styles.budgetText}>
+                  {formatBudgetDisplay({
+                    budget_type: item.budget_type,
+                    budget_amount: item.budget_amount,
+                    budget_currency: item.budget_currency,
+                  })}
+                </Text>
               </View>
             </View>
             <Text style={styles.jobMeta}>
@@ -153,8 +204,8 @@ export default function JobsListScreen() {
           </TouchableOpacity>
         )}
         ListEmptyComponent={
-          <View style={styles.center}>
-            <Text style={styles.emptyText}>No jobs found</Text>
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyText}>{isCompanyUser ? 'No jobs yet. Post one above.' : 'No jobs found'}</Text>
           </View>
         }
       />
@@ -186,7 +237,20 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   badgeText: { color: '#FFDC00', fontSize: 11, fontWeight: '700' },
+  postJobBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#FFDC00',
+  },
+  postJobBtnText: { fontSize: 16, fontWeight: '800', color: '#0a0a0a' },
   list: { paddingHorizontal: 20, paddingBottom: 40, gap: 10 },
+  listEmpty: { flexGrow: 1 },
   card: {
     backgroundColor: '#111111',
     borderRadius: 16,
@@ -224,6 +288,16 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.55)',
     letterSpacing: 0.2,
   },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  statusPillText: { fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.55)', letterSpacing: 0.5 },
+  emptyWrap: { paddingVertical: 32, alignItems: 'center' },
   cardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',

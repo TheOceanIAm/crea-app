@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, type Href } from 'expo-router'
 import type { LucideIcon } from 'lucide-react-native'
 import {
+  AppWindow,
   Briefcase,
   Building2,
   CalendarDays,
@@ -24,6 +25,7 @@ import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } f
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { money } from '@/lib/invoiceFormatting'
 import { getCreaWebBaseUrl } from '@/lib/creaWeb'
+import { isDevDemoWorkspaceRouteEnabled } from '@/lib/devDemoWorkspace'
 
 type IncomeTotals = { paid: number; incoming: number; overdue: number; currency: string }
 
@@ -245,6 +247,15 @@ export default function DashboardScreen() {
         if (webBase) Linking.openURL(webBase).catch(() => {})
       },
     },
+    ...(isDevDemoWorkspaceRouteEnabled()
+      ? [
+          {
+            label: 'Demo workspace',
+            icon: AppWindow,
+            onPress: () => router.push('/project/demo' as Href),
+          } satisfies CeoQuick,
+        ]
+      : []),
   ]
 
   if (isCeoProfile(role)) {
@@ -490,22 +501,6 @@ export default function DashboardScreen() {
           ))}
         </View>
 
-        {isCompanyProfile(role) ? (
-          <TouchableOpacity
-            style={styles.companyToolsBanner}
-            activeOpacity={0.8}
-            onPress={() => router.push('/(tabs)/company-hub' as Href)}
-          >
-            <Building2 size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-            <View style={styles.companyToolsBannerText}>
-              <Text style={styles.companyToolsBannerTitle}>Company tools</Text>
-              <Text style={styles.companyToolsBannerSub}>
-                Post jobs, review applicants, incoming invoices, and profile — all in one place.
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ) : null}
-
         {/* Quick Actions */}
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.actionsGrid}>
@@ -680,18 +675,4 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     marginBottom: 6,
   },
-  companyToolsBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    backgroundColor: '#111111',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,220,0,0.15)',
-  },
-  companyToolsBannerText: { flex: 1 },
-  companyToolsBannerTitle: { fontSize: 16, fontWeight: '800', color: '#ffffff', marginBottom: 4 },
-  companyToolsBannerSub: { fontSize: 12, color: 'rgba(255,255,255,0.4)', lineHeight: 17 },
 })

@@ -21,9 +21,14 @@ type Milestone = {
   completed: boolean
 }
 
-type Props = { projectId: string; onCountsChanged?: () => void }
+type Props = {
+  projectId: string
+  onCountsChanged?: () => void
+  /** Company or lead: add/remove milestones. Crew can still mark items complete when false. */
+  canManage: boolean
+}
 
-export function ProjectMilestonesTab({ projectId, onCountsChanged }: Props) {
+export function ProjectMilestonesTab({ projectId, onCountsChanged, canManage }: Props) {
   const [rows, setRows] = useState<Milestone[]>([])
   const [loading, setLoading] = useState(true)
   const [newTitle, setNewTitle] = useState('')
@@ -112,24 +117,32 @@ export function ProjectMilestonesTab({ projectId, onCountsChanged }: Props) {
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <Text style={styles.hint}>Check off steps as you go. Everyone on the crew sees this list.</Text>
+      <Text style={styles.hint}>
+        {canManage
+          ? 'Add or remove steps as the client or lead. The crew can check items off below.'
+          : 'Check off steps as you go. Only the company or lead can edit the list.'}
+      </Text>
 
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.input}
-          placeholder="New milestone…"
-          placeholderTextColor="rgba(255,255,255,0.25)"
-          value={newTitle}
-          onChangeText={setNewTitle}
-          onSubmitEditing={add}
-        />
-        <TouchableOpacity style={[styles.addBtn, busy && styles.dim]} onPress={add} disabled={busy}>
-          <Plus size={22} color="#0a0a0a" strokeWidth={ICON_STROKE} />
-        </TouchableOpacity>
-      </View>
+      {canManage ? (
+        <View style={styles.addRow}>
+          <TextInput
+            style={styles.input}
+            placeholder="New milestone…"
+            placeholderTextColor="rgba(255,255,255,0.25)"
+            value={newTitle}
+            onChangeText={setNewTitle}
+            onSubmitEditing={add}
+          />
+          <TouchableOpacity style={[styles.addBtn, busy && styles.dim]} onPress={add} disabled={busy}>
+            <Plus size={22} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {rows.length === 0 ? (
-        <Text style={styles.empty}>No milestones yet — add the first one above.</Text>
+        <Text style={styles.empty}>
+          {canManage ? 'No milestones yet — add the first one above.' : 'No milestones yet.'}
+        </Text>
       ) : (
         rows.map((m) => (
           <View key={m.id} style={styles.row}>
@@ -143,9 +156,13 @@ export function ProjectMilestonesTab({ projectId, onCountsChanged }: Props) {
               )}
             </TouchableOpacity>
             <Text style={[styles.title, m.completed && styles.titleDone]}>{m.title}</Text>
-            <TouchableOpacity onPress={() => remove(m)} hitSlop={8}>
-              <Trash2 size={18} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
-            </TouchableOpacity>
+            {canManage ? (
+              <TouchableOpacity onPress={() => remove(m)} hitSlop={8}>
+                <Trash2 size={18} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.trashSpacer} />
+            )}
           </View>
         ))
       )}
@@ -205,4 +222,5 @@ const styles = StyleSheet.create({
   },
   title: { flex: 1, fontSize: 15, color: 'rgba(255,255,255,0.9)' },
   titleDone: { textDecorationLine: 'line-through', color: 'rgba(255,255,255,0.35)' },
+  trashSpacer: { width: 18 },
 })

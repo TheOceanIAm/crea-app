@@ -17,6 +17,7 @@ as $$
       jo.category,
       jo.budget_type,
       jo.budget_amount,
+      jo.budget_currency,
       jo.location_type,
       jo.description,
       jo.status,

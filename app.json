@@ -7,11 +7,11 @@
     "icon": "./assets/CREA_icon.jpg",
     "scheme": "crea",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#0a0a0a",
+    "backgroundColor": "#FFDC00",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/splash-wordmark.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0a0a0a"
+      "backgroundColor": "#FFDC00"
     },
     "ios": {
       "supportsTablet": false,
@@ -33,6 +33,15 @@
       ]
     },
     "plugins": [
+      "./plugins/withFmtPodfileFix.js",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FFDC00",
+          "image": "./assets/splash-wordmark.png",
+          "resizeMode": "contain"
+        }
+      ],
       "expo-router",
       "expo-secure-store",
       [
@@ -47,7 +56,8 @@
           "icon": "./assets/icon.png",
           "color": "#FFDC00"
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true

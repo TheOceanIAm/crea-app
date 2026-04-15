@@ -23,13 +23,29 @@ export function statusVariant(status: string): InvoiceStatusVariant {
   return 'pending'
 }
 
-export function money(amount: number | null, currency: string | null | undefined) {
-  if (amount == null) return '—'
+/** Coerce Supabase `numeric` / JSON values for display (often strings at runtime). */
+export function toMoneyNumber(amount: unknown): number | null {
+  if (amount == null) return null
+  if (typeof amount === 'number') return Number.isFinite(amount) ? amount : null
+  if (typeof amount === 'string') {
+    const t = amount.trim().replace(',', '.')
+    if (!t) return null
+    const n = Number(t)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+/** Formats with currency symbol when possible; always includes ISO code in the fallback path. */
+export function money(amount: number | string | null | undefined, currency: string | null | undefined) {
+  const n = toMoneyNumber(amount)
+  if (n == null) return '—'
   const cur = (currency || 'EUR').toUpperCase()
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(amount)
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(n)
   } catch {
-    return `€${amount.toLocaleString('en-US')}`
+    const parts = n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+    return `${cur} ${parts}`
   }
 }
 

@@ -78,20 +78,142 @@ export function parseNotificationSettings(raw: unknown): NotificationSettings {
   }
 }
 
+/** Normalize user- or CMS-pasted URLs (incl. // and www-only) for Linking.openURL. */
+function normalizeExternalVideoUrl(raw: string): string {
+  const t = raw.trim()
+  if (!t) return ''
+  if (/^https?:\/\//i.test(t)) return t
+  if (t.startsWith('//')) return `https:${t}`
+  if (/^(www\.)?(youtube\.com|youtu\.be|vimeo\.com)\b/i.test(t)) {
+    return `https://${t.replace(/^\/+/, '')}`
+  }
+  return t
+}
+
+function titleFromUrl(url: string): string {
+  const u = normalizeExternalVideoUrl(url)
+  if (!u) return 'Project'
+  try {
+    const parsed = new URL(u)
+    const host = parsed.hostname.replace(/^www\./, '')
+    if (host.includes('youtube') || host.includes('youtu.be')) return 'YouTube'
+    if (host.includes('vimeo')) return 'Vimeo'
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    const last = parts[parts.length - 1]
+    if (last && last.length < 48) {
+      return decodeURIComponent(last).replace(/[-_+]/g, ' ').replace(/\.[^.]+$/, '') || 'Project'
+    }
+  } catch {
+    /* ignore */
+  }
+  return 'Video'
+}
+
+/** Web / CMS portfolio rows often use embed or vendor-specific keys instead of `link`. */
+function extractProjectLink(r: Record<string, unknown>): string {
+  const keys = [
+    'link',
+    'url',
+    'href',
+    'src',
+    'video_url',
+    'videoUrl',
+    'embed_url',
+    'embedUrl',
+    'embed',
+    'youtube_url',
+    'youtubeUrl',
+    'vimeo_url',
+    'vimeoUrl',
+    'watch_url',
+    'watchUrl',
+    'uri',
+    'source',
+    'web_url',
+    'webUrl',
+    'permalink',
+  ] as const
+  for (const k of keys) {
+    const v = r[k]
+    if (typeof v === 'string' && v.trim()) {
+      const n = normalizeExternalVideoUrl(v)
+      if (n && (n.startsWith('http') || n.startsWith('//'))) return n.startsWith('//') ? `https:${n}` : n
+    }
+  }
+  return ''
+}
+
 export function parsePortfolioProjects(raw: unknown): PortfolioProject[] {
-  if (!Array.isArray(raw)) return []
+  if (raw == null) return []
+  let list: unknown = raw
+  if (typeof raw === 'string') {
+    try {
+      list = JSON.parse(raw) as unknown
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(list) && typeof list === 'object' && list !== null) {
+    const o = list as Record<string, unknown>
+    const nested = [
+      o.items,
+      o.projects,
+      o.portfolio,
+      o.work,
+      o.videos,
+      o.portfolio_items,
+      o.portfolioItems,
+      o.video_items,
+      o.videoItems,
+      o.entries,
+      o.data,
+    ]
+    for (const n of nested) {
+      if (Array.isArray(n)) {
+        list = n
+        break
+      }
+    }
+  }
+  if (!Array.isArray(list)) return []
   const out: PortfolioProject[] = []
-  for (const p of raw) {
+  for (const p of list) {
+    if (typeof p === 'string') {
+      const s = p.trim()
+      if (/^https?:\/\//i.test(s) || /^(www\.)?(youtube\.com|youtu\.be|vimeo\.com)\b/i.test(s)) {
+        const link = normalizeExternalVideoUrl(s.startsWith('http') ? s : `https://${s.replace(/^\/+/, '')}`)
+        out.push({
+          title: titleFromUrl(link),
+          client: '',
+          link,
+        })
+      }
+      continue
+    }
     if (!p || typeof p !== 'object') continue
     const r = p as Record<string, unknown>
-    const roleRaw = r.role
-    const imgRaw = r.image_url ?? r.thumbnail_url ?? r.image
+    const roleRaw = r.role ?? r.category ?? r.type ?? r.role_in_project
+    const link = extractProjectLink(r)
+    const imgRaw =
+      r.image_url ??
+      r.thumbnail_url ??
+      r.image ??
+      r.cover_image ??
+      r.thumb ??
+      r.thumbnail ??
+      r.poster ??
+      r.preview_image ??
+      r.previewImage
     const imageUrl =
       typeof imgRaw === 'string' && /^https?:\/\//i.test(imgRaw.trim()) ? imgRaw.trim() : undefined
+    const titleRaw =
+      String(r.title ?? r.name ?? r.slug ?? r.label ?? '').trim() ||
+      String(r.client ?? r.company ?? r.brand ?? '').trim()
+    const title = titleRaw || (link ? titleFromUrl(link) : 'Project')
     out.push({
-      title: String(r.title ?? ''),
-      client: String(r.client ?? ''),
-      link: String(r.link ?? ''),
+      title,
+      client: String(r.client ?? r.company ?? r.brand ?? ''),
+      link,
       role: typeof roleRaw === 'string' && roleRaw.trim() ? roleRaw.trim() : undefined,
       image_url: imageUrl,
     })

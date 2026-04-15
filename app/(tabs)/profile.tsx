@@ -21,6 +21,7 @@ import { router, type Href } from 'expo-router'
 import type { LucideIcon } from 'lucide-react-native'
 import {
   Bell,
+  CalendarDays,
   ChevronRight,
   CircleDollarSign,
   CreditCard,
@@ -62,6 +63,7 @@ type MenuId =
   | 'preview'
   | 'portfolio'
   | 'rates'
+  | 'availability'
   | 'billing'
   | 'plan'
   | 'notifications'
@@ -79,15 +81,21 @@ const MENU_ITEMS: MenuItem[] = [
   { id: 'preview', label: 'Preview', icon: Eye, href: '/(tabs)/profile-preview' },
   { id: 'portfolio', label: 'Portfolio', icon: Link2 },
   { id: 'rates', label: 'Rates', icon: CircleDollarSign },
+  {
+    id: 'availability',
+    label: 'Availability',
+    icon: CalendarDays,
+    href: '/(tabs)/availability',
+  },
   { id: 'billing', label: 'Invoice & bank', icon: Wallet },
   { id: 'plan', label: 'Plan', icon: CreditCard },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'account', label: 'Account', icon: Settings },
 ]
 
-const CEO_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'billing', 'plan']
+const CEO_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability', 'billing', 'plan']
 /** Portfolio & rates are freelancer-focused; companies post budgets on jobs instead. */
-const COMPANY_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates']
+const COMPANY_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability']
 
 function roleLabel(role: string) {
   if (role === 'company') return 'Company'

@@ -43,3 +43,6 @@ as $$
     limit 1
   ) t;
 $$;
+
+revoke all on function public.profile_share_public(uuid) from public;
+grant execute on function public.profile_share_public(uuid) to anon, authenticated;
