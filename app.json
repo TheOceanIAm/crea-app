@@ -54,7 +54,8 @@
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
-          "color": "#FFDC00"
+          "color": "#FFDC00",
+          "enableBackgroundRemoteNotifications": true
         }
       ],
       "expo-font"

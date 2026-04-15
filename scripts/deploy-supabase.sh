@@ -74,6 +74,12 @@ echo ">>> Deploying Edge Function brief-ai ..."
 npx supabase functions deploy brief-ai --project-ref "$PROJECT_REF"
 
 echo ""
+echo ">>> Deploying Edge Function notify-message-push (Expo push for new DMs) ..."
+npx supabase functions deploy notify-message-push --project-ref "$PROJECT_REF"
+
+echo ""
 echo "Done. If brief-ai needs OpenAI:"
 echo "  npx supabase secrets set --project-ref $PROJECT_REF OPENAI_API_KEY=sk-..."
+echo "Push: optional — npx supabase secrets set --project-ref $PROJECT_REF EXPO_ACCESS_TOKEN=expo_..."
+echo "      (only if you enabled enhanced push security on expo.dev; otherwise Expo accepts sends without it.)"
 echo "Storage: create private bucket project-files in Dashboard if not exists (see project_workspace_native.sql)."

@@ -211,10 +211,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: '800',
-    color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 1.5,
+    color: '#ffffff',
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
   headHint: { flex: 1, fontSize: 11, color: 'rgba(255,255,255,0.32)', textAlign: 'right' },

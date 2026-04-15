@@ -9,6 +9,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "deploy:supabase": "bash scripts/deploy-supabase.sh",
+    "deploy:notify-push": "bash scripts/deploy-notify-push.sh",
     "splash:transparent-bg": "node scripts/splash-make-transparent-bg.mjs",
     "splash:fix": "node scripts/splash-flatten-brand-yellow.mjs"
   },

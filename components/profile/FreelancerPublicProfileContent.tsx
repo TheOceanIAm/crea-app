@@ -735,10 +735,10 @@ const styles = StyleSheet.create({
   rateSub: { marginTop: 8, fontSize: 14, color: 'rgba(255,255,255,0.55)' },
   block: { marginBottom: 22 },
   blockTitle: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: '800',
-    color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 1.5,
+    color: '#ffffff',
+    letterSpacing: 1.2,
     marginBottom: 12,
     textTransform: 'uppercase',
   },

@@ -1,29 +1,39 @@
 import { supabase } from '@/lib/supabase'
 import { findOrCreateDirectConversation } from '@/lib/directConversation'
+import { requestNotifyRecipientPush } from '@/lib/notifyMessagePush'
 
-async function insertMessageBody(conversationId: string, senderId: string, text: string): Promise<{ ok: true } | { ok: false; error: string }> {
+async function insertMessageBody(
+  conversationId: string,
+  senderId: string,
+  text: string
+): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
   const payload: Record<string, unknown> = {
     conversation_id: conversationId,
     sender_id: senderId,
     body: text,
     read: false,
   }
-  let { error } = await supabase.from('messages').insert(payload)
+  let { data: inserted, error } = await supabase.from('messages').insert(payload).select('id').single()
   if (error?.message?.includes('column') && error.message.includes('body')) {
     const alt = { ...payload }
     delete alt.body
     alt.content = text
-    const r2 = await supabase.from('messages').insert(alt)
+    const r2 = await supabase.from('messages').insert(alt).select('id').single()
+    inserted = r2.data
     error = r2.error
   }
   if (error) {
     return { ok: false, error: error.message }
   }
+  const messageId = typeof inserted?.id === 'string' ? inserted.id : ''
+  if (!messageId) {
+    return { ok: false, error: 'Message id missing' }
+  }
   await supabase
     .from('conversations')
     .update({ last_message: text, last_message_at: new Date().toISOString() })
     .eq('id', conversationId)
-  return { ok: true }
+  return { ok: true, messageId }
 }
 
 /**
@@ -53,6 +63,8 @@ export async function sendAvailabilityProjectInvite(params: {
 
   const ins = await insertMessageBody(conv.conversationId, me, body)
   if (ins.ok === false) return { ok: false, error: ins.error }
+
+  void requestNotifyRecipientPush(ins.messageId)
 
   return { ok: true, conversationId: conv.conversationId }
 }

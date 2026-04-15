@@ -1334,8 +1334,8 @@ export default function ProfileScreen() {
                 <View style={styles.sectionCard}>
                   <Text style={styles.cardTitle}>Push notifications</Text>
                   <Text style={styles.cardSubtitle}>
-                    Alerts on this device. Registering saves an Expo push token on your profile so the backend can send
-                    notifications (configure sending in Supabase / Edge Functions).
+                    You can get alerts when CREA is in the background or fully closed (standard iOS/Android push). Allow
+                    notifications when prompted, tap Register this device, choose categories below, then Save.
                   </Text>
                   {!Device.isDevice ? (
                     <Text style={styles.inlineHint}>Simulators don’t receive push tokens — use a physical device.</Text>

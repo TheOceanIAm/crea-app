@@ -1,6 +1,7 @@
 import '@/lib/pushNotifications'
 import { useEffect } from 'react'
-import { Linking, Alert } from 'react-native'
+import { Linking, Alert, Platform } from 'react-native'
+import { PushNotificationRouter } from '@/components/PushNotificationRouter'
 import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
@@ -31,6 +32,7 @@ export default function RootLayout() {
   return (
     <>
       <AuthDeepLinkBridge />
+      {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
       <StatusBar style="light" backgroundColor="#0a0a0a" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
         {/* Same yellow as app.json splash so nothing flashes black behind the native splash */}

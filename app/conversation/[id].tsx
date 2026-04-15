@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { requestNotifyRecipientPush } from '@/lib/notifyMessagePush'
 
 type MsgRow = {
   id: string
@@ -92,12 +93,13 @@ export default function ConversationThreadScreen() {
       body: t,
       read: false,
     }
-    let { error } = await supabase.from('messages').insert(payload)
+    let { data: inserted, error } = await supabase.from('messages').insert(payload).select('id').single()
     if (error?.message?.includes('column') && error.message.includes('body')) {
       const alt = { ...payload }
       delete alt.body
       alt.content = t
-      const r2 = await supabase.from('messages').insert(alt)
+      const r2 = await supabase.from('messages').insert(alt).select('id').single()
+      inserted = r2.data
       error = r2.error
     }
     if (!error) {
@@ -106,6 +108,7 @@ export default function ConversationThreadScreen() {
         .from('conversations')
         .update({ last_message: t, last_message_at: new Date().toISOString() })
         .eq('id', conversationId)
+      if (inserted?.id) void requestNotifyRecipientPush(inserted.id)
       await load()
     }
     setSending(false)
