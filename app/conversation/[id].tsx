@@ -2,17 +2,18 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native'
+import { ScrollView, Swipeable } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft } from 'lucide-react-native'
+import { ChevronLeft, Trash2 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { requestNotifyRecipientPush } from '@/lib/notifyMessagePush'
@@ -29,6 +30,24 @@ type MsgRow = {
 function messageText(m: MsgRow): string {
   const raw = m.body ?? m.content ?? m.message
   return typeof raw === 'string' ? raw : ''
+}
+
+async function syncConversationPreviewAfterMessagesChange(conversationId: string) {
+  const { data: lastRows } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  const last = lastRows?.[0] as MsgRow | undefined
+  const preview = last ? messageText(last).trim() || 'No messages yet' : 'No messages yet'
+  const at = last?.created_at ?? new Date().toISOString()
+
+  await supabase
+    .from('conversations')
+    .update({ last_message: preview, last_message_at: at })
+    .eq('id', conversationId)
 }
 
 export default function ConversationThreadScreen() {
@@ -114,6 +133,33 @@ export default function ConversationThreadScreen() {
     setSending(false)
   }
 
+  const confirmDeleteMessage = (m: MsgRow) => {
+    if (!conversationId || typeof conversationId !== 'string' || !me) return
+    Alert.alert(
+      'Delete message',
+      'Remove this message from the chat for both of you? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => void deleteMessageById(m),
+        },
+      ]
+    )
+  }
+
+  const deleteMessageById = async (m: MsgRow) => {
+    if (!conversationId || typeof conversationId !== 'string') return
+    const { error } = await supabase.from('messages').delete().eq('id', m.id)
+    if (error) {
+      Alert.alert('Could not delete', error.message)
+      return
+    }
+    await syncConversationPreviewAfterMessagesChange(conversationId)
+    await load()
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -159,13 +205,40 @@ export default function ConversationThreadScreen() {
               const mine = m.sender_id === me
               const txt = messageText(m)
               return (
-                <View key={m.id} style={[styles.bubbleWrap, mine && styles.bubbleWrapMine]}>
-                  <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
-                    <Text style={[styles.bubbleText, mine ? styles.bubbleTextMine : styles.bubbleTextTheirs]}>
-                      {txt}
-                    </Text>
+                <Swipeable
+                  key={m.id}
+                  friction={2}
+                  overshootRight={false}
+                  renderRightActions={() => (
+                    <View style={styles.swipeDeleteOuter}>
+                      <TouchableOpacity
+                        style={styles.swipeDeleteBtn}
+                        onPress={() => confirmDeleteMessage(m)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete message"
+                      >
+                        <Trash2 size={22} color="#fff" strokeWidth={ICON_STROKE} />
+                        <Text style={styles.swipeDeleteLabel}>Delete</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                >
+                  <View style={[styles.bubbleWrap, mine && styles.bubbleWrapMine]}>
+                    <TouchableOpacity
+                      activeOpacity={0.92}
+                      delayLongPress={380}
+                      onLongPress={() => confirmDeleteMessage(m)}
+                      accessibilityLabel="Message"
+                      accessibilityHint="Swipe left to delete, or long press to delete"
+                    >
+                      <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
+                        <Text style={[styles.bubbleText, mine ? styles.bubbleTextMine : styles.bubbleTextTheirs]}>
+                          {txt}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
                   </View>
-                </View>
+                </Swipeable>
               )
             })
           )}
@@ -219,6 +292,23 @@ const styles = StyleSheet.create({
   empty: { color: 'rgba(255,255,255,0.35)', textAlign: 'center', marginTop: 40 },
   bubbleWrap: { alignItems: 'flex-start', marginBottom: 10 },
   bubbleWrapMine: { alignItems: 'flex-end' },
+  swipeDeleteOuter: {
+    width: 84,
+    marginBottom: 10,
+    justifyContent: 'center',
+  },
+  swipeDeleteBtn: {
+    flex: 1,
+    backgroundColor: '#b91c1c',
+    borderRadius: 14,
+    marginLeft: 8,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+  },
+  swipeDeleteLabel: { color: '#fff', fontSize: 12, fontWeight: '700' },
   bubble: {
     maxWidth: '85%',
     paddingHorizontal: 14,

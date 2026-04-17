@@ -21,6 +21,10 @@ export function linkedinUrl(raw: string): string | null {
   const t = raw.trim()
   if (!t) return null
   if (/^https?:\/\//i.test(t)) return t
+  // Company pages: linkedin.com/company/… (avoid forcing /in/ path)
+  if (/linkedin\.com\//i.test(t)) {
+    return t.startsWith('//') ? `https:${t}` : `https://${t.replace(/^\/+/, '')}`
+  }
   return `https://linkedin.com/in/${t.replace(/^\/+/, '')}`
 }
 

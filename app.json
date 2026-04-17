@@ -39,7 +39,8 @@
         {
           "backgroundColor": "#FFDC00",
           "image": "./assets/splash-wordmark.png",
-          "resizeMode": "contain"
+          "resizeMode": "contain",
+          "imageWidth": 320
         }
       ],
       "expo-router",

@@ -94,8 +94,8 @@ const MENU_ITEMS: MenuItem[] = [
 ]
 
 const CEO_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability', 'billing', 'plan']
-/** Portfolio & rates are freelancer-focused; companies post budgets on jobs instead. */
-const COMPANY_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability']
+/** Rates & availability are freelancer-focused; companies use jobs for budgets. Website/social live under Profile. */
+const COMPANY_HIDDEN_MENU_IDS: MenuId[] = ['rates', 'availability']
 
 function roleLabel(role: string) {
   if (role === 'company') return 'Company'
@@ -392,6 +392,13 @@ export default function ProfileScreen() {
     if (freelancer) {
       payload.skills = skillsList
       payload.equipment = equipmentList
+    }
+    if (company) {
+      payload.portfolio_website = portfolioWebsite.trim() || null
+      payload.portfolio_instagram = portfolioInstagram.trim() || null
+      payload.portfolio_linkedin = portfolioLinkedin.trim() || null
+      payload.portfolio_vimeo = portfolioVimeo.trim() || null
+      payload.portfolio_behance = portfolioBehance.trim() || null
     }
 
     const { error } = await supabase.from('profiles').update(payload).eq('id', user.id)
@@ -845,11 +852,69 @@ export default function ProfileScreen() {
                   style={[styles.input, styles.bioInput]}
                   value={bio}
                   onChangeText={setBio}
-                  placeholder="2–4 sentences about your work and style …"
+                  placeholder={
+                    company
+                      ? 'About your company — visible on your public profile.'
+                      : '2–4 sentences about your work and style …'
+                  }
                   placeholderTextColor="rgba(255,255,255,0.28)"
                   multiline
                   textAlignVertical="top"
                 />
+
+                {company ? (
+                  <>
+                    <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Website</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={portfolioWebsite}
+                      onChangeText={setPortfolioWebsite}
+                      placeholder="https://yourcompany.com"
+                      placeholderTextColor="rgba(255,255,255,0.28)"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Instagram</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={portfolioInstagram}
+                      onChangeText={setPortfolioInstagram}
+                      placeholder="@handle or full URL"
+                      placeholderTextColor="rgba(255,255,255,0.28)"
+                      autoCapitalize="none"
+                    />
+                    <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>LinkedIn</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={portfolioLinkedin}
+                      onChangeText={setPortfolioLinkedin}
+                      placeholder="linkedin.com/company/… or full URL"
+                      placeholderTextColor="rgba(255,255,255,0.28)"
+                      autoCapitalize="none"
+                    />
+                    <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Vimeo</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={portfolioVimeo}
+                      onChangeText={setPortfolioVimeo}
+                      placeholder="vimeo.com/…"
+                      placeholderTextColor="rgba(255,255,255,0.28)"
+                      autoCapitalize="none"
+                    />
+                    <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Behance</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={portfolioBehance}
+                      onChangeText={setPortfolioBehance}
+                      placeholder="behance.net/…"
+                      placeholderTextColor="rgba(255,255,255,0.28)"
+                      autoCapitalize="none"
+                    />
+                    <Text style={styles.inlineHint}>
+                      These appear on your public company profile under Website and Socials.
+                    </Text>
+                  </>
+                ) : null}
               </View>
 
               {freelancer && (

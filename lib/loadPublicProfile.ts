@@ -107,6 +107,7 @@ function normalizeRawProfileRow(row: Record<string, unknown>): Record<string, un
   if (!isMeaningfulValue(o.bio)) {
     if (isMeaningfulValue(o.about)) o.bio = o.about
     else if (isMeaningfulValue(o.description)) o.bio = o.description
+    else if (isMeaningfulValue(o.company_about)) o.bio = o.company_about
   }
   if (!isMeaningfulValue(o.portfolio_projects)) {
     if (isMeaningfulValue(o.portfolio)) o.portfolio_projects = o.portfolio
@@ -124,7 +125,75 @@ function normalizeRawProfileRow(row: Record<string, unknown>): Record<string, un
   if (!isMeaningfulValue(o.availability_calendar) && isMeaningfulValue(o.availability)) {
     o.availability_calendar = o.availability
   }
-  return o
+
+  // Web / alternate APIs: website & socials under different keys (incl. camelCase on freelancer_profiles).
+  if (!isMeaningfulValue(o.portfolio_website)) {
+    if (isMeaningfulValue(o.portfolioWebsite)) o.portfolio_website = o.portfolioWebsite
+    else if (isMeaningfulValue(o.website)) o.portfolio_website = o.website
+    else if (isMeaningfulValue(o.company_website)) o.portfolio_website = o.company_website
+    else if (isMeaningfulValue(o.web_url)) o.portfolio_website = o.web_url
+    else if (isMeaningfulValue(o.site_url)) o.portfolio_website = o.site_url
+  }
+  if (!isMeaningfulValue(o.portfolio_instagram)) {
+    if (isMeaningfulValue(o.portfolioInstagram)) o.portfolio_instagram = o.portfolioInstagram
+    else if (isMeaningfulValue(o.instagram)) o.portfolio_instagram = o.instagram
+    else if (isMeaningfulValue(o.instagram_url)) o.portfolio_instagram = o.instagram_url
+    else if (isMeaningfulValue(o.instagram_handle)) o.portfolio_instagram = o.instagram_handle
+  }
+  if (!isMeaningfulValue(o.portfolio_linkedin)) {
+    if (isMeaningfulValue(o.portfolioLinkedin)) o.portfolio_linkedin = o.portfolioLinkedin
+    else if (isMeaningfulValue(o.portfolioLinkedIn)) o.portfolio_linkedin = o.portfolioLinkedIn
+    else if (isMeaningfulValue(o.linkedin)) o.portfolio_linkedin = o.linkedin
+    else if (isMeaningfulValue(o.linkedin_url)) o.portfolio_linkedin = o.linkedin_url
+  }
+  if (!isMeaningfulValue(o.portfolio_vimeo)) {
+    if (isMeaningfulValue(o.portfolioVimeo)) o.portfolio_vimeo = o.portfolioVimeo
+    else if (isMeaningfulValue(o.vimeo)) o.portfolio_vimeo = o.vimeo
+    else if (isMeaningfulValue(o.vimeo_url)) o.portfolio_vimeo = o.vimeo_url
+  }
+  if (!isMeaningfulValue(o.portfolio_behance)) {
+    if (isMeaningfulValue(o.portfolioBehance)) o.portfolio_behance = o.portfolioBehance
+    else if (isMeaningfulValue(o.behance)) o.portfolio_behance = o.behance
+    else if (isMeaningfulValue(o.behance_url)) o.portfolio_behance = o.behance_url
+  }
+
+  // Optional JSON blob from web: { "instagram": "…", "linkedin": "…" }
+  const socials = o.socials ?? o.social_links
+  if (socials && typeof socials === 'object' && !Array.isArray(socials)) {
+    const s = socials as Record<string, unknown>
+    if (!isMeaningfulValue(o.portfolio_instagram) && isMeaningfulValue(s.instagram)) {
+      o.portfolio_instagram = s.instagram
+    }
+    if (!isMeaningfulValue(o.portfolio_linkedin) && isMeaningfulValue(s.linkedin)) {
+      o.portfolio_linkedin = s.linkedin
+    }
+    if (!isMeaningfulValue(o.portfolio_vimeo) && isMeaningfulValue(s.vimeo)) {
+      o.portfolio_vimeo = s.vimeo
+    }
+    if (!isMeaningfulValue(o.portfolio_behance) && isMeaningfulValue(s.behance)) {
+      o.portfolio_behance = s.behance
+    }
+    if (!isMeaningfulValue(o.portfolio_website) && isMeaningfulValue(s.website)) {
+      o.portfolio_website = s.website
+    }
+  }
+
+  // Empty strings block combineProfileSources from falling through to RPC — treat as missing.
+  const r = o as Record<string, unknown>
+  for (const k of [
+    'portfolio_website',
+    'portfolio_instagram',
+    'portfolio_linkedin',
+    'portfolio_vimeo',
+    'portfolio_behance',
+    'location',
+    'bio',
+  ]) {
+    const v = r[k]
+    if (typeof v === 'string' && v.trim() === '') delete r[k]
+  }
+
+  return r
 }
 
 /**
@@ -287,6 +356,25 @@ async function fetchFreelancerProfilesRow(userId: string): Promise<Record<string
   return null
 }
 
+/** Some deployments store company-only fields in a separate table (web). Ignore errors if table missing. */
+async function fetchCompanyProfilesRow(userId: string): Promise<Record<string, unknown> | null> {
+  const uid = userId.trim()
+  const attempts = [
+    () => supabase.from('company_profiles').select('*').eq('id', uid).maybeSingle(),
+    () => supabase.from('company_profiles').select('*').eq('profile_id', uid).maybeSingle(),
+    () => supabase.from('company_profiles').select('*').eq('user_id', uid).maybeSingle(),
+    () => supabase.from('company_profiles').select('*').eq('company_id', uid).maybeSingle(),
+  ]
+  for (const run of attempts) {
+    const { data, error } = await run()
+    if (error) continue
+    if (data && typeof data === 'object') {
+      return normalizeRawProfileRow(data as Record<string, unknown>)
+    }
+  }
+  return null
+}
+
 /**
  * Loads public profile: merges `profile_share_public` RPC with a direct `profiles` row when available.
  * Field-wise merge so either source can supply bio / skills / portfolio / calendar.
@@ -302,13 +390,14 @@ export async function loadPublicProfile(userId: string): Promise<{
   } = await supabase.auth.getUser()
   const authed = !!user
 
-  const [rpcResult, countResult, row, fpRow, portfolioTableRows] = await Promise.all([
+  const [rpcResult, countResult, row, fpRow, cpRow, portfolioTableRows] = await Promise.all([
     supabase.rpc('profile_share_public', { profile_id: trimmed }),
     authed
       ? supabase.from('projects').select('*', { count: 'exact', head: true }).eq('freelancer_id', trimmed)
       : Promise.resolve({ count: null as number | null, error: null as null }),
     fetchProfileRowForPublic(trimmed),
     fetchFreelancerProfilesRow(trimmed),
+    fetchCompanyProfilesRow(trimmed),
     fetchFreelancerPortfolioTableRows(trimmed),
   ])
 
@@ -317,7 +406,8 @@ export async function loadPublicProfile(userId: string): Promise<{
 
   const wsCount = countResult.error ? null : countResult.count
 
-  const mergedRow = mergeProfileRows(row, fpRow)
+  const normalizedProfilesRow = row ? normalizeRawProfileRow(row) : null
+  const mergedRow = mergeProfileRows(mergeProfileRows(normalizedProfilesRow, fpRow), cpRow)
 
   if (rpcError && !mergedRow && !rpcPayload) {
     return { profile: null, error: rpcError.message }
@@ -352,6 +442,8 @@ export async function loadPublicProfile(userId: string): Promise<{
         !!row,
         'freelancer_profiles?',
         !!fpRow,
+        'company_profiles?',
+        !!cpRow,
         'rpcPayloadKeys',
         rpcPayload ? Object.keys(rpcPayload).length : 0
       )

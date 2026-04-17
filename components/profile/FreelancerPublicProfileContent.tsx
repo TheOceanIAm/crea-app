@@ -13,9 +13,10 @@ import {
 import { useRouter } from 'expo-router'
 import type { LucideIcon } from 'lucide-react-native'
 import {
-  Briefcase,
   Camera,
+  ChevronRight,
   Globe,
+  Link2,
   MapPin,
   MessageCircle,
   Palette,
@@ -42,19 +43,29 @@ import { profileShareUrl } from '@/lib/shareLinks'
 import { supabase } from '@/lib/supabase'
 import { findOrCreateDirectConversation } from '@/lib/directConversation'
 import { normalizePublicProfileRpc } from '@/lib/normalizePublicProfileRpc'
+import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 
 function strTrim(v: string | null | undefined): string {
   if (v == null) return ''
   return typeof v === 'string' ? v.trim() : ''
 }
 
-function SocialButton({ icon: Icon, url }: { icon: LucideIcon; url: string | null }) {
+function SocialButton({
+  icon: Icon,
+  url,
+  accessibilityLabel,
+}: {
+  icon: LucideIcon
+  url: string | null
+  accessibilityLabel: string
+}) {
   if (!url) return null
   return (
     <TouchableOpacity
       style={styles.socialBtn}
       onPress={() => Linking.openURL(url).catch(() => {})}
       accessibilityRole="link"
+      accessibilityLabel={accessibilityLabel}
     >
       <Icon size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
     </TouchableOpacity>
@@ -106,7 +117,20 @@ export function FreelancerPublicProfileContent({
   const setShareOpen = onShareModalOpenChange ?? setShareOpenInternal
   const [portfolioFilter, setPortfolioFilter] = useState<string>('All')
   const [viewerIsCompany, setViewerIsCompany] = useState(false)
+  const [viewerIsCeo, setViewerIsCeo] = useState(false)
   const [inviteDateIso, setInviteDateIso] = useState<string | null>(null)
+  const [companyJobs, setCompanyJobs] = useState<
+    {
+      id: string
+      title: string
+      category: string
+      budget_type: string
+      budget_amount: number | null
+      budget_currency: string | null
+      location_type: string
+    }[]
+  >([])
+  const [companyJobsLoading, setCompanyJobsLoading] = useState(false)
 
   const projects = useMemo(
     () => parsePortfolioProjects(profileNorm.portfolio_projects),
@@ -137,6 +161,7 @@ export function FreelancerPublicProfileContent({
     let cancelled = false
     if (!authUserId) {
       setViewerIsCompany(false)
+      setViewerIsCeo(false)
       return
     }
     ;(async () => {
@@ -147,11 +172,41 @@ export function FreelancerPublicProfileContent({
       if (cancelled) return
       const role = resolveAppRole(p?.role, user)
       setViewerIsCompany(isCompanyProfile(role))
+      setViewerIsCeo(isCeoProfile(role))
     })()
     return () => {
       cancelled = true
     }
   }, [authUserId])
+
+  useEffect(() => {
+    if (isFreelancer || !userId) {
+      setCompanyJobs([])
+      setCompanyJobsLoading(false)
+      return
+    }
+    let cancelled = false
+    setCompanyJobsLoading(true)
+    void (async () => {
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('id, title, category, budget_type, budget_amount, budget_currency, location_type, status')
+        .eq('company_id', userId)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(40)
+      if (cancelled) return
+      if (!error && Array.isArray(data)) {
+        setCompanyJobs(data)
+      } else {
+        setCompanyJobs([])
+      }
+      setCompanyJobsLoading(false)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isFreelancer, userId])
 
   const filteredProjects = useMemo(() => {
     if (portfolioFilter === 'All') return projects
@@ -168,14 +223,34 @@ export function FreelancerPublicProfileContent({
   )
 
   const socials = useMemo(() => {
-    const entries = [
-      { icon: Globe, url: profileNorm.portfolio_website ? normalizeExternalUrl(profileNorm.portfolio_website) : null },
-      { icon: Camera, url: instagramUrl(profileNorm.portfolio_instagram ?? '') },
-      { icon: Briefcase, url: linkedinUrl(profileNorm.portfolio_linkedin ?? '') },
-      { icon: Video, url: vimeoUrl(profileNorm.portfolio_vimeo ?? '') },
-      { icon: Palette, url: behanceUrl(profileNorm.portfolio_behance ?? '') },
+    const entries: { icon: LucideIcon; url: string | null; label: string }[] = [
+      {
+        icon: Globe,
+        url: profileNorm.portfolio_website ? normalizeExternalUrl(profileNorm.portfolio_website) : null,
+        label: 'Website',
+      },
+      {
+        icon: Camera,
+        url: instagramUrl(profileNorm.portfolio_instagram ?? ''),
+        label: 'Instagram',
+      },
+      {
+        icon: Link2,
+        url: linkedinUrl(profileNorm.portfolio_linkedin ?? ''),
+        label: 'LinkedIn',
+      },
+      {
+        icon: Video,
+        url: vimeoUrl(profileNorm.portfolio_vimeo ?? ''),
+        label: 'Vimeo',
+      },
+      {
+        icon: Palette,
+        url: behanceUrl(profileNorm.portfolio_behance ?? ''),
+        label: 'Behance',
+      },
     ]
-    return entries.filter((x): x is { icon: LucideIcon; url: string } => x.url != null)
+    return entries.filter((x): x is { icon: LucideIcon; url: string; label: string } => x.url != null)
   }, [profileNorm])
 
   const shareUrl = useMemo(() => profileShareUrl(userId), [userId])
@@ -196,6 +271,12 @@ export function FreelancerPublicProfileContent({
   const viewingOwn = Boolean(authUserId && authUserId === userId)
   const companyAvailabilityInvite =
     Boolean(authUserId) && viewerIsCompany && isFreelancer && !viewingOwn && !isCeoProfile(profileNorm.role)
+
+  /** Company profiles: only the CEO may start a chat with a company. Freelancer profiles: existing rules (not to CEO). */
+  const showSendMessage =
+    Boolean(authUserId && !viewingOwn) &&
+    !isCeoProfile(profileNorm.role) &&
+    (isFreelancer ? true : viewerIsCeo)
 
   const onMessagePress = async () => {
     if (!authUserId) {
@@ -247,17 +328,35 @@ export function FreelancerPublicProfileContent({
           )}
           <Text style={styles.name}>{name}</Text>
           {headlineDisplay ? <Text style={styles.headline}>{headlineDisplay}</Text> : null}
-          {locationDisplay ? (
+
+          {!isFreelancer ? (
+            <View style={styles.companyShareSocialRow}>
+              <TouchableOpacity
+                style={styles.socialBtn}
+                onPress={() => setShareOpen(true)}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Share profile"
+              >
+                <Share2 size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+              </TouchableOpacity>
+              {socials.map((s, i) => (
+                <SocialButton key={i} icon={s.icon} url={s.url} accessibilityLabel={s.label} />
+              ))}
+            </View>
+          ) : null}
+
+          {isFreelancer && locationDisplay ? (
             <View style={styles.locationRow}>
               <MapPin size={16} color="rgba(255,255,255,0.4)" strokeWidth={ICON_STROKE} />
               <Text style={styles.location}>{locationDisplay}</Text>
             </View>
           ) : null}
 
-          {socials.length > 0 ? (
+          {isFreelancer && socials.length > 0 ? (
             <View style={styles.heroSocialRow}>
               {socials.map((s, i) => (
-                <SocialButton key={i} icon={s.icon} url={s.url} />
+                <SocialButton key={i} icon={s.icon} url={s.url} accessibilityLabel={s.label} />
               ))}
             </View>
           ) : null}
@@ -304,23 +403,88 @@ export function FreelancerPublicProfileContent({
               ) : null}
             </View>
           ) : null}
-          <View style={styles.quickActions}>
-            {authUserId && !viewingOwn && !isCeoProfile(profileNorm.role) ? (
-              <TouchableOpacity
-                style={styles.quickActionBtn}
-                onPress={() => void onMessagePress()}
-                activeOpacity={0.85}
-              >
-                <MessageCircle size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-                <Text style={styles.quickActionText}>Send message</Text>
-              </TouchableOpacity>
-            ) : null}
-            <TouchableOpacity style={styles.quickActionBtn} onPress={() => setShareOpen(true)} activeOpacity={0.85}>
-              <Share2 size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-              <Text style={styles.quickActionText}>Share profile</Text>
-            </TouchableOpacity>
-          </View>
+          {showSendMessage || isFreelancer ? (
+            <View style={styles.quickActions}>
+              {showSendMessage ? (
+                <TouchableOpacity
+                  style={styles.quickActionBtn}
+                  onPress={() => void onMessagePress()}
+                  activeOpacity={0.85}
+                >
+                  <MessageCircle size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                  <Text style={styles.quickActionText}>Send message</Text>
+                </TouchableOpacity>
+              ) : null}
+              {isFreelancer ? (
+                <TouchableOpacity style={styles.quickActionBtn} onPress={() => setShareOpen(true)} activeOpacity={0.85}>
+                  <Share2 size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                  <Text style={styles.quickActionText}>Share profile</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
         </View>
+
+        {!isFreelancer ? (
+          <>
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>Location</Text>
+              {locationDisplay ? (
+                <View style={styles.companyDetailRow}>
+                  <MapPin size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                  <Text style={styles.bio}>{locationDisplay}</Text>
+                </View>
+              ) : (
+                <Text style={styles.emptyHint}>No location on this profile yet.</Text>
+              )}
+            </View>
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>About the company</Text>
+              {bioDisplay ? (
+                <Text style={styles.bio}>{bioDisplay}</Text>
+              ) : (
+                <Text style={styles.emptyHint}>No description yet.</Text>
+              )}
+            </View>
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>Posted jobs</Text>
+              {companyJobsLoading ? (
+                <Text style={styles.emptyHint}>Loading jobs…</Text>
+              ) : companyJobs.length === 0 ? (
+                <Text style={styles.emptyHint}>No open jobs right now.</Text>
+              ) : (
+                companyJobs.map((job) => (
+                  <TouchableOpacity
+                    key={job.id}
+                    style={styles.jobRow}
+                    activeOpacity={0.85}
+                    onPress={() => router.push(`/(tabs)/jobs/${job.id}`)}
+                  >
+                    <View style={styles.jobRowBody}>
+                      <Text style={styles.jobRowTitle} numberOfLines={2}>
+                        {job.title}
+                      </Text>
+                      <Text style={styles.jobRowMeta} numberOfLines={2}>
+                        {[
+                          strTrim(job.category),
+                          formatBudgetDisplay({
+                            budget_type: job.budget_type,
+                            budget_amount: job.budget_amount,
+                            budget_currency: job.budget_currency,
+                          }),
+                          strTrim(job.location_type),
+                        ]
+                          .filter((x) => x.length > 0)
+                          .join(' · ')}
+                      </Text>
+                    </View>
+                    <ChevronRight size={20} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+          </>
+        ) : null}
 
         {isFreelancer && (dayRate != null || halfDay != null) ? (
           <View style={styles.block}>
@@ -343,16 +507,18 @@ export function FreelancerPublicProfileContent({
           </View>
         ) : null}
 
-        {bioDisplay ? (
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>About</Text>
-            <Text style={styles.bio}>{bioDisplay}</Text>
-          </View>
-        ) : isFreelancer ? (
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>About</Text>
-            <Text style={styles.emptyHint}>No bio on this public profile yet.</Text>
-          </View>
+        {isFreelancer ? (
+          bioDisplay ? (
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>About</Text>
+              <Text style={styles.bio}>{bioDisplay}</Text>
+            </View>
+          ) : (
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>About</Text>
+              <Text style={styles.emptyHint}>No bio on this public profile yet.</Text>
+            </View>
+          )
         ) : null}
 
         {isFreelancer ? (
@@ -678,6 +844,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 12,
   },
+  /** Company: Share + link icons in one row directly under the name. */
+  companyShareSocialRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 14,
+    marginBottom: 4,
+  },
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 14 },
   statsRow: {
     flexDirection: 'row',
@@ -822,4 +998,21 @@ const styles = StyleSheet.create({
   workTileSub: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
   browseLink: { marginTop: 20, marginBottom: 8, paddingVertical: 8, alignItems: 'center' },
   browseLinkText: { fontSize: 14, fontWeight: '700', color: '#FFDC00' },
+  companyDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  jobRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  jobRowBody: { flex: 1, minWidth: 0 },
+  jobRowTitle: { fontSize: 16, fontWeight: '700', color: '#fff', marginBottom: 4 },
+  jobRowMeta: { fontSize: 13, color: 'rgba(255,255,255,0.45)' },
 })

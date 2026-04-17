@@ -1,20 +1,11 @@
 import { useEffect, useState } from 'react'
-import { View, Image, StyleSheet } from 'react-native'
+import { View, StyleSheet } from 'react-native'
 import { Redirect } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import * as SplashScreen from 'expo-splash-screen'
 import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 
 const SPLASH_BG = '#FFDC00'
-
-/** Wait until the next frame(s) so the yellow bridge view is painted before hiding the native splash. */
-function waitForPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve())
-    })
-  })
-}
 
 export default function Index() {
   const [loading, setLoading] = useState(true)
@@ -57,7 +48,8 @@ export default function Index() {
         }
       } finally {
         if (cancelled) return
-        await waitForPaint()
+        // One continuous native splash (large logo via app.json plugin imageWidth) until auth is ready.
+        // No second in-JS wordmark with a different scale.
         await SplashScreen.hideAsync()
         if (!cancelled) setLoading(false)
       }
@@ -69,17 +61,9 @@ export default function Index() {
     }
   }, [])
 
-  // Bridge: matches native splash (yellow + same wordmark) so the handoff is not a flash to black.
+  // Under the native splash: same yellow so there is no black flash if the RN view peeks through.
   if (loading) {
-    return (
-      <View style={styles.bridge}>
-        <Image
-          source={require('../assets/splash-wordmark.png')}
-          style={styles.wordmark}
-          resizeMode="contain"
-        />
-      </View>
-    )
+    return <View style={styles.bridge} />
   }
 
   if (!session) {
@@ -97,13 +81,5 @@ const styles = StyleSheet.create({
   bridge: {
     flex: 1,
     backgroundColor: SPLASH_BG,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  wordmark: {
-    width: '72%',
-    maxWidth: 420,
-    aspectRatio: 1350 / 1080,
-    maxHeight: '40%',
   },
 })
