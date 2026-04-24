@@ -12,7 +12,6 @@ import {
   CircleDollarSign,
   ClipboardList,
   ExternalLink,
-  LayoutGrid,
   MessageCircle,
   PlusCircle,
   Receipt,
@@ -103,7 +102,6 @@ function parseCeoSnapshot(raw: unknown): CeoSnapshot {
 function quickActionsForRole(role: string | null): QuickAction[] {
   if (isCompanyProfile(role ?? undefined)) {
     return [
-      { label: 'Company tools', icon: LayoutGrid, href: '/(tabs)/company-hub' },
       { label: 'Post job', icon: PlusCircle, href: '/(tabs)/company-post-job' },
       { label: 'Applications', icon: ClipboardList, href: '/(tabs)/company-applications' },
       { label: 'My jobs', icon: Briefcase, href: '/(tabs)/company-my-jobs' },
@@ -506,7 +504,6 @@ export default function DashboardScreen() {
           ))}
         </View>
 
-        {/* Quick Actions */}
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.actionsGrid}>
           {quickActions.map((a) => {

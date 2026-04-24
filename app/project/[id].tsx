@@ -77,6 +77,14 @@ function parseIsoDateInput(raw: string): string | null {
   return t
 }
 
+function todayLocalISODate(): string {
+  const t = new Date()
+  const y = t.getFullYear()
+  const m = String(t.getMonth() + 1).padStart(2, '0')
+  const d = String(t.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
 const BASE_TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'milestones', label: 'Milestones' },
@@ -111,6 +119,8 @@ export default function ProjectWorkspaceScreen() {
   const [scheduleStart, setScheduleStart] = useState('')
   const [scheduleEnd, setScheduleEnd] = useState('')
   const [savingSchedule, setSavingSchedule] = useState(false)
+  const [productionApplyDate, setProductionApplyDate] = useState('')
+  const [applyingProd, setApplyingProd] = useState(false)
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
       setLoading(false)
@@ -158,6 +168,13 @@ export default function ProjectWorkspaceScreen() {
     load()
   }, [load])
 
+  useEffect(() => {
+    if (!project) return
+    const from = typeof project.scheduling_start_date === 'string' ? project.scheduling_start_date.slice(0, 10) : ''
+    if (from && parseIsoDateInput(from)) setProductionApplyDate(from)
+    else setProductionApplyDate(todayLocalISODate())
+  }, [project?.id, project?.scheduling_start_date])
+
   const tabs = BASE_TABS
 
   const canManageCrew = useMemo(() => {
@@ -175,6 +192,96 @@ export default function ProjectWorkspaceScreen() {
   }, [project])
 
   const currentOutput = project?.brief_ai_outputs?.[tool] ?? ''
+  const canSyncProductionTool = tool === 'shotlist' || tool === 'callsheet'
+
+  const invokeApplyBriefProduction = async (replaceShots: boolean) => {
+    if (!project || !canSyncProductionTool) return
+    const d = parseIsoDateInput(productionApplyDate.trim())
+    if (!d) {
+      Alert.alert('Date', 'Enter the shoot / production day as YYYY-MM-DD.')
+      return
+    }
+    setApplyingProd(true)
+    const { data, error } = await supabase.functions.invoke<{
+      ok?: boolean
+      error?: string
+      hint?: string
+      shotsInserted?: number
+      crewUpdated?: number
+      createdDay?: boolean
+    }>('apply-brief-to-production', {
+      body: { projectId: project.id, tool, shootDate: d, replaceShots },
+    })
+    setApplyingProd(false)
+    if (error) {
+      Alert.alert(
+        'Apply failed',
+        `${error.message}\n\nDeploy the apply-brief-to-production Edge Function (see deploy-supabase.sh) and set OPENAI_API_KEY.`
+      )
+      return
+    }
+    if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
+      const o = data as { error?: string; hint?: string }
+      Alert.alert('Apply', [o.error, o.hint].filter(Boolean).join('\n\n'))
+      return
+    }
+    if (data?.ok && tool === 'shotlist' && typeof data.shotsInserted === 'number') {
+      Alert.alert(
+        'Shot list',
+        `${data.shotsInserted} shot(s) for ${d}. Open the Production tab → Shotlist (same calendar day).`
+      )
+      return
+    }
+    if (data?.ok && tool === 'callsheet') {
+      const parts = [`Saved for ${d}.`]
+      if (data.createdDay) parts.push('A production day was created.')
+      parts.push(`${data.crewUpdated ?? 0} crew row(s) updated in the call sheet.`)
+      Alert.alert('Call sheet', parts.join(' '))
+      return
+    }
+    Alert.alert('Apply', 'Unexpected response from server.')
+  }
+
+  const onApplyShotlistChoices = () => {
+    if (!currentOutput.trim()) {
+      Alert.alert('Nothing to apply', 'Generate and save a shot list first.')
+      return
+    }
+    const d = parseIsoDateInput(productionApplyDate.trim())
+    if (!d) {
+      Alert.alert('Date', 'Enter YYYY-MM-DD.')
+      return
+    }
+    Alert.alert(
+      'Apply to Production',
+      `Add Brief AI shots to the Production shot list for ${d}. Append keeps existing rows for that day; Replace clears them first.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Append', onPress: () => void invokeApplyBriefProduction(false) },
+        { text: 'Replace day', style: 'destructive', onPress: () => void invokeApplyBriefProduction(true) },
+      ]
+    )
+  }
+
+  const onApplyCallsheet = () => {
+    if (!currentOutput.trim()) {
+      Alert.alert('Nothing to apply', 'Generate and save a call sheet first.')
+      return
+    }
+    const d = parseIsoDateInput(productionApplyDate.trim())
+    if (!d) {
+      Alert.alert('Date', 'Enter YYYY-MM-DD.')
+      return
+    }
+    Alert.alert(
+      'Apply to Production',
+      `Merges call times into the production day for ${d}. If no day exists yet, it is created when you are the company on this project.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Apply', onPress: () => void invokeApplyBriefProduction(false) },
+      ]
+    )
+  }
 
   const saveSchedule = async () => {
     if (!project) return
@@ -522,6 +629,38 @@ export default function ProjectWorkspaceScreen() {
                   </View>
                 )}
 
+                {canSyncProductionTool && !!currentOutput.trim() ? (
+                  <View style={styles.prodSyncCard}>
+                    <Text style={styles.sectionLabel}>Production sync</Text>
+                    <Text style={styles.prodSyncSub}>
+                      Writes into the same database rows as Production → Shotlist / Call sheet. Pick the calendar day
+                      (must match the day you open in Production).
+                    </Text>
+                    <TextInput
+                      style={styles.scheduleInput}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor="rgba(255,255,255,0.25)"
+                      value={productionApplyDate}
+                      onChangeText={setProductionApplyDate}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <TouchableOpacity
+                      style={[styles.prodSyncBtn, applyingProd && styles.btnDim]}
+                      onPress={tool === 'shotlist' ? onApplyShotlistChoices : onApplyCallsheet}
+                      disabled={applyingProd}
+                    >
+                      {applyingProd ? (
+                        <ActivityIndicator color="#FFDC00" />
+                      ) : (
+                        <Text style={styles.prodSyncBtnText}>
+                          {tool === 'shotlist' ? 'Apply shot list to Production…' : 'Apply call sheet to Production…'}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+
                 <Text style={styles.contextLabel}>
                   ADDITIONAL CONTEXT <Text style={styles.optional}>(optional)</Text>
                 </Text>
@@ -727,6 +866,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   genBtnText: { color: '#0a0a0a', fontWeight: '800' },
+  prodSyncCard: {
+    marginTop: 20,
+    marginBottom: 8,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#141414',
+  },
+  prodSyncSub: { fontSize: 12, color: 'rgba(255,255,255,0.4)', lineHeight: 17, marginBottom: 12 },
+  prodSyncBtn: {
+    marginTop: 4,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,220,0,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.4)',
+    alignItems: 'center',
+  },
+  prodSyncBtnText: { color: '#FFDC00', fontWeight: '800', fontSize: 14 },
   btnDim: { opacity: 0.6 },
   para: { fontSize: 14, color: 'rgba(255,255,255,0.45)', lineHeight: 20, marginBottom: 12 },
   miss: { color: 'rgba(255,255,255,0.5)', textAlign: 'center' },

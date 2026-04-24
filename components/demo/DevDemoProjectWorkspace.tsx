@@ -203,7 +203,8 @@ export function DevDemoProjectWorkspace() {
   const banner = (
     <View style={styles.devBanner}>
       <Text style={styles.devBannerText}>
-        DEV demo workspace — local UI only, nothing is saved to Supabase.
+        DEV demo workspace — local UI only, nothing is saved to Supabase. To test Brief AI + Production against your
+        database, set EXPO_PUBLIC_DEMO_PROJECT_ID to a real project UUID in .env.local and open /project/demo again.
       </Text>
     </View>
   )

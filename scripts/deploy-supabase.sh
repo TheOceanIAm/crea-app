@@ -54,6 +54,8 @@ SQL_FILES=(
   ceo_platform_settings_install.sql
   ceo_dashboard_rpc.sql
   ceo_admin_rpcs.sql
+  production_workspace.sql
+  ceo_project_workspace_access.sql
   ceo_list_rpc_hide_login_emails.sql
   extend_profile_public_features.sql
   projects_scheduling_calendar.sql
@@ -74,6 +76,10 @@ done
 echo ""
 echo ">>> Deploying Edge Function brief-ai ..."
 npx supabase functions deploy brief-ai --project-ref "$PROJECT_REF"
+
+echo ""
+echo ">>> Deploying Edge Function apply-brief-to-production (Brief AI → production_shots / production_days) ..."
+npx supabase functions deploy apply-brief-to-production --project-ref "$PROJECT_REF"
 
 echo ""
 echo ">>> Deploying Edge Function notify-message-push (Expo push for new DMs) ..."

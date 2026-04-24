@@ -8,11 +8,12 @@ import {
   ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useFocusEffect, useRouter } from 'expo-router'
+import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { projectStatusDisplayLabel } from '@/lib/projectStatusDisplay'
 
 type JobRow = {
   id: string
@@ -20,6 +21,8 @@ type JobRow = {
   category: string
   status: string
   created_at: string
+  /** Hiring workspace linked via `projects.job_id` (at most one per job). */
+  workspace: { id: string; status: string } | null
 }
 
 function statusLabel(s: string) {
@@ -61,16 +64,30 @@ export default function CompanyMyJobsScreen() {
       .order('created_at', { ascending: false })
       .limit(100)
     if (error || !data) setRows([])
-    else
-      setRows(
-        data.map((r) => ({
-          id: r.id as string,
-          title: String(r.title ?? ''),
-          category: String(r.category ?? ''),
-          status: String(r.status ?? ''),
-          created_at: String(r.created_at ?? ''),
-        }))
-      )
+    else {
+      const jobs: JobRow[] = data.map((r) => ({
+        id: r.id as string,
+        title: String(r.title ?? ''),
+        category: String(r.category ?? ''),
+        status: String(r.status ?? ''),
+        created_at: String(r.created_at ?? ''),
+        workspace: null,
+      }))
+      const jobIds = jobs.map((j) => j.id).filter(Boolean)
+      const wsByJob = new Map<string, { id: string; status: string }>()
+      if (jobIds.length > 0) {
+        const { data: prows } = await supabase
+          .from('projects')
+          .select('id, job_id, status')
+          .in('job_id', jobIds)
+        for (const pr of prows ?? []) {
+          const jid = pr.job_id as string | null
+          if (jid)
+            wsByJob.set(jid, { id: String(pr.id), status: String((pr as { status?: string }).status ?? '') })
+        }
+      }
+      setRows(jobs.map((j) => ({ ...j, workspace: wsByJob.get(j.id) ?? null })))
+    }
     setLoading(false)
   }, [router])
 
@@ -129,21 +146,34 @@ export default function CompanyMyJobsScreen() {
           </View>
         }
         renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.card}
-            activeOpacity={0.75}
-            onPress={() => router.push(`/(tabs)/jobs/${item.id}`)}
-          >
-            <View style={styles.cardTop}>
-              <Text style={styles.jobTitle} numberOfLines={2}>
-                {item.title.trim() || 'Untitled'}
-              </Text>
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{statusLabel(item.status)}</Text>
+          <View style={styles.card}>
+            <TouchableOpacity
+              activeOpacity={0.75}
+              onPress={() => router.push(`/(tabs)/jobs/${item.id}`)}
+            >
+              <View style={styles.cardTop}>
+                <Text style={styles.jobTitle} numberOfLines={2}>
+                  {item.title.trim() || 'Untitled'}
+                </Text>
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{statusLabel(item.status)}</Text>
+                </View>
               </View>
-            </View>
-            <Text style={styles.meta}>{item.category}</Text>
-          </TouchableOpacity>
+              <Text style={styles.meta}>{item.category}</Text>
+            </TouchableOpacity>
+            {item.workspace ? (
+              <TouchableOpacity
+                style={styles.workspaceRow}
+                activeOpacity={0.75}
+                onPress={() => router.push(`/project/${item.workspace!.id}` as Href)}
+              >
+                <Text style={styles.workspaceLabel}>Open workspace</Text>
+                <View style={styles.wsBadge}>
+                  <Text style={styles.wsBadgeText}>{projectStatusDisplayLabel(item.workspace.status)}</Text>
+                </View>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         )}
       />
     </SafeAreaView>
@@ -176,6 +206,24 @@ const styles = StyleSheet.create({
   },
   badgeText: { fontSize: 10, fontWeight: '800', color: '#FFDC00', letterSpacing: 0.5 },
   meta: { fontSize: 12, color: 'rgba(255,255,255,0.35)' },
+  workspaceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  workspaceLabel: { fontSize: 13, fontWeight: '700', color: '#FFDC00' },
+  wsBadge: {
+    backgroundColor: 'rgba(255,220,0,0.08)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  wsBadgeText: { fontSize: 10, fontWeight: '700', color: 'rgba(255,220,0,0.85)' },
   emptyBox: { paddingVertical: 40, alignItems: 'center' },
   emptyText: { fontSize: 15, color: 'rgba(255,255,255,0.35)', marginBottom: 16 },
   cta: {
