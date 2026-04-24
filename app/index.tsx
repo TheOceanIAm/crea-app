@@ -7,6 +7,30 @@ import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 
 const SPLASH_BG = '#FFDC00'
 
+/** Avoid an endless native splash if Supabase/storage never resolves (offline, bad URL, etc.). */
+const SESSION_BOOTSTRAP_MS = 14_000
+
+type SessionRace =
+  | { kind: 'ok'; session: { user: { id: string } } | null }
+  | { kind: 'timeout' }
+
+async function getSessionOrTimeout(): Promise<SessionRace> {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (v: SessionRace) => {
+      if (settled) return
+      settled = true
+      clearTimeout(t)
+      resolve(v)
+    }
+    const t = setTimeout(() => done({ kind: 'timeout' }), SESSION_BOOTSTRAP_MS)
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => done({ kind: 'ok', session: data.session }))
+      .catch(() => done({ kind: 'ok', session: null }))
+  })
+}
+
 export default function Index() {
   const [loading, setLoading] = useState(true)
   const [session, setSession] = useState<{ user: { id: string } } | null>(null)
@@ -17,10 +41,15 @@ export default function Index() {
 
     const run = async () => {
       try {
-        const { data: sessionData } = await supabase.auth.getSession()
-        const s = sessionData.session
+        const raced = await getSessionOrTimeout()
         if (cancelled) return
 
+        if (raced.kind === 'timeout') {
+          setSession(null)
+          return
+        }
+
+        const s = raced.session
         if (!s) {
           setSession(null)
           return
@@ -46,11 +75,13 @@ export default function Index() {
         } else {
           setOnboardingDone(!profileNeedsOnboarding(profile))
         }
+      } catch {
+        if (!cancelled) setSession(null)
       } finally {
         if (cancelled) return
         // One continuous native splash (large logo via app.json plugin imageWidth) until auth is ready.
         // No second in-JS wordmark with a different scale.
-        await SplashScreen.hideAsync()
+        await SplashScreen.hideAsync().catch(() => {})
         if (!cancelled) setLoading(false)
       }
     }

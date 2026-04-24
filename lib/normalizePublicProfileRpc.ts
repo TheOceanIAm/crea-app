@@ -30,7 +30,7 @@ function parsePostgresTextArrayLiteral(s: string): string[] | null {
     .filter((x) => x.length > 0)
 }
 
-function coerceStringArray(raw: unknown): string[] {
+export function coerceStringArray(raw: unknown): string[] {
   if (raw == null) return []
   if (typeof raw === 'string') {
     const t = raw.trim()
@@ -87,11 +87,14 @@ export function normalizePublicProfileRpc(raw: FreelancerPublicProfilePayload): 
     }
   }
 
+  const calendar_busy_dates = coerceStringArray(o.calendar_busy_dates ?? o.calendarBusyDates)
+
   return {
     ...raw,
     portfolio_projects,
     skills,
     equipment,
     availability_calendar: availability_calendar as FreelancerPublicProfilePayload['availability_calendar'],
+    calendar_busy_dates,
   }
 }

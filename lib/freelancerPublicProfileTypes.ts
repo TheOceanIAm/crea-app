@@ -20,6 +20,8 @@ export type FreelancerPublicProfilePayload = {
   half_day_rate_amount?: number | null
   rates_currency?: string | null
   availability_calendar?: unknown
+  /** ISO dates (YYYY-MM-DD) blocked by active/in_progress projects with scheduling range. */
+  calendar_busy_dates?: string[] | unknown
   availability_status?: string | null
   availability_details?: string | null
   open_to_remote?: boolean | null

@@ -5,6 +5,7 @@ import {
   fetchFreelancerPortfolioTableRows,
 } from '@/lib/freelancerPortfolioTable'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
+import { coerceStringArray } from '@/lib/normalizePublicProfileRpc'
 
 /** Same columns as `profile_share_public` — used for explicit merge (PostgREST often omits null keys). */
 export const PROFILE_PUBLIC_KEYS = [
@@ -295,6 +296,16 @@ function combineProfileSources(
   const rowP = row ? parsePortfolioProjects(row.portfolio_projects).length : 0
   const rpcP = rpc ? parsePortfolioProjects(rpc.portfolio_projects).length : 0
   out.portfolio_items_count = Math.max(rowP, rpcP, rpc?.portfolio_items_count ?? 0)
+
+  const rpcBusy = rpc ? (rpc as Record<string, unknown>).calendar_busy_dates : undefined
+  const rowBusy = row ? (row as Record<string, unknown>).calendar_busy_dates : undefined
+  if (rpcBusy !== undefined && rpcBusy !== null) {
+    ;(out as Record<string, unknown>).calendar_busy_dates = coerceStringArray(rpcBusy)
+  } else if (rowBusy !== undefined && rowBusy !== null) {
+    ;(out as Record<string, unknown>).calendar_busy_dates = coerceStringArray(rowBusy)
+  } else {
+    ;(out as Record<string, unknown>).calendar_busy_dates = []
+  }
 
   return out as FreelancerPublicProfilePayload
 }

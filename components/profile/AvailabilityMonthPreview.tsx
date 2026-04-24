@@ -1,23 +1,65 @@
-import { useMemo, useState } from 'react'
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  PanResponder,
+  Pressable,
+  type LayoutChangeEvent,
+} from 'react-native'
 import { ChevronLeft, ChevronRight } from 'lucide-react-native'
 import type { AvailabilityCalendarPayload } from '@/lib/availabilityCalendar'
-import { getDayState, toISODateLocal } from '@/lib/availabilityCalendar'
+import { displayCellState, toISODateLocal } from '@/lib/availabilityCalendar'
 import type { CellState } from '@/lib/availabilityCalendar'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { buildMonthSlotMatrix } from '@/lib/calendarMonth'
+import { isIsoBookable } from '@/lib/availabilityBookingSelection'
 
 const WEEK = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const
+const CELL_GAP = 4
+const PAINT_MOVE_SLOP = 10
+
+type GridMetrics = { cellW: number; rowH: number; numRows: number }
+
+function hitTestIso(
+  x: number,
+  y: number,
+  metrics: GridMetrics,
+  slotMatrix: (string | null)[][]
+): string | null {
+  const { cellW, rowH, numRows } = metrics
+  let yRem = y
+  for (let ri = 0; ri < numRows; ri++) {
+    if (yRem >= 0 && yRem < rowH) {
+      let xRem = x
+      for (let ci = 0; ci < 7; ci++) {
+        if (xRem >= 0 && xRem < cellW) {
+          return slotMatrix[ri]?.[ci] ?? null
+        }
+        xRem -= cellW + CELL_GAP
+      }
+      return null
+    }
+    yRem -= rowH + CELL_GAP
+  }
+  return null
+}
 
 type Props = {
   calendar: AvailabilityCalendarPayload
   /** Initial month to display (year + month used; day ignored) */
   anchor: Date
-  /** Company-only: tap a free (green) day — e.g. invite freelancer to a project. */
+  /** Company-only: select open days (tap or drag) then open booking modal. */
   interactive?: boolean
   /** Public freelancer profile: always show the calendar block (empty state when nothing set). */
   alwaysShow?: boolean
-  onDayPress?: (iso: string) => void
-  selectedIso?: string | null
+  /** Optional: ISO dates blocked by accepted jobs (shown as busy). */
+  jobBookedIso?: ReadonlySet<string>
+  /** Highlight after booking modal opened (same days stay selected). */
+  committedBookingIsos?: ReadonlySet<string>
+  /** Fires when user finishes a tap or drag on bookable days (non-empty set). */
+  onCommitBookingSelection?: (isos: Set<string>) => void
 }
 
 function startOfMonth(d: Date) {
@@ -38,12 +80,112 @@ export function AvailabilityMonthPreview({
   anchor,
   interactive = false,
   alwaysShow = false,
-  onDayPress,
-  selectedIso,
+  jobBookedIso,
+  committedBookingIsos,
+  onCommitBookingSelection,
 }: Props) {
   const [viewDate, setViewDate] = useState(() => startOfMonth(anchor))
+  const [dragHighlight, setDragHighlight] = useState<Set<string>>(() => new Set())
+  const [metrics, setMetrics] = useState<GridMetrics | null>(null)
+
+  const slotMatrix = useMemo(
+    () => buildMonthSlotMatrix(viewDate.getFullYear(), viewDate.getMonth()),
+    [viewDate]
+  )
+
+  const calendarRef = useRef(calendar)
+  calendarRef.current = calendar
+  const jobBookedRef = useRef(jobBookedIso)
+  jobBookedRef.current = jobBookedIso
+
+  const visitedRef = useRef(new Set<string>())
+  const dragActiveRef = useRef(false)
+  const suppressTapRef = useRef(false)
+
+  useEffect(() => {
+    setMetrics(null)
+    setDragHighlight(new Set())
+  }, [viewDate])
 
   const todayIso = useMemo(() => toISODateLocal(new Date()), [])
+
+  const canBook = useCallback(
+    (iso: string | null) =>
+      Boolean(
+        iso &&
+          isIsoBookable(calendarRef.current, iso, jobBookedRef.current ?? undefined)
+      ),
+    []
+  )
+
+  const addVisited = useCallback((iso: string | null) => {
+    if (!iso || !canBook(iso)) return
+    visitedRef.current.add(iso)
+    setDragHighlight(new Set(visitedRef.current))
+  }, [canBook])
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gs) => {
+          if (!interactive || !onCommitBookingSelection) return false
+          const ax = Math.abs(gs.dx)
+          const ay = Math.abs(gs.dy)
+          if (ax < PAINT_MOVE_SLOP && ay < PAINT_MOVE_SLOP) return false
+          if (ay > ax && ay >= PAINT_MOVE_SLOP) return false
+          return true
+        },
+        onPanResponderTerminationRequest: () => true,
+        onPanResponderGrant: (evt) => {
+          if (!metrics || !interactive || !onCommitBookingSelection) return
+          visitedRef.current.clear()
+          dragActiveRef.current = false
+          const { locationX, locationY } = evt.nativeEvent
+          const iso = hitTestIso(locationX, locationY, metrics, slotMatrix)
+          addVisited(iso)
+        },
+        onPanResponderMove: (evt) => {
+          if (!metrics || !interactive || !onCommitBookingSelection) return
+          dragActiveRef.current = true
+          const { locationX, locationY } = evt.nativeEvent
+          const iso = hitTestIso(locationX, locationY, metrics, slotMatrix)
+          addVisited(iso)
+        },
+        onPanResponderRelease: () => {
+          if (!interactive || !onCommitBookingSelection) return
+          const set = new Set(visitedRef.current)
+          visitedRef.current.clear()
+          setDragHighlight(new Set())
+          if (set.size > 0) {
+            if (dragActiveRef.current) {
+              suppressTapRef.current = true
+              setTimeout(() => {
+                suppressTapRef.current = false
+              }, 450)
+            }
+            onCommitBookingSelection(set)
+          }
+          dragActiveRef.current = false
+        },
+        onPanResponderTerminate: () => {
+          visitedRef.current.clear()
+          setDragHighlight(new Set())
+          dragActiveRef.current = false
+        },
+      }),
+    [addVisited, interactive, metrics, onCommitBookingSelection, slotMatrix]
+  )
+
+  const onGridLayout = (e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout
+    if (width <= 0 || height <= 0) return
+    const numRows = slotMatrix.length
+    if (numRows < 1) return
+    const rowH = (height - Math.max(0, numRows - 1) * CELL_GAP) / numRows
+    const cellW = (width - 6 * CELL_GAP) / 7
+    setMetrics({ cellW, rowH, numRows })
+  }
 
   const { rows, monthLabel, availableCount, bookedCount } = useMemo(() => {
     const start = viewDate
@@ -57,10 +199,11 @@ export function AvailabilityMonthPreview({
     }
     let av = 0
     let bk = 0
+    const bookedOpts = jobBookedIso ? { jobBookedIso } : undefined
     for (let day = 1; day <= dim; day++) {
       const cellDate = new Date(y, m, day, 12, 0, 0, 0)
       const iso = toISODateLocal(cellDate)
-      const state = getDayState(calendar.days, iso)
+      const state = displayCellState(calendar, iso, bookedOpts)
       if (state === 'available') av += 1
       if (state === 'booked') bk += 1
       flat.push({ day, iso, state })
@@ -74,39 +217,55 @@ export function AvailabilityMonthPreview({
     }
     const monthLabel = start.toLocaleString('en-US', { month: 'long', year: 'numeric' }).toUpperCase()
     return { rows: rowChunks, monthLabel, availableCount: av, bookedCount: bk }
-  }, [calendar.days, viewDate])
+  }, [calendar, jobBookedIso, viewDate])
 
   const hasAny =
     availableCount > 0 ||
     bookedCount > 0 ||
     (calendar.notes && calendar.notes.trim().length > 0) ||
-    Object.keys(calendar.days).length > 0
+    Object.keys(calendar.days).length > 0 ||
+    (jobBookedIso && jobBookedIso.size > 0) ||
+    calendar.version === 3
 
-  /** Companies need the calendar (incl. empty) to invite; public profiles can force the block visible. */
   const showBlock = hasAny || interactive || alwaysShow
-
-  if (!showBlock) return null
 
   const shiftMonth = (delta: number) => {
     setViewDate((d) => new Date(d.getFullYear(), d.getMonth() + delta, 1, 12, 0, 0, 0))
   }
 
+  const mergedHighlight = useMemo(() => {
+    const out = new Set<string>()
+    committedBookingIsos?.forEach((x) => out.add(x))
+    dragHighlight.forEach((x) => out.add(x))
+    return out
+  }, [committedBookingIsos, dragHighlight])
+
+  if (!showBlock) return null
+
   return (
     <View style={styles.wrap}>
       <View style={styles.headRow}>
         <Text style={styles.title}>Availability</Text>
-        <Text style={styles.headHint} numberOfLines={3}>
+        <Text style={styles.headHint} numberOfLines={5}>
           {interactive
-            ? !hasAny
-              ? 'No availability published yet. Once they add free days, tap green days to invite to a project.'
-              : availableCount > 0
-                ? `Tap a free day — ${availableCount} day${availableCount === 1 ? '' : 's'} marked free`
-                : 'No free days this month'
-            : !hasAny
-              ? 'No availability shared yet.'
-              : availableCount > 0
-                ? `${availableCount} day${availableCount === 1 ? '' : 's'} free`
-                : 'No free days this month'}
+            ? calendar.version === 3
+              ? availableCount > 0
+                ? `Tap an open day, or drag across open days to select several — then book. Grey = blocked, red = busy.`
+                : 'No open days this month (all blocked or busy).'
+              : !hasAny
+                ? 'No availability published yet. Once they add free days, tap green days to invite.'
+                : availableCount > 0
+                  ? `Tap a free day — ${availableCount} day${availableCount === 1 ? '' : 's'} marked free`
+                  : 'No free days this month'
+            : calendar.version === 3
+              ? availableCount > 0
+                ? `${availableCount} open day${availableCount === 1 ? '' : 's'} this month unless marked busy/off.`
+                : 'No open days this month.'
+              : !hasAny
+                ? 'No availability shared yet.'
+                : availableCount > 0
+                  ? `${availableCount} day${availableCount === 1 ? '' : 's'} free`
+                  : 'No free days this month'}
         </Text>
       </View>
       <View style={styles.monthNav}>
@@ -125,62 +284,68 @@ export function AvailabilityMonthPreview({
           </View>
         ))}
       </View>
-      {rows.map((row, ri) => (
-        <View key={ri} style={styles.weekRow}>
-          {row.map((cell, ci) => {
-            if (cell.state === 'empty' || cell.day == null) {
-              return <View key={ci} style={styles.weekCell} />
-            }
-            const st = cell.state
-            const isToday = cell.iso === todayIso
-            const iso = cell.iso
-            const isSel = Boolean(iso && selectedIso && iso === selectedIso)
-            const canTap = interactive && st === 'available' && iso && onDayPress
-            const dayBox = (
-              <View
-                style={[
-                  styles.dayBox,
-                  st === 'available' && styles.dayAvail,
-                  st === 'booked' && styles.dayBooked,
-                  st === 'off' && styles.dayOff,
-                  isSel && styles.daySelected,
-                ]}
-              >
-                <Text
+
+      <View style={styles.gridTouchLayer} onLayout={onGridLayout} {...(interactive ? panResponder.panHandlers : {})}>
+        {rows.map((row, ri) => (
+          <View key={ri} style={styles.weekRow}>
+            {row.map((cell, ci) => {
+              if (cell.state === 'empty' || cell.day == null || !cell.iso) {
+                return <View key={ci} style={styles.weekCell} />
+              }
+              const st = cell.state
+              const iso = cell.iso
+              const isToday = iso === todayIso
+              const isSel = mergedHighlight.has(iso)
+              const canTap = interactive && st === 'available' && onCommitBookingSelection
+              const dayBox = (
+                <View
                   style={[
-                    styles.cellNum,
-                    st === 'available' && styles.cellNumAvail,
-                    st === 'booked' && styles.cellNumBooked,
-                    st === 'off' && styles.cellNumOff,
+                    styles.dayBox,
+                    st === 'available' && styles.dayAvail,
+                    st === 'booked' && styles.dayBooked,
+                    st === 'off' && styles.dayOff,
+                    isSel && styles.daySelected,
                   ]}
                 >
-                  {cell.day}
-                </Text>
-              </View>
-            )
-            return (
-              <View key={cell.iso ?? ci} style={styles.weekCell}>
-                {canTap ? (
-                  <TouchableOpacity
-                    style={styles.dayWrap}
-                    onPress={() => iso && onDayPress?.(iso)}
-                    activeOpacity={0.75}
-                    accessibilityLabel={`Invite for ${iso}`}
+                  <Text
+                    style={[
+                      styles.cellNum,
+                      st === 'available' && styles.cellNumAvail,
+                      st === 'booked' && styles.cellNumBooked,
+                      st === 'off' && styles.cellNumOff,
+                    ]}
                   >
-                    {isToday ? <View style={styles.todayDot} /> : null}
-                    {dayBox}
-                  </TouchableOpacity>
-                ) : (
-                  <View style={styles.dayWrap}>
-                    {isToday ? <View style={styles.todayDot} /> : null}
-                    {dayBox}
-                  </View>
-                )}
-              </View>
-            )
-          })}
-        </View>
-      ))}
+                    {cell.day}
+                  </Text>
+                </View>
+              )
+              return (
+                <View key={iso} style={styles.weekCell}>
+                  {canTap ? (
+                    <Pressable
+                      style={styles.dayWrap}
+                      onPress={() => {
+                        if (suppressTapRef.current) return
+                        onCommitBookingSelection?.(new Set([iso]))
+                      }}
+                      accessibilityLabel={`Select ${iso} for booking`}
+                    >
+                      {isToday ? <View style={styles.todayDot} /> : null}
+                      {dayBox}
+                    </Pressable>
+                  ) : (
+                    <View style={styles.dayWrap}>
+                      {isToday ? <View style={styles.todayDot} /> : null}
+                      {dayBox}
+                    </View>
+                  )}
+                </View>
+              )
+            })}
+          </View>
+        ))}
+      </View>
+
       <View style={styles.legend}>
         <LegendDot color="rgba(34,197,94,0.85)" label="Available" />
         <LegendDot color="rgba(239,68,68,0.85)" label="Busy" />
@@ -227,6 +392,7 @@ const styles = StyleSheet.create({
   month: { fontSize: 14, fontWeight: '800', color: '#fff', flex: 1, textAlign: 'center' },
   weekRow: { flexDirection: 'row', marginBottom: 4 },
   weekCell: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  gridTouchLayer: { marginBottom: 0 },
   weekLbl: {
     fontSize: 10,
     fontWeight: '700',

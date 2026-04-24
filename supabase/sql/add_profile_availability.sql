@@ -12,4 +12,4 @@ alter table public.profiles
 
 comment on column public.profiles.availability_status is 'Optional / Legacy';
 comment on column public.profiles.availability_details is 'Optional / Legacy';
-comment on column public.profiles.availability_calendar is 'Freelancer: JSON { version:2, days: {"YYYY-MM-DD": off|available|booked}, notes? }';
+comment on column public.profiles.availability_calendar is 'Freelancer: JSON v2 (default off) or v3 { version:3, defaultDay:available, days } with explicit off|booked; notes optional';

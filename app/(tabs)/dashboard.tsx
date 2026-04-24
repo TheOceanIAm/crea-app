@@ -141,88 +141,93 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     const load = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          router.replace('/login')
+          return
+        }
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('name, role, avatar_url')
-        .eq('id', user.id)
-        .single()
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('name, role, avatar_url')
+          .eq('id', user.id)
+          .single()
 
-      setName(profile?.name ?? '')
-      const resolvedRole = resolveAppRole(profile?.role, user)
-      setRole(resolvedRole || null)
-      const av = (profile?.avatar_url as string | undefined)?.trim()
-      setAvatarUrl(av && /^https?:\/\//i.test(av) ? av : null)
+        setName(profile?.name ?? '')
+        const resolvedRole = resolveAppRole(profile?.role, user)
+        setRole(resolvedRole || null)
+        const av = (profile?.avatar_url as string | undefined)?.trim()
+        setAvatarUrl(av && /^https?:\/\//i.test(av) ? av : null)
 
-      if (isCeoProfile(resolvedRole)) {
+        if (isCeoProfile(resolvedRole)) {
+          setCeoRpcError(null)
+          const { data: ceoData, error: ceoErr } = await supabase.rpc('ceo_dashboard_snapshot')
+          if (ceoErr) {
+            setCeoRpcError(ceoErr.message)
+            setCeoSnap(null)
+          } else {
+            setCeoSnap(parseCeoSnapshot(ceoData))
+          }
+          setStats([])
+          setIncome(null)
+          return
+        }
+
+        setCeoSnap(null)
         setCeoRpcError(null)
-        const { data: ceoData, error: ceoErr } = await supabase.rpc('ceo_dashboard_snapshot')
-        if (ceoErr) {
-          setCeoRpcError(ceoErr.message)
-          setCeoSnap(null)
+
+        if (isCompanyProfile(resolvedRole)) {
+          const { count: jobCount } = await supabase
+            .from('jobs').select('*', { count: 'exact', head: true })
+            .eq('company_id', user.id).eq('status', 'active')
+          const { count: invCount } = await supabase
+            .from('invoices').select('*', { count: 'exact', head: true })
+            .eq('company_id', user.id).eq('status', 'pending')
+
+          const { data: myJobRows } = await supabase.from('jobs').select('id').eq('company_id', user.id)
+          const jobIds = (myJobRows ?? []).map((r) => r.id as string).filter(Boolean)
+          let pendingApps = 0
+          if (jobIds.length > 0) {
+            const { count: appCount } = await supabase
+              .from('job_applications')
+              .select('*', { count: 'exact', head: true })
+              .in('job_id', jobIds)
+              .eq('status', 'pending')
+            pendingApps = appCount ?? 0
+          }
+
+          setStats([
+            { label: 'Active jobs', value: String(jobCount ?? 0), sub: 'Open' },
+            { label: 'Pending apps', value: String(pendingApps), sub: 'To review' },
+            { label: 'Open invoices', value: String(invCount ?? 0), sub: 'Pending' },
+          ])
+          setIncome(null)
         } else {
-          setCeoSnap(parseCeoSnapshot(ceoData))
-        }
-        setStats([])
-        setIncome(null)
-        setLoading(false)
-        return
-      }
-
-      setCeoSnap(null)
-      setCeoRpcError(null)
-
-      if (isCompanyProfile(resolvedRole)) {
-        const { count: jobCount } = await supabase
-          .from('jobs').select('*', { count: 'exact', head: true })
-          .eq('company_id', user.id).eq('status', 'active')
-        const { count: invCount } = await supabase
-          .from('invoices').select('*', { count: 'exact', head: true })
-          .eq('company_id', user.id).eq('status', 'pending')
-
-        const { data: myJobRows } = await supabase.from('jobs').select('id').eq('company_id', user.id)
-        const jobIds = (myJobRows ?? []).map((r) => r.id as string).filter(Boolean)
-        let pendingApps = 0
-        if (jobIds.length > 0) {
           const { count: appCount } = await supabase
-            .from('job_applications')
-            .select('*', { count: 'exact', head: true })
-            .in('job_id', jobIds)
-            .eq('status', 'pending')
-          pendingApps = appCount ?? 0
+            .from('job_applications').select('*', { count: 'exact', head: true })
+            .eq('freelancer_id', user.id).eq('status', 'pending')
+          const { count: viewCount } = await supabase
+            .from('profile_views').select('*', { count: 'exact', head: true })
+            .eq('viewed_freelancer_id', user.id)
+
+          setStats([
+            { label: 'Applications', value: String(appCount ?? 0), sub: 'Pending' },
+            { label: 'Profile views', value: String(viewCount ?? 0), sub: 'Total' },
+          ])
+
+          const { data: invs } = await supabase
+            .from('invoices')
+            .select('amount, currency, status, due_date')
+            .eq('freelancer_id', user.id)
+          setIncome(computeIncomeTotals(invs ?? []))
         }
-
-        setStats([
-          { label: 'Active jobs', value: String(jobCount ?? 0), sub: 'Open' },
-          { label: 'Pending apps', value: String(pendingApps), sub: 'To review' },
-          { label: 'Open invoices', value: String(invCount ?? 0), sub: 'Pending' },
-        ])
-        setIncome(null)
-      } else {
-        const { count: appCount } = await supabase
-          .from('job_applications').select('*', { count: 'exact', head: true })
-          .eq('freelancer_id', user.id).eq('status', 'pending')
-        const { count: viewCount } = await supabase
-          .from('profile_views').select('*', { count: 'exact', head: true })
-          .eq('viewed_freelancer_id', user.id)
-
-        setStats([
-          { label: 'Applications', value: String(appCount ?? 0), sub: 'Pending' },
-          { label: 'Profile views', value: String(viewCount ?? 0), sub: 'Total' },
-        ])
-
-        const { data: invs } = await supabase
-          .from('invoices')
-          .select('amount, currency, status, due_date')
-          .eq('freelancer_id', user.id)
-        setIncome(computeIncomeTotals(invs ?? []))
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
-    load()
-  }, [])
+    void load()
+  }, [router])
 
   if (loading) {
     return (

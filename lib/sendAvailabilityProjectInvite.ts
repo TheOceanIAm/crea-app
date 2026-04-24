@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { toISODateLocal } from '@/lib/availabilityCalendar'
 import { findOrCreateDirectConversation } from '@/lib/directConversation'
 import { requestNotifyRecipientPush } from '@/lib/notifyMessagePush'
 
@@ -36,14 +37,29 @@ async function insertMessageBody(
   return { ok: true, messageId }
 }
 
+function formatLongDate(iso: string): string {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
+
 /**
- * Sends a DM to the freelancer with project + date (company workflow from availability).
+ * Sends a DM to the freelancer with project + date(s) (company workflow from availability).
  */
 export async function sendAvailabilityProjectInvite(params: {
   freelancerId: string
   projectId: string
   projectTitle: string
-  isoDate: string
+  /** First day (inclusive). */
+  isoStartDate: string
+  /** Last day (inclusive); defaults to start when omitted. */
+  isoEndDate?: string
+  /** All chosen calendar days (sorted), for non-contiguous ranges. */
+  selectedIsoDates?: string[]
+  userMessage?: string
 }): Promise<{ ok: true; conversationId: string } | { ok: false; error: string }> {
   const conv = await findOrCreateDirectConversation(params.freelancerId)
   if (!conv.ok) return conv
@@ -52,14 +68,47 @@ export async function sendAvailabilityProjectInvite(params: {
   const me = auth.user?.id
   if (!me) return { ok: false, error: 'not_authenticated' }
 
-  const dateLabel = new Date(`${params.isoDate}T12:00:00`).toLocaleDateString(undefined, {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
+  const end = params.isoEndDate ?? params.isoStartDate
+  let unique: string[]
+  if (params.selectedIsoDates && params.selectedIsoDates.length > 0) {
+    unique = Array.from(new Set(params.selectedIsoDates)).sort()
+  } else {
+    const out: string[] = []
+    const a = new Date(`${params.isoStartDate}T12:00:00`)
+    const b = new Date(`${end}T12:00:00`)
+    if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) {
+      unique = [params.isoStartDate]
+    } else {
+      const cursor = new Date(a)
+      while (cursor <= b) {
+        out.push(toISODateLocal(cursor))
+        cursor.setDate(cursor.getDate() + 1)
+      }
+      unique = out
+    }
+  }
+  const dateLines =
+    unique.length === 1
+      ? `${formatLongDate(unique[0])} (${unique[0]})`
+      : unique.map((iso) => `• ${iso}: ${formatLongDate(iso)}`).join('\n')
+
+  const rangeLine =
+    params.isoStartDate === end
+      ? `Range: ${params.isoStartDate} (${unique.length} day${unique.length === 1 ? '' : 's'})`
+      : `Range: ${params.isoStartDate} → ${end} (${unique.length} day${unique.length === 1 ? '' : 's'})`
+
   const title = params.projectTitle.trim() || 'Project'
-  const body = `Availability: I’d like to book you for «${title}» on ${dateLabel} (${params.isoDate}).\nOpen project: crea://project/${params.projectId}`
+  const msg = params.userMessage?.trim()
+  const body = [
+    `Booking request: «${title}»`,
+    rangeLine,
+    'Dates:',
+    dateLines,
+    msg ? `\nMessage:\n${msg}` : '',
+    `\nOpen project: crea://project/${params.projectId}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
 
   const ins = await insertMessageBody(conv.conversationId, me, body)
   if (ins.ok === false) return { ok: false, error: ins.error }

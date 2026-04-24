@@ -64,6 +64,17 @@ type ProjectRow = {
   frame_io_url: string | null
   picdrop_url: string | null
   brief_ai_outputs: Record<string, string> | null
+  scheduling_start_date: string | null
+  scheduling_end_date: string | null
+}
+
+function parseIsoDateInput(raw: string): string | null {
+  const t = raw.trim()
+  if (!t) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null
+  const d = new Date(`${t}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return null
+  return t
 }
 
 const BASE_TABS: { id: TabId; label: string }[] = [
@@ -97,6 +108,9 @@ export default function ProjectWorkspaceScreen() {
   const [briefText, setBriefText] = useState('')
   const [savingBrief, setSavingBrief] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [scheduleStart, setScheduleStart] = useState('')
+  const [scheduleEnd, setScheduleEnd] = useState('')
+  const [savingSchedule, setSavingSchedule] = useState(false)
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
       setLoading(false)
@@ -123,6 +137,8 @@ export default function ProjectWorkspaceScreen() {
     const p = row as ProjectRow
     setProject(p)
     setBriefText(p.brief_ai_context ?? '')
+    setScheduleStart(typeof p.scheduling_start_date === 'string' ? p.scheduling_start_date.slice(0, 10) : '')
+    setScheduleEnd(typeof p.scheduling_end_date === 'string' ? p.scheduling_end_date.slice(0, 10) : '')
     setForbidden(false)
 
     if (p.job_id) {
@@ -159,6 +175,50 @@ export default function ProjectWorkspaceScreen() {
   }, [project])
 
   const currentOutput = project?.brief_ai_outputs?.[tool] ?? ''
+
+  const saveSchedule = async () => {
+    if (!project) return
+    const a = parseIsoDateInput(scheduleStart)
+    const b = parseIsoDateInput(scheduleEnd)
+    if (scheduleStart.trim() && !a) {
+      Alert.alert('Schedule', 'Start date must be YYYY-MM-DD.')
+      return
+    }
+    if (scheduleEnd.trim() && !b) {
+      Alert.alert('Schedule', 'End date must be YYYY-MM-DD.')
+      return
+    }
+    if (a && b && b < a) {
+      Alert.alert('Schedule', 'End date must be on or after start date.')
+      return
+    }
+    if ((a && !b) || (!a && b)) {
+      Alert.alert('Schedule', 'Set both start and end, or clear both.')
+      return
+    }
+    setSavingSchedule(true)
+    const { error } = await supabase
+      .from('projects')
+      .update({
+        scheduling_start_date: a,
+        scheduling_end_date: b,
+      })
+      .eq('id', project.id)
+    setSavingSchedule(false)
+    if (error) {
+      Alert.alert('Save failed', error.message)
+      return
+    }
+    setProject((prev) =>
+      prev
+        ? {
+            ...prev,
+            scheduling_start_date: a,
+            scheduling_end_date: b,
+          }
+        : prev
+    )
+  }
 
   const saveBrief = async () => {
     if (!project) return
@@ -381,6 +441,40 @@ export default function ProjectWorkspaceScreen() {
                   status={project.status}
                   briefContext={project.brief_ai_context}
                 />
+                {canManageCrew ? (
+                  <View style={styles.scheduleCard}>
+                    <Text style={styles.scheduleTitle}>Public freelancer calendar</Text>
+                    <Text style={styles.scheduleSub}>
+                      Inclusive shoot dates (YYYY-MM-DD). They appear as busy on the freelancer&apos;s public profile
+                      while this project is active.
+                    </Text>
+                    <TextInput
+                      style={styles.scheduleInput}
+                      placeholder="Start date e.g. 2026-05-12"
+                      placeholderTextColor="rgba(255,255,255,0.25)"
+                      value={scheduleStart}
+                      onChangeText={setScheduleStart}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <TextInput
+                      style={styles.scheduleInput}
+                      placeholder="End date e.g. 2026-05-14"
+                      placeholderTextColor="rgba(255,255,255,0.25)"
+                      value={scheduleEnd}
+                      onChangeText={setScheduleEnd}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <TouchableOpacity
+                      style={[styles.scheduleSaveBtn, savingSchedule && styles.btnDim]}
+                      onPress={saveSchedule}
+                      disabled={savingSchedule}
+                    >
+                      <Text style={styles.scheduleSaveText}>{savingSchedule ? 'Saving…' : 'Save schedule'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
                 <Text style={styles.para}>
                   Milestones, crew, chat, files, Review (Frame.io + PicDrop), production tools, and Brief AI stay in sync
                   via Supabase for everyone on this project.
@@ -495,6 +589,36 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#0a0a0a' },
   body: { flex: 1 },
   bodyContent: { paddingBottom: 40 },
+  scheduleCard: {
+    marginBottom: 20,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#141414',
+  },
+  scheduleTitle: { fontSize: 13, fontWeight: '800', color: '#fff', letterSpacing: 0.6, marginBottom: 6 },
+  scheduleSub: { fontSize: 11, color: 'rgba(255,255,255,0.38)', lineHeight: 16, marginBottom: 12 },
+  scheduleInput: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 10,
+    backgroundColor: '#0a0a0a',
+  },
+  scheduleSaveBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#FFDC00',
+  },
+  scheduleSaveText: { fontSize: 13, fontWeight: '700', color: '#0a0a0a' },
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
   statCard: {
     width: '48%',

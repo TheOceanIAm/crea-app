@@ -71,7 +71,29 @@ as $$
       p.years_experience,
       p.public_rating,
       (select count(*)::int from public.projects j where j.freelancer_id = p.id) as workspace_projects_count,
-      coalesce(jsonb_array_length(coalesce(p.portfolio_projects, '[]'::jsonb)), 0) as portfolio_items_count
+      coalesce(jsonb_array_length(coalesce(p.portfolio_projects, '[]'::jsonb)), 0) as portfolio_items_count,
+      (
+        select coalesce(
+          (
+            select jsonb_agg(sub.iso order by sub.iso)
+            from (
+              select distinct to_char(dr.d, 'YYYY-MM-DD') as iso
+              from public.projects pr
+              cross join lateral generate_series(
+                pr.scheduling_start_date,
+                pr.scheduling_end_date,
+                interval '1 day'
+              ) as dr(d)
+              where pr.freelancer_id = p.id
+                and pr.scheduling_start_date is not null
+                and pr.scheduling_end_date is not null
+                and pr.scheduling_end_date >= pr.scheduling_start_date
+                and lower(coalesce(pr.status, '')) in ('active', 'in_progress')
+            ) sub
+          ),
+          '[]'::jsonb
+        )
+      ) as calendar_busy_dates
     from public.profiles p
     where p.id = profile_id
     limit 1

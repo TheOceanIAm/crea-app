@@ -24,7 +24,7 @@ import {
   Video,
 } from 'lucide-react-native'
 import { AvailabilityMonthPreview } from '@/components/profile/AvailabilityMonthPreview'
-import { InviteFreelancerDateModal } from '@/components/profile/InviteFreelancerDateModal'
+import { BookFreelancerModal } from '@/components/profile/BookFreelancerModal'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { parseAvailabilityCalendar } from '@/lib/availabilityCalendar'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -118,7 +118,7 @@ export function FreelancerPublicProfileContent({
   const [portfolioFilter, setPortfolioFilter] = useState<string>('All')
   const [viewerIsCompany, setViewerIsCompany] = useState(false)
   const [viewerIsCeo, setViewerIsCeo] = useState(false)
-  const [inviteDateIso, setInviteDateIso] = useState<string | null>(null)
+  const [bookingSelection, setBookingSelection] = useState<Set<string> | null>(null)
   const [companyJobs, setCompanyJobs] = useState<
     {
       id: string
@@ -221,6 +221,17 @@ export function FreelancerPublicProfileContent({
     () => parseAvailabilityCalendar(profileNorm.availability_calendar),
     [profileNorm.availability_calendar]
   )
+
+  const jobBookedIso = useMemo(() => {
+    const raw = profileNorm.calendar_busy_dates
+    if (!Array.isArray(raw) || raw.length === 0) return undefined
+    const next = new Set<string>()
+    for (const x of raw) {
+      const s = typeof x === 'string' ? x.trim() : String(x).trim()
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) next.add(s)
+    }
+    return next.size > 0 ? next : undefined
+  }, [profileNorm.calendar_busy_dates])
 
   const socials = useMemo(() => {
     const entries: { icon: LucideIcon; url: string | null; label: string }[] = [
@@ -709,11 +720,16 @@ export function FreelancerPublicProfileContent({
             anchor={new Date()}
             interactive={companyAvailabilityInvite}
             alwaysShow
-            selectedIso={inviteDateIso}
-            onDayPress={(iso) => {
-              if (!companyAvailabilityInvite) return
-              setInviteDateIso(iso)
-            }}
+            jobBookedIso={jobBookedIso}
+            committedBookingIsos={bookingSelection ?? undefined}
+            onCommitBookingSelection={
+              companyAvailabilityInvite
+                ? (isos) => {
+                    if (isos.size === 0) return
+                    setBookingSelection(new Set(isos))
+                  }
+                : undefined
+            }
           />
         ) : null}
 
@@ -740,16 +756,20 @@ export function FreelancerPublicProfileContent({
         mailSubject={`Crea profile: ${name}`}
       />
 
-      {authUserId && companyAvailabilityInvite ? (
-        <InviteFreelancerDateModal
-          visible={inviteDateIso != null}
-          onClose={() => setInviteDateIso(null)}
+      {authUserId && companyAvailabilityInvite && bookingSelection != null && bookingSelection.size > 0 ? (
+        <BookFreelancerModal
+          visible
+          onClose={() => setBookingSelection(null)}
           companyUserId={authUserId}
           freelancerId={userId}
           freelancerName={name}
-          selectedIso={inviteDateIso}
+          freelancerAvatarUrl={showImage ? avatarUri : null}
+          freelancerLetter={letter}
+          dayRateAmount={dayRate}
+          ratesCurrency={cur}
+          selectedIsos={bookingSelection}
           onInviteSent={(conversationId) => {
-            setInviteDateIso(null)
+            setBookingSelection(null)
             router.push(`/conversation/${conversationId}`)
           }}
         />

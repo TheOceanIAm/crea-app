@@ -23,9 +23,10 @@ import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isFreelancerProfile } from '@/lib/profileRole'
 import {
+  type CalendarDefaultMode,
   type CellState,
   DAY_LABELS_EN,
-  getDayState,
+  effectiveDayStateMap,
   nextCellState,
   parseAvailabilityCalendar,
   toISODateLocal,
@@ -46,6 +47,7 @@ type MonthPageProps = {
   year: number
   monthIndex: number
   days: Record<string, CellState>
+  defaultMode: CalendarDefaultMode
   todayISO: string
   onPaintDay: (iso: string, target: CellState) => void
   onShiftMonth: (delta: number) => void
@@ -76,7 +78,16 @@ function hitTestIso(
   return null
 }
 
-function MonthPage({ pageWidth, year, monthIndex, days, todayISO, onPaintDay, onShiftMonth }: MonthPageProps) {
+function MonthPage({
+  pageWidth,
+  year,
+  monthIndex,
+  days,
+  defaultMode,
+  todayISO,
+  onPaintDay,
+  onShiftMonth,
+}: MonthPageProps) {
   const slotMatrix = useMemo(() => buildMonthSlotMatrix(year, monthIndex), [year, monthIndex])
   const [metrics, setMetrics] = useState<GridMetrics | null>(null)
   const daysRef = useRef(days)
@@ -110,7 +121,7 @@ function MonthPage({ pageWidth, year, monthIndex, days, todayISO, onPaintDay, on
           const { locationX, locationY } = evt.nativeEvent
           const iso = hitTestIso(locationX, locationY, metrics, slotMatrix)
           if (iso) {
-            const cur = getDayState(daysRef.current, iso)
+            const cur = effectiveDayStateMap(daysRef.current, iso, defaultMode)
             paintTargetRef.current = nextCellState(cur)
             visitedRef.current.add(iso)
             onPaintDay(iso, paintTargetRef.current)
@@ -124,7 +135,7 @@ function MonthPage({ pageWidth, year, monthIndex, days, todayISO, onPaintDay, on
           if (!iso) return
 
           if (!paintTargetRef.current) {
-            const cur = getDayState(daysRef.current, iso)
+            const cur = effectiveDayStateMap(daysRef.current, iso, defaultMode)
             paintTargetRef.current = nextCellState(cur)
             if (!visitedRef.current.has(iso)) {
               visitedRef.current.add(iso)
@@ -139,7 +150,7 @@ function MonthPage({ pageWidth, year, monthIndex, days, todayISO, onPaintDay, on
           }
         },
       }),
-    [metrics, slotMatrix, onPaintDay]
+    [metrics, slotMatrix, onPaintDay, defaultMode]
   )
 
   const rows: ReactNode[] = []
@@ -151,7 +162,7 @@ function MonthPage({ pageWidth, year, monthIndex, days, todayISO, onPaintDay, on
           if (iso == null) {
             return <View key={`e-${ri}-${ci}`} style={[styles.dayCell, styles.dayCellEmpty]} />
           }
-          const st = getDayState(days, iso)
+          const st = effectiveDayStateMap(days, iso, defaultMode)
           const isToday = iso === todayISO
           const dayNum = parseInt(iso.slice(8, 10), 10)
           return (
@@ -159,7 +170,9 @@ function MonthPage({ pageWidth, year, monthIndex, days, todayISO, onPaintDay, on
               key={iso}
               accessibilityRole="button"
               accessibilityLabel={`Day ${dayNum}`}
-              onPress={() => onPaintDay(iso, nextCellState(getDayState(days, iso)))}
+              onPress={() =>
+                onPaintDay(iso, nextCellState(effectiveDayStateMap(days, iso, defaultMode)))
+              }
               style={({ pressed }) => [
                 styles.dayCell,
                 st === 'off' && styles.cellOff,
@@ -239,6 +252,7 @@ export default function AvailabilityScreen() {
   const [saving, setSaving] = useState(false)
   const [role, setRole] = useState<string | null>(null)
   const [days, setDays] = useState<Record<string, CellState>>({})
+  const [defaultMode, setDefaultMode] = useState<CalendarDefaultMode>('available')
   const [notes, setNotes] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [cursor, setCursor] = useState(() => {
@@ -273,6 +287,7 @@ export default function AvailabilityScreen() {
       const parsed = parseAvailabilityCalendar(profile?.availability_calendar)
       setDays(parsed.days)
       setNotes(parsed.notes ?? '')
+      setDefaultMode(parsed.version === 3 ? 'available' : 'off')
     }
     setLoading(false)
   }, [])
@@ -302,18 +317,18 @@ export default function AvailabilityScreen() {
   const paintDay = useCallback((iso: string, target: CellState) => {
     setDays((prev) => {
       const next = { ...prev }
-      if (target === 'off') delete next[iso]
+      if (target === defaultMode) delete next[iso]
       else next[iso] = target
       return next
     })
-  }, [])
+  }, [defaultMode])
 
   const save = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
     setSaving(true)
-    const payload = toJsonPayload(days, notes)
+    const payload = toJsonPayload(days, notes, defaultMode)
     const { error } = await supabase
       .from('profiles')
       .update({ availability_calendar: payload })
@@ -393,7 +408,10 @@ export default function AvailabilityScreen() {
           <Text style={styles.titleAccent}>Everyone sees it.</Text>
           <Text style={styles.subtitle}>
             Change month: arrows next to the month name, or swipe horizontally on the title / weekday row. Days: tap
-            to toggle; drag horizontally across days to paint (same state as the first day touched).
+            to cycle free → busy → blocked; drag horizontally to paint the same state.
+            {defaultMode === 'available'
+              ? ' Open (green) is the default; mark grey where you are not free.'
+              : ' Empty days are blocked until you mark them free (older calendar format).'}
           </Text>
 
           {loadError ? (
@@ -431,6 +449,7 @@ export default function AvailabilityScreen() {
                 year={prev.getFullYear()}
                 monthIndex={prev.getMonth()}
                 days={days}
+                defaultMode={defaultMode}
                 todayISO={todayISO}
                 onPaintDay={paintDay}
                 onShiftMonth={shiftMonth}
@@ -440,6 +459,7 @@ export default function AvailabilityScreen() {
                 year={cursor.getFullYear()}
                 monthIndex={cursor.getMonth()}
                 days={days}
+                defaultMode={defaultMode}
                 todayISO={todayISO}
                 onPaintDay={paintDay}
                 onShiftMonth={shiftMonth}
@@ -449,6 +469,7 @@ export default function AvailabilityScreen() {
                 year={next.getFullYear()}
                 monthIndex={next.getMonth()}
                 days={days}
+                defaultMode={defaultMode}
                 todayISO={todayISO}
                 onPaintDay={paintDay}
                 onShiftMonth={shiftMonth}
