@@ -15,6 +15,7 @@ import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
+import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 
 type Job = {
   id: string
@@ -49,6 +50,7 @@ export default function JobsListScreen() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
   const [isCompanyUser, setIsCompanyUser] = useState(false)
+  const [workspaceOnly, setWorkspaceOnly] = useState(false)
 
   const loadJobs = useCallback(async () => {
     setLoading(true)
@@ -59,6 +61,16 @@ export default function JobsListScreen() {
     if (user) {
       const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
       role = resolveAppRole(prof?.role, user)
+      const isWorkspaceFreelancer =
+        role === 'freelancer' && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))
+      setWorkspaceOnly(isWorkspaceFreelancer)
+      if (isWorkspaceFreelancer) {
+        setJobs([])
+        setLoading(false)
+        return
+      }
+    } else {
+      setWorkspaceOnly(false)
     }
     const companyOnly = Boolean(user && isCompanyProfile(role))
     setIsCompanyUser(companyOnly)
@@ -210,7 +222,13 @@ export default function JobsListScreen() {
         )}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
-            <Text style={styles.emptyText}>{isCompanyUser ? 'No jobs yet. Post one above.' : 'No jobs found'}</Text>
+            <Text style={styles.emptyText}>
+              {workspaceOnly
+                ? 'Workspace plan: marketplace jobs are hidden.'
+                : isCompanyUser
+                  ? 'No jobs yet. Post one above.'
+                  : 'No jobs found'}
+            </Text>
           </View>
         }
       />

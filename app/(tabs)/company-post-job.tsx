@@ -100,6 +100,7 @@ export default function CompanyPostJobScreen() {
       description: description.trim() || null,
       company_id: user.id,
       status: 'active',
+      is_solo_workspace: false,
     })
     setSaving(false)
     if (error) {

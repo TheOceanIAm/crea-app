@@ -193,6 +193,7 @@ export function FreelancerPublicProfileContent({
         .select('id, title, category, budget_type, budget_amount, budget_currency, location_type, status')
         .eq('company_id', userId)
         .eq('status', 'active')
+        .eq('is_solo_workspace', false)
         .order('created_at', { ascending: false })
         .limit(40)
       if (cancelled) return

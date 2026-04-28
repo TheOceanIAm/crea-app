@@ -19,6 +19,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { getCreaWebBaseUrl, openProjectOnWeb } from '@/lib/creaWeb'
 import { jobShareUrl } from '@/lib/shareLinks'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
+import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 
 type JobRow = {
   id: string
@@ -70,6 +71,14 @@ export default function JobDetailScreen() {
       const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
       resolvedRole = resolveAppRole(prof?.role, user)
       setRole(prof?.role ?? null)
+      if (resolvedRole === 'freelancer' && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))) {
+        setAccessDenied(true)
+        setJob(null)
+        setCompanyName('Company')
+        setCompanyLogoUrl(null)
+        setLoading(false)
+        return
+      }
     } else {
       setRole(null)
     }
