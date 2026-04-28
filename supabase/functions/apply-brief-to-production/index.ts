@@ -280,7 +280,11 @@ Rules: Use empty strings for unknown fields. At most ${MAX_SHOTS} shots. Preserv
 
     const sys = `You convert a call sheet from Markdown into JSON for a known crew list. Reply with ONLY valid JSON (no markdown fences), shape:
 {"entries":[{"name":"string matching a crew person","call_time":"HH:MM","location":""}],"default_call_time":"","default_location":"","notes":""}
-Use entries when the markdown names people; use default_call_time / default_location for a general crew call when the doc states one time for everyone. notes is optional extra lines for the production day (schedule, parking, etc.).`
+
+Rules:
+- entries: match names to the crew list; call_time and location are per person when the markdown differentiates (e.g. staggered calls). location may include address + short parking note in one string.
+- default_call_time / default_location: use when the sheet gives one crew report time or one base for everyone.
+- notes (REQUIRED if the markdown contains them — never omit): copy and condense into plain text (no JSON inside notes) the parts of the markdown that are NOT per-person overrides: full **day timeline** with times, **location list** with addresses/parking, **travel legs** (from → to, approx distance, drive times normal vs rush if stated, suggested depart times), meals/catering window, cast vs crew timing if present, emergency/hospital line, weather line. Aim for dense, scannable paragraphs or bullet lines; max about 9000 characters in notes. If the markdown has no extra logistics, notes may be empty string.`
 
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -294,7 +298,7 @@ Use entries when the markdown names people; use default_call_time / default_loca
           { role: 'system', content: sys },
           {
             role: 'user',
-            content: `Call sheet markdown:\n${markdown.slice(0, 8000)}\n\nCrew (match "name" to entries; profile_id is for your reasoning only, do not invent ids):\n${crewLines}`,
+            content: `Call sheet markdown:\n${markdown.slice(0, 14000)}\n\nCrew (match "name" to entries; profile_id is for your reasoning only, do not invent ids):\n${crewLines}`,
           },
         ],
         temperature: 0.2,
@@ -343,7 +347,7 @@ Use entries when the markdown names people; use default_call_time / default_loca
       }
     }
 
-    const notesAi = (parsed.notes ?? '').trim()
+    const notesAi = (parsed.notes ?? '').trim().slice(0, 12000)
 
     const { data: existing, error: exErr } = await supabase
       .from('production_days')

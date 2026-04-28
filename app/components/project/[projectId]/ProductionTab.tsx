@@ -11,10 +11,11 @@ import {
 } from 'react-native'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react-native'
+import { ChevronLeft, ChevronRight, Clock, MapPin, Plus, Users } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProductionWeatherSection } from '@/components/project/ProductionWeatherSection'
+import { BriefAiFormattedOutput } from '@/components/project/BriefAiFormattedOutput'
 
 type ShotStatus = 'open' | 'rolling' | 'done' | 'pick'
 
@@ -69,6 +70,15 @@ function todayLocalISODate(): string {
   const m = String(t.getMonth() + 1).padStart(2, '0')
   const d = String(t.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
+}
+
+function parseIsoDateInput(raw: string): string | null {
+  const t = raw.trim()
+  if (!t) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null
+  const d = new Date(`${t}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return null
+  return t
 }
 
 function nextStatus(s: ShotStatus): ShotStatus {
@@ -137,7 +147,7 @@ const PRODUCTION_SECTIONS = [
   {
     id: 'shotlist' as const,
     label: 'Shotlist',
-    sub: 'Scene-by-scene list, status, and notes for today',
+    sub: 'Scene-by-scene list for the calendar day you load below',
   },
   {
     id: 'call_sheet' as const,
@@ -156,7 +166,11 @@ export function ProductionTab({
   companyId,
   briefContext,
 }: Props) {
-  const today = useMemo(() => todayLocalISODate(), [])
+  const [shootDay, setShootDay] = useState(() => todayLocalISODate())
+  const [dayInput, setDayInput] = useState(() => todayLocalISODate())
+  useEffect(() => {
+    setDayInput(shootDay)
+  }, [shootDay])
   const isCompany = userId === companyId
 
   const [shots, setShots] = useState<ProductionShot[]>([])
@@ -177,7 +191,7 @@ export function ProductionTab({
         .from('production_shots')
         .select('*')
         .eq('project_id', projectId)
-        .eq('shoot_date', today)
+        .eq('shoot_date', shootDay)
         .order('created_at', { ascending: true }),
       supabase
         .from('project_members')
@@ -188,7 +202,7 @@ export function ProductionTab({
         .from('production_days')
         .select('*')
         .eq('project_id', projectId)
-        .eq('date', today)
+        .eq('date', shootDay)
         .maybeSingle(),
     ])
 
@@ -217,7 +231,7 @@ export function ProductionTab({
     }
 
     setLoading(false)
-  }, [projectId, today])
+  }, [projectId, shootDay])
 
   useEffect(() => {
     setLoading(true)
@@ -247,7 +261,7 @@ export function ProductionTab({
       .from('production_shots')
       .insert({
         project_id: projectId,
-        shoot_date: today,
+        shoot_date: shootDay,
         scene_nr: '',
         description: '',
         lens: '',
@@ -275,7 +289,7 @@ export function ProductionTab({
       .from('production_days')
       .insert({
         project_id: projectId,
-        date: today,
+        date: shootDay,
         wrap_time: null,
         notes: '',
         call_sheet: {},
@@ -327,10 +341,10 @@ export function ProductionTab({
   const buildReportContext = () => {
     const lines: string[] = []
     lines.push(`Project: ${projectTitle}`)
-    lines.push(`Date: ${today}`)
+    lines.push(`Date: ${shootDay}`)
     if (briefContext?.trim()) lines.push(`Brief context:\n${briefContext.trim()}`)
     if (shots.length) {
-      lines.push('\nShots today:')
+      lines.push('\nShots this day:')
       shots.forEach((s, i) => {
         const bits = [
           `Scene ${s.scene_nr || '—'}`,
@@ -373,7 +387,7 @@ export function ProductionTab({
       return
     }
 
-    const body = `📋 **Production report (${today})**\n\n${content.trim()}`
+    const body = `📋 **Production report (${shootDay})**\n\n${content.trim()}`
     const { error: msgErr } = await supabase.from('project_messages').insert({
       project_id: projectId,
       sender_id: userId,
@@ -402,6 +416,12 @@ export function ProductionTab({
         })
         .join('')
 
+      const notesBlock =
+        prodDay?.notes?.trim() ?
+          `<h2 style="font-size:16px;margin-top:28px;margin-bottom:10px;">Schedule &amp; travel</h2>
+        <pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;line-height:1.45;color:#222;border:1px solid #ddd;padding:12px;border-radius:8px;background:#fafafa;">${escapeHtml(prodDay.notes.trim())}</pre>`
+          : ''
+
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; color:#111; padding:24px; }
         h1 { font-size:22px; margin-bottom:8px; }
@@ -411,7 +431,8 @@ export function ProductionTab({
         th { background:#f4f4f4; }
       </style></head><body>
         <h1>Call Sheet</h1>
-        <div class="sub">${escapeHtml(projectTitle)} · ${today}</div>
+        <div class="sub">${escapeHtml(projectTitle)} · ${shootDay}</div>
+        ${notesBlock}
         <table>
           <thead><tr><th>Name</th><th>Role</th><th>Call</th><th>Location</th></tr></thead>
           <tbody>${rowsHtml}</tbody>
@@ -470,6 +491,38 @@ export function ProductionTab({
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      {openFeature === 'shotlist' || openFeature === 'call_sheet' ? (
+        <View style={styles.shootDayRow}>
+          <Text style={styles.shootDayLabel}>Calendar day (YYYY-MM-DD)</Text>
+          <View style={styles.shootDayControls}>
+            <TextInput
+              style={styles.shootDayInput}
+              value={dayInput}
+              onChangeText={setDayInput}
+              placeholder={todayLocalISODate()}
+              placeholderTextColor="rgba(255,255,255,0.25)"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <TouchableOpacity
+              style={styles.shootDayBtn}
+              onPress={() => {
+                const v = parseIsoDateInput(dayInput)
+                if (!v) {
+                  Alert.alert('Date', 'Use a valid date: YYYY-MM-DD')
+                  return
+                }
+                setShootDay(v)
+              }}
+            >
+              <Text style={styles.shootDayBtnText}>Load day</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.shootDayHint}>
+            Brief AI → Production sync must use this same date. New shots and call sheet rows use this day.
+          </Text>
+        </View>
+      ) : null}
       {openFeature === 'weather' ? <ProductionWeatherSection initialLocation={projectLocation} /> : null}
 
       {showDataLoading ? (
@@ -490,7 +543,7 @@ export function ProductionTab({
         <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
       </View>
       <Text style={styles.progressLabel}>
-        {doneToday} / {totalToday} shots completed today
+        {doneToday} / {totalToday} shots marked done for {shootDay}
       </Text>
 
       {shots.map((s, idx) => (
@@ -603,54 +656,96 @@ export function ProductionTab({
       <Text style={[styles.sectionHead, styles.sectionSp]}>CALL SHEET</Text>
       {!prodDay && (
         <Text style={styles.banner}>
-          Call sheet and daily wrap are saved once the client creates a production day for today.
+          Call sheet and daily wrap are saved once the client creates a production day for the loaded calendar day.
         </Text>
       )}
       {isCompany && !prodDay ? (
         <TouchableOpacity style={[styles.accentBtn, creatingDay && styles.dim]} onPress={createToday} disabled={creatingDay}>
-          <Text style={styles.accentBtnText}>{creatingDay ? '…' : 'Create production day for today'}</Text>
+          <Text style={styles.accentBtnText}>{creatingDay ? '…' : `Create production day for ${shootDay}`}</Text>
         </TouchableOpacity>
       ) : null}
 
-      {crew.map((m) => {
-        const prof = m.profiles as { name: string | null } | { name: string | null }[] | null | undefined
-        const p = Array.isArray(prof) ? prof[0] : prof
-        const ov = prodDay?.call_sheet[m.profile_id]
-        const callVal = ov?.call_time ?? ''
-        const locVal = ov?.location ?? projectLocation ?? ''
-        return (
-          <View key={`${m.id}-${prodDay?.id ?? 'none'}`} style={styles.csRow}>
-            <View style={styles.csNameCol}>
-              <Text style={styles.csName}>{p?.name || 'Member'}</Text>
-              <Text style={styles.csRole}>{roleLabel(m.member_role)}</Text>
+      {prodDay && (prodDay.notes ?? '').trim() ? (
+        <View style={styles.csLogisticsCard}>
+          <View style={styles.csLogisticsHeader}>
+            <View style={styles.csLogisticsIcon}>
+              <MapPin size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
             </View>
-            <TextInput
-              style={styles.csInput}
-              placeholder="Call"
-              placeholderTextColor="rgba(255,255,255,0.25)"
-              defaultValue={callVal}
-              editable={!!prodDay}
-              onEndEditing={(e) => {
-                if (!prodDay) return
-                const v = e.nativeEvent.text
-                if (v !== (ov?.call_time ?? '')) void saveCallCell(m.profile_id, { call_time: v })
-              }}
-            />
-            <TextInput
-              style={[styles.csInput, styles.csLoc]}
-              placeholder="Location"
-              placeholderTextColor="rgba(255,255,255,0.25)"
-              defaultValue={locVal}
-              editable={!!prodDay}
-              onEndEditing={(e) => {
-                if (!prodDay) return
-                const v = e.nativeEvent.text
-                if (v !== (ov?.location ?? (projectLocation || ''))) void saveCallCell(m.profile_id, { location: v })
-              }}
-            />
+            <View style={styles.csLogisticsHeaderText}>
+              <Text style={styles.csLogisticsKicker}>Day logistics</Text>
+              <Text style={styles.csLogisticsTitle}>Schedule & travel</Text>
+              <Text style={styles.csLogisticsHint}>
+                Synced with Daily wrap → Notes (Brief AI apply or manual edits).
+              </Text>
+            </View>
           </View>
-        )
-      })}
+          <BriefAiFormattedOutput content={(prodDay.notes ?? '').trim()} embedded />
+        </View>
+      ) : null}
+
+      {crew.length > 0 ? (
+        <View style={styles.csCrewSection}>
+          <View style={styles.csCrewSectionHead}>
+            <Users size={18} color="rgba(255,255,255,0.45)" strokeWidth={ICON_STROKE} />
+            <Text style={styles.csCrewSectionTitle}>Crew calls</Text>
+          </View>
+          {crew.map((m) => {
+            const prof = m.profiles as { name: string | null } | { name: string | null }[] | null | undefined
+            const p = Array.isArray(prof) ? prof[0] : prof
+            const ov = prodDay?.call_sheet[m.profile_id]
+            const callVal = ov?.call_time ?? ''
+            const locVal = ov?.location ?? projectLocation ?? ''
+            return (
+              <View key={`${m.id}-${prodDay?.id ?? 'none'}`} style={styles.csMemberCard}>
+                <View style={styles.csMemberHead}>
+                  <Text style={styles.csName}>{p?.name || 'Member'}</Text>
+                  <View style={styles.csRolePill}>
+                    <Text style={styles.csRolePillText}>{roleLabel(m.member_role)}</Text>
+                  </View>
+                </View>
+                <View style={styles.csFieldRow}>
+                  <Clock size={14} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
+                  <View style={styles.csFieldGrow}>
+                    <Text style={styles.csFieldLabel}>Call time</Text>
+                    <TextInput
+                      style={styles.csInputBlock}
+                      placeholder="e.g. 07:00"
+                      placeholderTextColor="rgba(255,255,255,0.25)"
+                      defaultValue={callVal}
+                      editable={!!prodDay}
+                      onEndEditing={(e) => {
+                        if (!prodDay) return
+                        const v = e.nativeEvent.text
+                        if (v !== (ov?.call_time ?? '')) void saveCallCell(m.profile_id, { call_time: v })
+                      }}
+                    />
+                  </View>
+                </View>
+                <View style={styles.csFieldRow}>
+                  <MapPin size={14} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
+                  <View style={styles.csFieldGrow}>
+                    <Text style={styles.csFieldLabel}>Location / set</Text>
+                    <TextInput
+                      style={[styles.csInputBlock, styles.csInputBlockTall]}
+                      placeholder="Address, stage, parking note…"
+                      placeholderTextColor="rgba(255,255,255,0.25)"
+                      defaultValue={locVal}
+                      editable={!!prodDay}
+                      multiline
+                      textAlignVertical="top"
+                      onEndEditing={(e) => {
+                        if (!prodDay) return
+                        const v = e.nativeEvent.text
+                        if (v !== (ov?.location ?? (projectLocation || ''))) void saveCallCell(m.profile_id, { location: v })
+                      }}
+                    />
+                  </View>
+                </View>
+              </View>
+            )
+          })}
+        </View>
+      ) : null}
 
       <TouchableOpacity
         style={[styles.outlineBtn, exportingPdf && styles.dim]}
@@ -765,6 +860,46 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: 'rgba(255,255,255,0.92)',
     textAlign: 'right',
+  },
+  shootDayRow: {
+    marginBottom: 16,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  shootDayLabel: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.38)',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  shootDayControls: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  shootDayInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 14,
+    backgroundColor: '#111',
+  },
+  shootDayBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,220,0,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.35)',
+  },
+  shootDayBtnText: { color: '#FFDC00', fontWeight: '800', fontSize: 13 },
+  shootDayHint: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.32)',
+    marginTop: 8,
+    lineHeight: 16,
   },
   sectionHead: {
     fontSize: 20,
@@ -883,32 +1018,105 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   outlineBtnText: { color: '#FFDC00', fontWeight: '700', fontSize: 14 },
-  csRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  csLogisticsCard: {
+    marginBottom: 20,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.22)',
+    backgroundColor: '#121212',
+  },
+  csLogisticsHeader: { flexDirection: 'row', gap: 14, marginBottom: 14 },
+  csLogisticsIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,220,0,0.12)',
     alignItems: 'center',
-    paddingVertical: 12,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.25)',
+  },
+  csLogisticsHeaderText: { flex: 1, minWidth: 0 },
+  csLogisticsKicker: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: 'rgba(255,220,0,0.85)',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  csLogisticsTitle: { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 6 },
+  csLogisticsHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.42)',
+    lineHeight: 17,
+  },
+  csCrewSection: { marginBottom: 8 },
+  csCrewSectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    marginTop: 4,
+  },
+  csCrewSectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.45)',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  csMemberCard: {
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#111',
+  },
+  csMemberHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 14,
+    paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.06)',
   },
-  csNameCol: { width: 140, flexGrow: 1 },
-  csName: { fontSize: 15, fontWeight: '600', color: '#fff' },
-  csRole: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 2 },
-  csInput: {
-    flex: 1,
-    minWidth: 100,
-    maxWidth: 200,
-    backgroundColor: '#111',
-    borderRadius: 10,
+  csName: { fontSize: 16, fontWeight: '800', color: '#fff', flex: 1, minWidth: 0 },
+  csRolePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 100,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    color: '#fff',
-    fontSize: 14,
   },
-  csLoc: { maxWidth: 280, flexGrow: 2 },
+  csRolePillText: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.55)' },
+  csFieldRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 12 },
+  csFieldGrow: { flex: 1, minWidth: 0 },
+  csFieldLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.35)',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  csInputBlock: {
+    backgroundColor: '#0a0a0a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  csInputBlockTall: { minHeight: 72, paddingTop: 11 },
   subtle: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginBottom: 16 },
   fieldLabel: {
     fontSize: 11,

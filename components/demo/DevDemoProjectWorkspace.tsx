@@ -58,9 +58,19 @@ const TABS: { id: TabId; label: string }[] = [
 
 const TOOLS: { id: string; title: string; sub: string; icon: LucideIcon }[] = [
   { id: 'shotlist', title: 'Shotlist', sub: 'Shot-by-shot breakdown.', icon: Clapperboard },
-  { id: 'tasks', title: 'Task breakdown', sub: 'Phases & responsibilities.', icon: ClipboardList },
-  { id: 'callsheet', title: 'Call sheet', sub: 'Crew, times & locations.', icon: Phone },
-  { id: 'gear', title: 'Equipment list', sub: 'Cameras, lights, grip & more.', icon: Video },
+  {
+    id: 'tasks',
+    title: 'Task breakdown',
+    sub: 'Phases, RACI-style tables & checklists.',
+    icon: ClipboardList,
+  },
+  { id: 'callsheet', title: 'Call sheet', sub: 'Timeline, travel legs, distances & crew calls.', icon: Phone },
+  {
+    id: 'gear',
+    title: 'Equipment list',
+    sub: 'Qty, specs, tables by department.',
+    icon: Video,
+  },
 ]
 
 type ShotDemo = { id: string; scene: string; desc: string; lens: string; status: string }
@@ -147,10 +157,63 @@ export function DevDemoProjectWorkspace() {
 
   const genBrief = () => {
     const samples: Record<string, string> = {
-      shotlist: '## Demo shotlist\n1. Wide establishing\n2. Product insert',
-      tasks: '## Demo tasks\n- **Prep** — art dept\n- **Shoot** — camera team',
-      callsheet: '## Demo call\n- Crew call 07:00\n- Block 1: interviews',
-      gear: '## Demo gear\n- Camera: FX6\n- Lenses: 24, 50, 85',
+      shotlist: `## Demo shotlist (rich preview — real app uses Brief AI + your context)
+
+### Back street — pre-dawn
+1. WS — Empty canyon of buildings, sodium + blue hour, talent as small silhouette downstage, 24mm, nat sound city hum
+2. MS — Walk-up from behind, coat collar + breath visible, 35mm handheld, lav rustle check
+3. CU — Laces hitting wet pavement, macro / 85mm close, foley-ready
+4. MCU — Profile, available light only, catch car pass bokeh BG
+
+### Subway entrance — morning rush building
+5. WS — Wide chart of stairs + signage geometry, talent paused mid-stride, 18mm distortion intentional
+6. MS — Turnstile push, hands + card, 35mm, nat sound turnstile beep
+7. CU — Metro card texture + thumb pressure, insert
+8. MS — Over-shoulder into dark mouth of tunnel, exposure hold for grade
+
+### Rooftop — skyline
+9. WS — Talent at parapet, skyline read, golden rim, 24mm on sticks, wind in mics note
+10. MS — Hair + fabric whip, 50mm, high shutter for crisp motion
+11. CU — Eyes searching frame R, catchlight from rising sun
+12. ECU — Jewelry / watch glint (if in brief), macro
+13. WS — Silhouette step-off frame as beat to black, music drop placeholder`,
+      tasks: `## Prep & permits
+| Task | Owner | Due |
+|------|-------|-----|
+| Location agreements | PM | TBD |
+| COI upload | LP | TBD |
+
+- [ ] Tech scout confirmed
+- [ ] Call sheet v1
+
+## Shoot
+- **Camera** — check media twice
+  - Spare batteries charged`,
+      callsheet: `## Demo call sheet
+### Day timeline
+| Time | What |
+|------|------|
+| 07:00 | General crew call — Studio A |
+| 08:30 | Camera blocking |
+| 12:30–13:15 | Lunch |
+| 17:30 | Est. wrap |
+
+### Locations
+- **Studio A** — Address TBD; crew parking Gate 2.
+
+### Travel legs
+| From | To | Dist. | Drive | Suggested depart |
+|------|----|-------|-------|------------------|
+| Studio A | City ext. | ~12 km (approx.) | 25 min (40 rush) | 14:05 for 14:40 block |`,
+      gear: `## Camera & media
+| Item | Qty | Notes |
+|------|-----|-------|
+| FX6 body | 1 | TBD backup |
+| CFexpress Type A | 6 | spare |
+
+## Lenses & filters
+- 24mm / 50mm / 85mm — **PL mount** (confirm)
+  - ND **0.6–1.2** slip-in`,
     }
     setBriefOut((o) => ({ ...o, [tool]: samples[tool] ?? samples.tasks }))
   }
@@ -491,6 +554,16 @@ export function DevDemoProjectWorkspace() {
                 <TouchableOpacity style={styles.genBtn} onPress={genBrief}>
                   <Text style={styles.genBtnText}>Generate demo output</Text>
                 </TouchableOpacity>
+                {(tool === 'shotlist' || tool === 'callsheet') && (
+                  <View style={styles.demoSyncBox}>
+                    <Text style={styles.demoSyncTitle}>Production sync</Text>
+                    <Text style={styles.demoSyncText}>
+                      In this mock workspace there is no Apply — nothing is saved to Supabase. To use Apply like the
+                      real app, set EXPO_PUBLIC_DEMO_PROJECT_ID in .env.local to a project UUID and reopen Demo
+                      workspace (or open a real /project/[id] link).
+                    </Text>
+                  </View>
+                )}
               </>
             )}
           </ScrollView>
@@ -633,6 +706,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   genBtnText: { color: '#0a0a0a', fontWeight: '800' },
+  demoSyncBox: {
+    marginTop: 20,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#141414',
+  },
+  demoSyncTitle: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  demoSyncText: { fontSize: 12, color: 'rgba(255,255,255,0.55)', lineHeight: 18 },
   placeholderBox: {
     flex: 1,
     justifyContent: 'center',

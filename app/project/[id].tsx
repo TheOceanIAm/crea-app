@@ -98,9 +98,24 @@ const BASE_TABS: { id: TabId; label: string }[] = [
 
 const TOOLS: { id: string; title: string; sub: string; icon: LucideIcon }[] = [
   { id: 'shotlist', title: 'Shotlist', sub: 'Shot-by-shot breakdown.', icon: Clapperboard },
-  { id: 'tasks', title: 'Task breakdown', sub: 'Phases & responsibilities.', icon: ClipboardList },
-  { id: 'callsheet', title: 'Call sheet', sub: 'Crew, times & locations.', icon: Phone },
-  { id: 'gear', title: 'Equipment list', sub: 'Cameras, lights, grip & more.', icon: Video },
+  {
+    id: 'tasks',
+    title: 'Task breakdown',
+    sub: 'Phases, RACI-style tables & checklists.',
+    icon: ClipboardList,
+  },
+  {
+    id: 'callsheet',
+    title: 'Call sheet',
+    sub: 'Timeline, travel legs, distances & crew calls.',
+    icon: Phone,
+  },
+  {
+    id: 'gear',
+    title: 'Equipment list',
+    sub: 'Qty, specs, tables by department.',
+    icon: Video,
+  },
 ]
 
 export default function ProjectWorkspaceScreen() {
@@ -170,10 +185,9 @@ export default function ProjectWorkspaceScreen() {
 
   useEffect(() => {
     if (!project) return
-    const from = typeof project.scheduling_start_date === 'string' ? project.scheduling_start_date.slice(0, 10) : ''
-    if (from && parseIsoDateInput(from)) setProductionApplyDate(from)
-    else setProductionApplyDate(todayLocalISODate())
-  }, [project?.id, project?.scheduling_start_date])
+    // Match Production tab default (shoot list loads "today" until user changes the day there).
+    setProductionApplyDate(todayLocalISODate())
+  }, [project?.id])
 
   const tabs = BASE_TABS
 
@@ -622,57 +636,20 @@ export default function ProjectWorkspaceScreen() {
                   })}
                 </View>
 
-                {!!currentOutput && (
-                  <View style={styles.outputBox}>
-                    <Text style={styles.outputLabel}>Generated · {TOOLS.find((t) => t.id === tool)?.title}</Text>
-                    <BriefAiFormattedOutput content={currentOutput} />
-                  </View>
-                )}
-
-                {canSyncProductionTool && !!currentOutput.trim() ? (
-                  <View style={styles.prodSyncCard}>
-                    <Text style={styles.sectionLabel}>Production sync</Text>
-                    <Text style={styles.prodSyncSub}>
-                      Writes into the same database rows as Production → Shotlist / Call sheet. Pick the calendar day
-                      (must match the day you open in Production).
-                    </Text>
-                    <TextInput
-                      style={styles.scheduleInput}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor="rgba(255,255,255,0.25)"
-                      value={productionApplyDate}
-                      onChangeText={setProductionApplyDate}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    <TouchableOpacity
-                      style={[styles.prodSyncBtn, applyingProd && styles.btnDim]}
-                      onPress={tool === 'shotlist' ? onApplyShotlistChoices : onApplyCallsheet}
-                      disabled={applyingProd}
-                    >
-                      {applyingProd ? (
-                        <ActivityIndicator color="#FFDC00" />
-                      ) : (
-                        <Text style={styles.prodSyncBtnText}>
-                          {tool === 'shotlist' ? 'Apply shot list to Production…' : 'Apply call sheet to Production…'}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                ) : null}
-
-                <Text style={styles.contextLabel}>
-                  ADDITIONAL CONTEXT <Text style={styles.optional}>(optional)</Text>
-                </Text>
-                <TextInput
-                  style={styles.briefInput}
-                  multiline
-                  placeholder="Describe creative direction, references, deliverables, schedule…"
-                  placeholderTextColor="rgba(255,255,255,0.25)"
-                  value={briefText}
-                  onChangeText={setBriefText}
-                  textAlignVertical="top"
-                />
+                <View style={styles.contextCard}>
+                  <Text style={styles.contextLabel}>
+                    ADDITIONAL CONTEXT <Text style={styles.optional}>(optional)</Text>
+                  </Text>
+                  <TextInput
+                    style={[styles.briefInput, styles.briefInputInCard]}
+                    multiline
+                    placeholder="Describe creative direction, references, deliverables, schedule…"
+                    placeholderTextColor="rgba(255,255,255,0.25)"
+                    value={briefText}
+                    onChangeText={setBriefText}
+                    textAlignVertical="top"
+                  />
+                </View>
                 <View style={styles.briefActions}>
                   <TouchableOpacity
                     style={[styles.saveBtn, savingBrief && styles.btnDim]}
@@ -693,6 +670,70 @@ export default function ProjectWorkspaceScreen() {
                     )}
                   </TouchableOpacity>
                 </View>
+
+                {!!currentOutput && (
+                  <View style={styles.outputBox}>
+                    <View style={styles.outputBoxHead}>
+                      <View style={styles.outputIconWrap}>
+                        <Sparkles size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                      </View>
+                      <View style={styles.outputBoxHeadText}>
+                        <Text style={styles.outputLabel}>Generated</Text>
+                        <Text style={styles.outputToolName}>{TOOLS.find((t) => t.id === tool)?.title}</Text>
+                      </View>
+                    </View>
+                    <BriefAiFormattedOutput content={currentOutput} />
+                  </View>
+                )}
+
+                {canSyncProductionTool ? (
+                  <View style={styles.prodSyncCard}>
+                    <View style={styles.prodSyncHead}>
+                      <View style={styles.prodSyncIconWrap}>
+                        <Sparkles size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                      </View>
+                      <View style={styles.prodSyncHeadText}>
+                        <Text style={styles.prodSyncKicker}>Production sync</Text>
+                        <Text style={styles.prodSyncLead}>
+                          Push this tool into the same Production tables as the app.
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.prodSyncSub}>
+                      Use the same date as Production → Shotlist / Call sheet (Load day). After Generate, tap Apply —
+                      nothing copies by itself.
+                    </Text>
+                    <TextInput
+                      style={styles.scheduleInput}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor="rgba(255,255,255,0.25)"
+                      value={productionApplyDate}
+                      onChangeText={setProductionApplyDate}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!applyingProd}
+                    />
+                    <TouchableOpacity
+                      style={[
+                        styles.prodSyncBtn,
+                        (!currentOutput.trim() || applyingProd) && styles.btnDim,
+                      ]}
+                      onPress={tool === 'shotlist' ? onApplyShotlistChoices : onApplyCallsheet}
+                      disabled={!currentOutput.trim() || applyingProd}
+                    >
+                      {applyingProd ? (
+                        <ActivityIndicator color="#FFDC00" />
+                      ) : (
+                        <Text style={styles.prodSyncBtnText}>
+                          {tool === 'shotlist' ? 'Apply shot list to Production…' : 'Apply call sheet to Production…'}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                    {!currentOutput.trim() ? (
+                      <Text style={styles.prodSyncHint}>Generate first — then Apply appears here.</Text>
+                    ) : null}
+                  </View>
+                ) : null}
               </>
             )}
           </ScrollView>
@@ -811,24 +852,43 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.06)',
     gap: 8,
   },
-  toolCardActive: { borderColor: 'rgba(255,220,0,0.55)' },
+  toolCardActive: {
+    borderColor: 'rgba(255,220,0,0.55)',
+    backgroundColor: 'rgba(255,220,0,0.07)',
+  },
   toolTitle: { fontSize: 15, fontWeight: '700', color: '#fff' },
   toolSub: { fontSize: 12, color: 'rgba(255,255,255,0.35)', lineHeight: 16 },
   outputBox: {
     backgroundColor: '#111',
-    borderRadius: 14,
-    padding: 14,
+    borderRadius: 16,
+    padding: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#FFDC00',
     marginBottom: 20,
   },
+  outputBoxHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  outputIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,220,0,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outputBoxHeadText: { flex: 1, minWidth: 0 },
   outputLabel: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.35)',
-    letterSpacing: 1.2,
-    marginBottom: 10,
+    color: 'rgba(255,255,255,0.38)',
+    letterSpacing: 1.3,
+    marginBottom: 2,
     textTransform: 'uppercase',
+    fontWeight: '700',
   },
+  outputToolName: { fontSize: 17, fontWeight: '800', color: '#fff' },
   contextLabel: {
     fontSize: 10,
     color: 'rgba(255,255,255,0.35)',
@@ -836,10 +896,18 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   optional: { fontStyle: 'italic', letterSpacing: 0 },
+  contextCard: {
+    marginBottom: 20,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+  },
   briefInput: {
     minHeight: 160,
-    backgroundColor: '#111',
-    borderRadius: 14,
+    backgroundColor: '#0a0a0a',
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
     padding: 14,
@@ -847,6 +915,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 16,
+  },
+  briefInputInCard: {
+    marginBottom: 0,
+    backgroundColor: '#0a0a0a',
   },
   briefActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   saveBtn: {
@@ -869,13 +941,36 @@ const styles = StyleSheet.create({
   prodSyncCard: {
     marginTop: 20,
     marginBottom: 8,
-    padding: 14,
-    borderRadius: 12,
+    padding: 16,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
+    borderLeftWidth: 3,
+    borderLeftColor: 'rgba(255,220,0,0.9)',
     backgroundColor: '#141414',
   },
-  prodSyncSub: { fontSize: 12, color: 'rgba(255,255,255,0.4)', lineHeight: 17, marginBottom: 12 },
+  prodSyncHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
+  prodSyncIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,220,0,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  prodSyncHeadText: { flex: 1, minWidth: 0 },
+  prodSyncKicker: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: 'rgba(255,220,0,0.9)',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  prodSyncLead: { fontSize: 15, fontWeight: '800', color: '#fff', lineHeight: 20 },
+  prodSyncSub: { fontSize: 12, color: 'rgba(255,255,255,0.42)', lineHeight: 17, marginBottom: 12 },
   prodSyncBtn: {
     marginTop: 4,
     paddingVertical: 14,
@@ -886,6 +981,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   prodSyncBtnText: { color: '#FFDC00', fontWeight: '800', fontSize: 14 },
+  prodSyncHint: {
+    marginTop: 10,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.38)',
+    lineHeight: 17,
+  },
   btnDim: { opacity: 0.6 },
   para: { fontSize: 14, color: 'rgba(255,255,255,0.45)', lineHeight: 20, marginBottom: 12 },
   miss: { color: 'rgba(255,255,255,0.5)', textAlign: 'center' },

@@ -60,7 +60,7 @@ Example (callsheet):
 
 1. Reads `projects.brief_ai_outputs.callsheet`.
 2. Loads **`project_members`** (+ profile names) for name matching.
-3. OpenAI returns JSON with `entries[]`, optional `default_call_time`, `default_location`, `notes`.
+3. OpenAI returns JSON with `entries[]`, optional `default_call_time`, `default_location`, and **`notes`** (day-wide logistics: timeline, location addresses/parking, **travel legs** with approx. distance and drive times, meals, emergency line — condensed from the Brief AI markdown).
 4. Merges into **`production_days.call_sheet`** as `{ [profile_id]: { call_time?, location? } }`.
 5. If no row exists for `(project_id, date)`:
    - **Company** (`projects.company_id === auth user`): **inserts** a new `production_days` row.
