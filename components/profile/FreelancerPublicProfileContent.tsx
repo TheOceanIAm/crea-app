@@ -392,12 +392,6 @@ export function FreelancerPublicProfileContent({
                 </Text>
                 <Text style={styles.statLabel}>PROJECTS</Text>
               </View>
-              <View style={styles.statCell}>
-                <Text style={styles.statValue}>
-                  {profileNorm.years_experience != null ? String(profileNorm.years_experience) : '—'}
-                </Text>
-                <Text style={styles.statLabel}>YEARS</Text>
-              </View>
             </View>
           ) : null}
           {isFreelancer && (profileNorm.open_to_remote || profileNorm.open_to_travel) ? (

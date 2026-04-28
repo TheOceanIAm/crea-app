@@ -31,6 +31,7 @@ type JobRow = {
   description: string | null
   company_id: string
   status: string
+  is_solo_workspace?: boolean | null
 }
 
 function companyInitial(name: string) {
@@ -85,6 +86,15 @@ export default function JobDetailScreen() {
     }
 
     const ownerId = String((row as JobRow).company_id || '').trim()
+    const isWorkspaceOnly = Boolean((row as JobRow).is_solo_workspace)
+    if (isWorkspaceOnly) {
+      setAccessDenied(true)
+      setJob(null)
+      setCompanyName('Company')
+      setCompanyLogoUrl(null)
+      setLoading(false)
+      return
+    }
     if (user && isCompanyProfile(resolvedRole) && ownerId && user.id !== ownerId) {
       setAccessDenied(true)
       setJob(null)

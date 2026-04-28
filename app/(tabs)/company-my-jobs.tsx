@@ -61,6 +61,7 @@ export default function CompanyMyJobsScreen() {
       .from('jobs')
       .select('id, title, category, status, created_at')
       .eq('company_id', user.id)
+      .eq('is_solo_workspace', false)
       .order('created_at', { ascending: false })
       .limit(100)
     if (error || !data) setRows([])

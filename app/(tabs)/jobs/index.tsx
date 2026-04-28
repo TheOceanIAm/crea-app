@@ -28,6 +28,7 @@ type Job = {
   company_name: string
   company_logo_url: string | null
   status: string
+  is_solo_workspace: boolean
 }
 
 function companyInitial(name: string) {
@@ -64,7 +65,9 @@ export default function JobsListScreen() {
 
     let q = supabase
       .from('jobs')
-      .select('id, title, category, budget_type, budget_amount, budget_currency, location_type, company_id, status')
+      .select(
+        'id, title, category, budget_type, budget_amount, budget_currency, location_type, company_id, status, is_solo_workspace'
+      )
       .order('created_at', { ascending: false })
       .limit(companyOnly ? 100 : 30)
 
@@ -73,6 +76,7 @@ export default function JobsListScreen() {
     } else {
       q = q.eq('status', 'active')
     }
+    q = q.eq('is_solo_workspace', false)
 
     const { data: jobRows, error } = await q
 
@@ -115,6 +119,7 @@ export default function JobsListScreen() {
         company_name: c?.name ?? 'Company',
         company_logo_url: c?.avatar_url ?? null,
         status: String(j.status ?? ''),
+        is_solo_workspace: Boolean(j.is_solo_workspace),
       }
     })
 
