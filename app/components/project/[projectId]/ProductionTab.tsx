@@ -136,6 +136,7 @@ type Props = {
   projectLocation: string | null
   companyId: string
   briefContext: string | null
+  briefOutputs?: Record<string, string> | null
 }
 
 const PRODUCTION_SECTIONS = [
@@ -154,6 +155,16 @@ const PRODUCTION_SECTIONS = [
     label: 'Call Sheet',
     sub: 'Crew calls, locations, PDF export, and daily wrap',
   },
+  {
+    id: 'tasks' as const,
+    label: 'Tasks',
+    sub: 'Brief AI task breakdown synced to production context',
+  },
+  {
+    id: 'equipment' as const,
+    label: 'Equipment',
+    sub: 'Brief AI equipment list synced to production context',
+  },
 ]
 
 type ProductionSectionId = (typeof PRODUCTION_SECTIONS)[number]['id']
@@ -165,6 +176,7 @@ export function ProductionTab({
   projectLocation,
   companyId,
   briefContext,
+  briefOutputs,
 }: Props) {
   const [shootDay, setShootDay] = useState(() => todayLocalISODate())
   const [dayInput, setDayInput] = useState(() => todayLocalISODate())
@@ -184,6 +196,8 @@ export function ProductionTab({
   const [exportingPdf, setExportingPdf] = useState(false)
   /** `null` = category hub; otherwise full-screen feature */
   const [openFeature, setOpenFeature] = useState<ProductionSectionId | null>(null)
+  const tasksOutput = (briefOutputs?.tasks ?? '').trim()
+  const gearOutput = (briefOutputs?.gear ?? '').trim()
 
   const load = useCallback(async () => {
     const [shRes, crRes, dayRes] = await Promise.all([
@@ -458,7 +472,7 @@ export function ProductionTab({
     return (
       <ScrollView style={styles.scroll} contentContainerStyle={styles.hubContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.hint}>
-          Choose a category to open weather, the shotlist, or call sheet & wrap. Visible to the whole team.
+          Choose a category to open weather, shotlist, call sheet, tasks, or equipment. Visible to the whole team.
         </Text>
         {PRODUCTION_SECTIONS.map((s) => (
           <TouchableOpacity
@@ -524,6 +538,26 @@ export function ProductionTab({
         </View>
       ) : null}
       {openFeature === 'weather' ? <ProductionWeatherSection initialLocation={projectLocation} /> : null}
+      {openFeature === 'tasks' ? (
+        <View style={styles.aiDocCard}>
+          <Text style={styles.aiDocTitle}>Task breakdown</Text>
+          {tasksOutput ? (
+            <BriefAiFormattedOutput content={tasksOutput} embedded />
+          ) : (
+            <Text style={styles.muted}>Generate “Task breakdown” in Brief AI first. It will appear here automatically.</Text>
+          )}
+        </View>
+      ) : null}
+      {openFeature === 'equipment' ? (
+        <View style={styles.aiDocCard}>
+          <Text style={styles.aiDocTitle}>Equipment list</Text>
+          {gearOutput ? (
+            <BriefAiFormattedOutput content={gearOutput} embedded />
+          ) : (
+            <Text style={styles.muted}>Generate “Equipment list” in Brief AI first. It will appear here automatically.</Text>
+          )}
+        </View>
+      ) : null}
 
       {showDataLoading ? (
         <View style={styles.loadingBlock}>
@@ -1151,6 +1185,20 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   muted: { fontSize: 13, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic' },
+  aiDocCard: {
+    marginTop: 18,
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#111',
+  },
+  aiDocTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#fff',
+    marginBottom: 12,
+  },
   loadingBlock: { paddingVertical: 24, alignItems: 'center', gap: 12 },
   loadingHint: { fontSize: 13, color: 'rgba(255,255,255,0.45)' },
 })

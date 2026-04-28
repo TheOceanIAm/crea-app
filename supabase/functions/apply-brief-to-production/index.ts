@@ -23,6 +23,16 @@ function extractJsonObject(raw: string): unknown {
   return JSON.parse(s)
 }
 
+function extractAnthropicText(payload: unknown): string {
+  const content = (payload as { content?: Array<{ type?: string; text?: string }> })?.content
+  if (!Array.isArray(content)) return ''
+  return content
+    .filter((x) => x && x.type === 'text' && typeof x.text === 'string')
+    .map((x) => x.text ?? '')
+    .join('\n')
+    .trim()
+}
+
 type ShotPayload = {
   scene_nr?: string
   description?: string
@@ -161,12 +171,12 @@ Deno.serve(async (req) => {
       )
     }
 
-    const openaiKey = Deno.env.get('OPENAI_API_KEY')
-    if (!openaiKey) {
+    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
+    if (!anthropicKey) {
       return new Response(
         JSON.stringify({
-          error: 'OpenAI not configured',
-          hint: 'Set OPENAI_API_KEY for Edge Functions',
+          error: 'Anthropic not configured',
+          hint: 'Set ANTHROPIC_API_KEY for Edge Functions',
         }),
         { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       )
@@ -177,33 +187,32 @@ Deno.serve(async (req) => {
 {"shots":[{"scene_nr":"","description":"","lens":"","location":"","framing":"","audio_notes":""}]}
 Rules: Use empty strings for unknown fields. At most ${MAX_SHOTS} shots. Preserve order from the source.`
 
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${openaiKey}`,
           'Content-Type': 'application/json',
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: sys },
-            { role: 'user', content: markdown.slice(0, 12000) },
-          ],
+          model: 'claude-3-5-sonnet-latest',
+          max_tokens: 2400,
           temperature: 0.2,
-          response_format: { type: 'json_object' },
+          system: `${sys}\n\nOutput ONLY JSON. No markdown fences.`,
+          messages: [{ role: 'user', content: markdown.slice(0, 12000) }],
         }),
       })
 
       if (!res.ok) {
         const t = await res.text()
-        return new Response(JSON.stringify({ error: 'OpenAI error', details: t }), {
+        return new Response(JSON.stringify({ error: 'Anthropic error', details: t }), {
           status: 502,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
 
       const completion = await res.json()
-      const raw = completion?.choices?.[0]?.message?.content ?? ''
+      const raw = extractAnthropicText(completion)
       let parsed: { shots?: ShotPayload[] }
       try {
         parsed = extractJsonObject(raw) as { shots?: ShotPayload[] }
@@ -286,36 +295,37 @@ Rules:
 - default_call_time / default_location: use when the sheet gives one crew report time or one base for everyone.
 - notes (REQUIRED if the markdown contains them — never omit): copy and condense into plain text (no JSON inside notes) the parts of the markdown that are NOT per-person overrides: full **day timeline** with times, **location list** with addresses/parking, **travel legs** (from → to, approx distance, drive times normal vs rush if stated, suggested depart times), meals/catering window, cast vs crew timing if present, emergency/hospital line, weather line. Aim for dense, scannable paragraphs or bullet lines; max about 9000 characters in notes. If the markdown has no extra logistics, notes may be empty string.`
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${openaiKey}`,
         'Content-Type': 'application/json',
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'claude-3-5-sonnet-latest',
+        max_tokens: 3000,
+        temperature: 0.2,
+        system: `${sys}\n\nOutput ONLY JSON. No markdown fences.`,
         messages: [
-          { role: 'system', content: sys },
           {
             role: 'user',
             content: `Call sheet markdown:\n${markdown.slice(0, 14000)}\n\nCrew (match "name" to entries; profile_id is for your reasoning only, do not invent ids):\n${crewLines}`,
           },
         ],
-        temperature: 0.2,
-        response_format: { type: 'json_object' },
       }),
     })
 
     if (!res.ok) {
       const t = await res.text()
-      return new Response(JSON.stringify({ error: 'OpenAI error', details: t }), {
+      return new Response(JSON.stringify({ error: 'Anthropic error', details: t }), {
         status: 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
     const completion = await res.json()
-    const raw = completion?.choices?.[0]?.message?.content ?? ''
+    const raw = extractAnthropicText(completion)
     let parsed: CallsheetPayload
     try {
       parsed = extractJsonObject(raw) as CallsheetPayload

@@ -53,6 +53,7 @@ import {
   parsePortfolioProjects,
 } from '@/lib/profileSettingsExtras'
 import { registerForExpoPushTokenAsync } from '@/lib/pushNotifications'
+import { resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 
 const SUPPORT_MAIL = 'mailto:support@crea.app?subject=CREA%20App%20Support'
 const TRIAL_END_LABEL = 'June 1, 2026'
@@ -96,6 +97,7 @@ const MENU_ITEMS: MenuItem[] = [
 const CEO_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability', 'billing', 'plan']
 /** Rates & availability are freelancer-focused; companies use jobs for budgets. Website/social live under Profile. */
 const COMPANY_HIDDEN_MENU_IDS: MenuId[] = ['rates', 'availability']
+const WORKSPACE_PLAN_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability', 'billing']
 
 function roleLabel(role: string) {
   if (role === 'company') return 'Company'
@@ -231,17 +233,25 @@ export default function ProfileScreen() {
   const freelancer = isFreelancerProfile(role)
   const ceo = isCeoProfile(role)
   const company = isCompanyProfile(role)
+  const workspacePlan = freelancer && subscriptionTier === 'workspace'
 
   const visibleMenuItems = useMemo(() => {
     if (ceo) return MENU_ITEMS.filter((item) => !CEO_HIDDEN_MENU_IDS.includes(item.id))
     if (company) return MENU_ITEMS.filter((item) => !COMPANY_HIDDEN_MENU_IDS.includes(item.id))
+    if (workspacePlan) return MENU_ITEMS.filter((item) => !WORKSPACE_PLAN_HIDDEN_MENU_IDS.includes(item.id))
     return MENU_ITEMS
-  }, [ceo, company])
+  }, [ceo, company, workspacePlan])
 
   useEffect(() => {
-    const hidden = ceo ? CEO_HIDDEN_MENU_IDS : company ? COMPANY_HIDDEN_MENU_IDS : []
+    const hidden = ceo
+      ? CEO_HIDDEN_MENU_IDS
+      : company
+        ? COMPANY_HIDDEN_MENU_IDS
+        : workspacePlan
+          ? WORKSPACE_PLAN_HIDDEN_MENU_IDS
+          : []
     if (hidden.length && hidden.includes(activeMenu)) setActiveMenu('profile')
-  }, [ceo, company, activeMenu])
+  }, [ceo, company, workspacePlan, activeMenu])
 
   const load = useCallback(async () => {
     setLoadError(null)
@@ -315,7 +325,18 @@ export default function ProfileScreen() {
       setTaxNumber(data?.tax_number ?? '')
       setVatRegistered(Boolean(data?.vat_registered))
       setNotif(parseNotificationSettings(data?.notification_settings))
-      setSubscriptionTier((data?.subscription_tier as string) || 'starter')
+      const dbTier = String((data?.subscription_tier as string) || '')
+        .trim()
+        .toLowerCase()
+      const authTier = resolveFreelancerPlanFromUser(user)
+      // Web source of truth is auth metadata (`freelancer_plan`); prefer it for freelancer sessions.
+      const effectiveTier =
+        resolveAppRole(data?.role, user) === 'freelancer'
+          ? authTier
+          : dbTier === 'pro' || dbTier === 'premium'
+            ? dbTier
+            : 'starter'
+      setSubscriptionTier(effectiveTier)
       setDayRate(data?.day_rate_amount != null ? String(data.day_rate_amount) : '')
       setHalfDayRate(data?.half_day_rate_amount != null ? String(data.half_day_rate_amount) : '')
       setRatesCurrency((data?.rates_currency as string) || 'EUR')
@@ -1323,10 +1344,18 @@ export default function ProfileScreen() {
                 <View style={styles.currentPlanBox}>
                   <Text style={styles.currentPlanLabel}>Current plan</Text>
                   <Text style={styles.currentPlanName}>
-                    {subscriptionTier === 'pro' ? 'Pro' : subscriptionTier === 'premium' ? 'Premium' : 'Starter'}
+                    {subscriptionTier === 'workspace'
+                      ? 'Workspace'
+                      : subscriptionTier === 'pro'
+                        ? 'Pro'
+                        : subscriptionTier === 'premium'
+                          ? 'Premium'
+                          : 'Starter'}
                   </Text>
                   <Text style={styles.currentPlanDesc}>
-                    {subscriptionTier === 'pro'
+                    {subscriptionTier === 'workspace'
+                      ? 'Private workspace mode: no marketplace visibility.'
+                      : subscriptionTier === 'pro'
                       ? 'Job Feed+, post jobs, 5 active bookings per month.'
                       : subscriptionTier === 'premium'
                         ? 'Verified, liability cover, maximum visibility — tier coming soon.'
@@ -1354,7 +1383,7 @@ export default function ProfileScreen() {
                   price="9 € / month"
                   desc="Basic job feed, 2 active bookings per month, no job postings."
                   cta="Checkout after trial"
-                  current={subscriptionTier === 'starter'}
+                  current={subscriptionTier === 'starter' || subscriptionTier === 'workspace'}
                   onPress={() =>
                     Alert.alert(
                       'Stripe',

@@ -36,6 +36,8 @@ import {
   projectStatusDisplayLabel,
   projectStatusVariant,
 } from '@/lib/projectStatusDisplay'
+import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 
 type TabId =
   | 'overview'
@@ -66,6 +68,15 @@ type ProjectRow = {
   brief_ai_outputs: Record<string, string> | null
   scheduling_start_date: string | null
   scheduling_end_date: string | null
+}
+
+type ApplyBriefProdResult = {
+  ok?: boolean
+  error?: string
+  hint?: string
+  shotsInserted?: number
+  crewUpdated?: number
+  createdDay?: boolean
 }
 
 function parseIsoDateInput(raw: string): string | null {
@@ -125,11 +136,18 @@ export default function ProjectWorkspaceScreen() {
   const [forbidden, setForbidden] = useState(false)
   const [project, setProject] = useState<ProjectRow | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+  const [workspaceOnlyPlan, setWorkspaceOnlyPlan] = useState(false)
   const [applicants, setApplicants] = useState(0)
-  const [tab, setTab] = useState<TabId>('brief')
+  const [tab, setTab] = useState<TabId>('overview')
   const [tool, setTool] = useState<string>('tasks')
   const [briefText, setBriefText] = useState('')
+  const [overviewSummary, setOverviewSummary] = useState('')
+  const [overviewBudgetAmount, setOverviewBudgetAmount] = useState('')
+  const [overviewBudgetType, setOverviewBudgetType] = useState('')
+  const [overviewStatus, setOverviewStatus] = useState('active')
+  const [overviewEditOpen, setOverviewEditOpen] = useState(false)
   const [savingBrief, setSavingBrief] = useState(false)
+  const [savingOverview, setSavingOverview] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [scheduleStart, setScheduleStart] = useState('')
   const [scheduleEnd, setScheduleEnd] = useState('')
@@ -146,10 +164,16 @@ export default function ProjectWorkspaceScreen() {
     } = await supabase.auth.getUser()
     if (!user) {
       setForbidden(true)
+      setWorkspaceOnlyPlan(false)
       setLoading(false)
       return
     }
     setUserId(user.id)
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+    const role = resolveAppRole(profile?.role, user)
+    setWorkspaceOnlyPlan(
+      isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))
+    )
 
     const { data: row, error } = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
     if (error || !row) {
@@ -162,6 +186,14 @@ export default function ProjectWorkspaceScreen() {
     const p = row as ProjectRow
     setProject(p)
     setBriefText(p.brief_ai_context ?? '')
+    setOverviewSummary(
+      p.brief_ai_outputs && typeof p.brief_ai_outputs.workspace_summary === 'string'
+        ? p.brief_ai_outputs.workspace_summary
+        : p.brief_ai_context ?? ''
+    )
+    setOverviewBudgetAmount(typeof p.budget_amount === 'number' ? String(p.budget_amount) : '')
+    setOverviewBudgetType(p.budget_type ?? '')
+    setOverviewStatus(p.status || 'active')
     setScheduleStart(typeof p.scheduling_start_date === 'string' ? p.scheduling_start_date.slice(0, 10) : '')
     setScheduleEnd(typeof p.scheduling_end_date === 'string' ? p.scheduling_end_date.slice(0, 10) : '')
     setForbidden(false)
@@ -189,7 +221,14 @@ export default function ProjectWorkspaceScreen() {
     setProductionApplyDate(todayLocalISODate())
   }, [project?.id])
 
-  const tabs = BASE_TABS
+  const tabs = useMemo(
+    () => (workspaceOnlyPlan ? BASE_TABS.filter((t) => t.id !== 'messages') : BASE_TABS),
+    [workspaceOnlyPlan]
+  )
+
+  useEffect(() => {
+    if (workspaceOnlyPlan && tab === 'messages') setTab('overview')
+  }, [workspaceOnlyPlan, tab])
 
   const canManageCrew = useMemo(() => {
     if (!project || !userId) return false
@@ -208,29 +247,25 @@ export default function ProjectWorkspaceScreen() {
   const currentOutput = project?.brief_ai_outputs?.[tool] ?? ''
   const canSyncProductionTool = tool === 'shotlist' || tool === 'callsheet'
 
-  const invokeApplyBriefProduction = async (replaceShots: boolean) => {
+  const invokeApplyBriefProduction = async (
+    replaceShots: boolean,
+    opts?: { date?: string; silentSuccess?: boolean }
+  ) => {
     if (!project || !canSyncProductionTool) return
-    const d = parseIsoDateInput(productionApplyDate.trim())
+    const d = parseIsoDateInput((opts?.date ?? productionApplyDate).trim())
     if (!d) {
       Alert.alert('Date', 'Enter the shoot / production day as YYYY-MM-DD.')
       return
     }
     setApplyingProd(true)
-    const { data, error } = await supabase.functions.invoke<{
-      ok?: boolean
-      error?: string
-      hint?: string
-      shotsInserted?: number
-      crewUpdated?: number
-      createdDay?: boolean
-    }>('apply-brief-to-production', {
+    const { data, error } = await supabase.functions.invoke<ApplyBriefProdResult>('apply-brief-to-production', {
       body: { projectId: project.id, tool, shootDate: d, replaceShots },
     })
     setApplyingProd(false)
     if (error) {
       Alert.alert(
         'Apply failed',
-        `${error.message}\n\nDeploy the apply-brief-to-production Edge Function (see deploy-supabase.sh) and set OPENAI_API_KEY.`
+        `${error.message}\n\nDeploy the apply-brief-to-production Edge Function (see deploy-supabase.sh) and set ANTHROPIC_API_KEY.`
       )
       return
     }
@@ -240,20 +275,22 @@ export default function ProjectWorkspaceScreen() {
       return
     }
     if (data?.ok && tool === 'shotlist' && typeof data.shotsInserted === 'number') {
-      Alert.alert(
-        'Shot list',
-        `${data.shotsInserted} shot(s) for ${d}. Open the Production tab → Shotlist (same calendar day).`
-      )
+      if (!opts?.silentSuccess) {
+        Alert.alert(
+          'Shot list',
+          `${data.shotsInserted} shot(s) for ${d}. Open the Production tab → Shotlist (same calendar day).`
+        )
+      }
       return
     }
     if (data?.ok && tool === 'callsheet') {
       const parts = [`Saved for ${d}.`]
       if (data.createdDay) parts.push('A production day was created.')
       parts.push(`${data.crewUpdated ?? 0} crew row(s) updated in the call sheet.`)
-      Alert.alert('Call sheet', parts.join(' '))
+      if (!opts?.silentSuccess) Alert.alert('Call sheet', parts.join(' '))
       return
     }
-    Alert.alert('Apply', 'Unexpected response from server.')
+    if (!opts?.silentSuccess) Alert.alert('Apply', 'Unexpected response from server.')
   }
 
   const onApplyShotlistChoices = () => {
@@ -356,6 +393,46 @@ export default function ProjectWorkspaceScreen() {
     setProject((prev) => (prev ? { ...prev, brief_ai_context: briefText.trim() || null } : prev))
   }
 
+  const saveOverview = async () => {
+    if (!project) return
+    const rawBudget = overviewBudgetAmount.trim()
+    const parsedBudget = rawBudget ? Number(rawBudget.replace(',', '.')) : null
+    if (rawBudget && (!Number.isFinite(parsedBudget) || parsedBudget < 0)) {
+      Alert.alert('Budget', 'Please enter a valid non-negative number.')
+      return
+    }
+    const nextStatus = overviewStatus.trim() || 'active'
+    const nextSummary = overviewSummary.trim()
+    const prevOutputs = (project.brief_ai_outputs ?? {}) as Record<string, string>
+    setSavingOverview(true)
+    const { error } = await supabase
+      .from('projects')
+      .update({
+        budget_amount: parsedBudget,
+        budget_type: overviewBudgetType.trim() || null,
+        status: nextStatus,
+        brief_ai_outputs: { ...prevOutputs, workspace_summary: nextSummary },
+      })
+      .eq('id', project.id)
+    setSavingOverview(false)
+    if (error) {
+      Alert.alert('Save failed', error.message)
+      return
+    }
+    setProject((prev) =>
+      prev
+        ? {
+            ...prev,
+            budget_amount: parsedBudget,
+            budget_type: overviewBudgetType.trim() || null,
+            status: nextStatus,
+            brief_ai_outputs: { ...prevOutputs, workspace_summary: nextSummary },
+          }
+        : prev
+    )
+    Alert.alert('Saved', 'Overview details were updated.')
+  }
+
   const onGenerate = async () => {
     if (!project) return
     setGenerating(true)
@@ -379,7 +456,7 @@ export default function ProjectWorkspaceScreen() {
     if (error) {
       Alert.alert(
         'Generation failed',
-        `${error.message}\n\nDeploy the brief-ai Edge Function and set OPENAI_API_KEY if you have not yet.`
+        `${error.message}\n\nDeploy the brief-ai Edge Function and set ANTHROPIC_API_KEY if you have not yet.`
       )
       return
     }
@@ -391,7 +468,7 @@ export default function ProjectWorkspaceScreen() {
 
     const content = data?.content
     if (typeof content !== 'string' || !content.trim()) {
-      Alert.alert('Brief AI', 'No content returned. Check function logs and OpenAI billing.')
+      Alert.alert('Brief AI', 'No content returned. Check function logs and Anthropic billing.')
       return
     }
 
@@ -413,6 +490,9 @@ export default function ProjectWorkspaceScreen() {
           }
         : prev
     )
+    if (workspaceOnlyPlan && (tool === 'shotlist' || tool === 'callsheet')) {
+      await invokeApplyBriefProduction(false)
+    }
   }
 
   if (loading) {
@@ -442,11 +522,13 @@ export default function ProjectWorkspaceScreen() {
 
   const statsRow = (
     <View style={styles.statsRow}>
-      <View style={styles.statCard}>
-        <Text style={styles.statLabel}>Applicants</Text>
-        <Text style={styles.statValue}>{applicants}</Text>
-        <Text style={styles.statSub}>in crew pipeline</Text>
-      </View>
+      {!workspaceOnlyPlan ? (
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>Applicants</Text>
+          <Text style={styles.statValue}>{applicants}</Text>
+          <Text style={styles.statSub}>in crew pipeline</Text>
+        </View>
+      ) : null}
       <View style={styles.statCard}>
         <Text style={styles.statLabel}>Milestones</Text>
         <Text style={styles.statValue}>
@@ -544,6 +626,7 @@ export default function ProjectWorkspaceScreen() {
                   projectLocation={project.location}
                   companyId={project.company_id}
                   briefContext={project.brief_ai_context}
+                  briefOutputs={project.brief_ai_outputs}
                 />
               )}
               {tab === 'crew' && <ProjectCrewTab projectId={project.id} canManage={canManageCrew} />}
@@ -557,12 +640,75 @@ export default function ProjectWorkspaceScreen() {
             {tab === 'overview' && (
               <>
                 <ProjectOverviewAbout
-                  title={project.title}
-                  location={project.location}
-                  status={project.status}
-                  briefContext={project.brief_ai_context}
+                  briefContext={overviewSummary}
                 />
-                {canManageCrew ? (
+                {workspaceOnlyPlan ? (
+                  <>
+                    <TouchableOpacity
+                      style={styles.overviewEditToggleBtn}
+                      onPress={() => setOverviewEditOpen((v) => !v)}
+                    >
+                      <Text style={styles.overviewEditToggleText}>
+                        {overviewEditOpen ? 'Close edit overview' : 'Edit overview'}
+                      </Text>
+                    </TouchableOpacity>
+                    {overviewEditOpen ? (
+                      <View style={styles.overviewEditCard}>
+                        <Text style={styles.overviewEditTitle}>Edit overview</Text>
+                        <TextInput
+                          style={styles.scheduleInput}
+                          placeholder="Budget amount e.g. 2500"
+                          placeholderTextColor="rgba(255,255,255,0.25)"
+                          value={overviewBudgetAmount}
+                          onChangeText={setOverviewBudgetAmount}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          keyboardType="decimal-pad"
+                        />
+                        <TextInput
+                          style={styles.scheduleInput}
+                          placeholder="Budget type e.g. fixed / negotiable / daily"
+                          placeholderTextColor="rgba(255,255,255,0.25)"
+                          value={overviewBudgetType}
+                          onChangeText={setOverviewBudgetType}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                        />
+                        <View style={styles.statusRow}>
+                          {['active', 'paused', 'completed', 'cancelled'].map((s) => {
+                            const active = overviewStatus === s
+                            return (
+                              <TouchableOpacity
+                                key={s}
+                                style={[styles.statusChip, active && styles.statusChipActive]}
+                                onPress={() => setOverviewStatus(s)}
+                              >
+                                <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>{s}</Text>
+                              </TouchableOpacity>
+                            )
+                          })}
+                        </View>
+                        <TextInput
+                          style={[styles.briefInput, styles.overviewContentInput]}
+                          multiline
+                          placeholder="Project summary"
+                          placeholderTextColor="rgba(255,255,255,0.25)"
+                          value={overviewSummary}
+                          onChangeText={setOverviewSummary}
+                          textAlignVertical="top"
+                        />
+                        <TouchableOpacity
+                          style={[styles.scheduleSaveBtn, savingOverview && styles.btnDim]}
+                          onPress={saveOverview}
+                          disabled={savingOverview}
+                        >
+                          <Text style={styles.scheduleSaveText}>{savingOverview ? 'Saving…' : 'Save overview'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                  </>
+                ) : null}
+                {canManageCrew && !workspaceOnlyPlan ? (
                   <View style={styles.scheduleCard}>
                     <Text style={styles.scheduleTitle}>Public freelancer calendar</Text>
                     <Text style={styles.scheduleSub}>
@@ -799,6 +945,40 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFDC00',
   },
   scheduleSaveText: { fontSize: 13, fontWeight: '700', color: '#0a0a0a' },
+  overviewEditCard: {
+    marginBottom: 20,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#141414',
+  },
+  overviewEditToggleBtn: {
+    alignSelf: 'flex-start',
+    marginTop: -6,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: '#111',
+  },
+  overviewEditToggleText: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.85)' },
+  overviewEditTitle: { fontSize: 13, fontWeight: '800', color: '#fff', letterSpacing: 0.6, marginBottom: 10 },
+  statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  statusChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: '#0f0f0f',
+  },
+  statusChipActive: { backgroundColor: '#FFDC00', borderColor: '#FFDC00' },
+  statusChipText: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '700' },
+  statusChipTextActive: { color: '#0a0a0a' },
+  overviewContentInput: { minHeight: 120 },
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
   statCard: {
     width: '48%',

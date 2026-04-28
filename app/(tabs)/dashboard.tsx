@@ -25,6 +25,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { money } from '@/lib/invoiceFormatting'
 import { getCreaWebBaseUrl } from '@/lib/creaWeb'
 import { isDevDemoWorkspaceRouteEnabled } from '@/lib/devDemoWorkspace'
+import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser, type FreelancerPlan } from '@/lib/freelancerPlan'
 
 type IncomeTotals = { paid: number; incoming: number; overdue: number; currency: string }
 
@@ -57,7 +58,13 @@ function computeIncomeTotals(
 
 type StatCard = { label: string; value: string; sub: string }
 
-type QuickAction = { label: string; icon: LucideIcon; href: `/(tabs)/${string}` }
+type QuickAction = {
+  label: string
+  icon: LucideIcon
+  href?: `/(tabs)/${string}`
+  disabled?: boolean
+  hint?: string
+}
 
 type CeoSnapshot = {
   ok: boolean
@@ -99,7 +106,10 @@ function parseCeoSnapshot(raw: unknown): CeoSnapshot {
   }
 }
 
-function quickActionsForRole(role: string | null): QuickAction[] {
+function quickActionsForRole(
+  role: string | null,
+  opts?: { freelancerPlan?: FreelancerPlan }
+): QuickAction[] {
   if (isCompanyProfile(role ?? undefined)) {
     return [
       { label: 'Post job', icon: PlusCircle, href: '/(tabs)/company-post-job' },
@@ -117,6 +127,16 @@ function quickActionsForRole(role: string | null): QuickAction[] {
     { label: 'Invoices', icon: Receipt, href: '/(tabs)/invoices' },
   ]
   if (isFreelancerProfile(role ?? undefined)) {
+    if (opts?.freelancerPlan && isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
+      return [
+        {
+          label: 'New Project',
+          icon: AppWindow,
+          href: '/(tabs)/workspace-projects',
+        },
+        { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
+      ]
+    }
     base.push({ label: 'Availability', icon: CalendarDays, href: '/(tabs)/availability' })
   }
   base.push({ label: 'Settings', icon: Settings2, href: '/(tabs)/profile' })
@@ -135,7 +155,10 @@ export default function DashboardScreen() {
   const [income, setIncome] = useState<IncomeTotals | null>(null)
   const [ceoSnap, setCeoSnap] = useState<CeoSnapshot | null>(null)
   const [ceoRpcError, setCeoRpcError] = useState<string | null>(null)
-  const quickActions = quickActionsForRole(role)
+  const [freelancerPlan, setFreelancerPlan] = useState<FreelancerPlan>('starter')
+  const quickActions = quickActionsForRole(role, {
+    freelancerPlan,
+  })
 
   useEffect(() => {
     const load = async () => {
@@ -155,6 +178,11 @@ export default function DashboardScreen() {
         setName(profile?.name ?? '')
         const resolvedRole = resolveAppRole(profile?.role, user)
         setRole(resolvedRole || null)
+        if (isFreelancerProfile(resolvedRole)) {
+          setFreelancerPlan(resolveFreelancerPlanFromUser(user))
+        } else {
+          setFreelancerPlan('starter')
+        }
         const av = (profile?.avatar_url as string | undefined)?.trim()
         setAvatarUrl(av && /^https?:\/\//i.test(av) ? av : null)
 
@@ -510,15 +538,20 @@ export default function DashboardScreen() {
             const Icon = a.icon
             return (
               <TouchableOpacity
-                key={a.href}
-                style={styles.actionCard}
+                key={a.href ?? a.label}
+                style={[styles.actionCard, a.disabled && styles.actionCardDisabled]}
                 activeOpacity={0.7}
-                onPress={() => router.navigate(a.href as Href)}
+                onPress={() => {
+                  if (a.disabled) return
+                  if (a.href) router.navigate(a.href as Href)
+                }}
+                disabled={!!a.disabled}
               >
                 <View style={styles.actionIconWrap}>
                   <Icon size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
                 </View>
                 <Text style={styles.actionLabel}>{a.label}</Text>
+                {a.hint ? <Text style={styles.ceoHint}>{a.hint}</Text> : null}
               </TouchableOpacity>
             )
           })}

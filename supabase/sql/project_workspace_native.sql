@@ -3,7 +3,7 @@
 --
 -- 1) Dashboard → Storage: create bucket "project-files" (private, not public).
 -- 2) Run this script.
--- 3) Deploy edge function `brief-ai` and set OPENAI_API_KEY secret.
+-- 3) Deploy edge function `brief-ai` and set ANTHROPIC_API_KEY secret.
 -- 4) Optional live chat: enable replication for project_messages, e.g.
 --    alter publication supabase_realtime add table public.project_messages;
 

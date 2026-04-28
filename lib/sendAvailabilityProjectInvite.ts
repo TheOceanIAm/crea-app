@@ -61,6 +61,21 @@ export async function sendAvailabilityProjectInvite(params: {
   selectedIsoDates?: string[]
   userMessage?: string
 }): Promise<{ ok: true; conversationId: string } | { ok: false; error: string }> {
+  const { data: fp } = await supabase
+    .from('freelancer_profiles')
+    .select('plan_tier')
+    .eq('id', params.freelancerId)
+    .maybeSingle()
+  const planTier = String((fp as { plan_tier?: string | null } | null)?.plan_tier ?? '')
+    .trim()
+    .toLowerCase()
+  if (planTier === 'workspace') {
+    return {
+      ok: false,
+      error: 'Booking invites are not available for this account plan.',
+    }
+  }
+
   const conv = await findOrCreateDirectConversation(params.freelancerId)
   if (!conv.ok) return conv
 

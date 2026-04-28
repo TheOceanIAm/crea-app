@@ -1,8 +1,32 @@
+import { useEffect, useState } from 'react'
 import { Tabs } from 'expo-router'
-import { Briefcase, LayoutGrid, MessageCircle, UserRound } from 'lucide-react-native'
+import { Briefcase, House, MessageCircle, UserRound } from 'lucide-react-native'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
+import { supabase } from '@/lib/supabase'
+import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
+import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 
 export default function TabLayout() {
+  const [workspaceOnlyTabs, setWorkspaceOnlyTabs] = useState(false)
+
+  useEffect(() => {
+    const load = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        setWorkspaceOnlyTabs(false)
+        return
+      }
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+      const role = resolveAppRole(profile?.role, user)
+      const workspaceOnly =
+        isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))
+      setWorkspaceOnlyTabs(workspaceOnly)
+    }
+    void load()
+  }, [])
+
   return (
     <Tabs
       screenOptions={{
@@ -27,15 +51,16 @@ export default function TabLayout() {
       <Tabs.Screen
         name="dashboard"
         options={{
-          title: 'Dashboard',
+          title: 'Home',
           tabBarIcon: ({ color, size }) => (
-            <LayoutGrid size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+            <House size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
           ),
         }}
       />
       <Tabs.Screen
         name="jobs"
         options={{
+          href: workspaceOnlyTabs ? null : '/jobs',
           title: 'Jobs',
           tabBarIcon: ({ color, size }) => (
             <Briefcase size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
@@ -45,6 +70,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="messages"
         options={{
+          href: workspaceOnlyTabs ? null : '/messages',
           title: 'Messages',
           tabBarIcon: ({ color, size }) => (
             <MessageCircle size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
@@ -58,6 +84,13 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <UserRound size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="workspace-projects"
+        options={{
+          href: null,
+          title: 'Workspace projects',
         }}
       />
       <Tabs.Screen

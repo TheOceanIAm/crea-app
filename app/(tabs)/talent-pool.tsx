@@ -24,6 +24,12 @@ type TalentRow = {
   role: string | null
 }
 
+type FreelancerDirectoryRow = {
+  id: string
+  location: string | null
+  plan_tier: string | null
+}
+
 function initial(name: string) {
   const t = name.trim()
   return t ? t.charAt(0).toUpperCase() : '?'
@@ -56,31 +62,62 @@ export default function TalentPoolScreen() {
     }
     setAllowed(true)
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, name, headline, location, avatar_url, role')
-      .neq('role', 'company')
-      .neq('role', 'ceo')
-      .order('name', { ascending: true })
-      .limit(120)
+    const { data: fpRows, error: fpErr } = await supabase
+      .from('freelancer_profiles')
+      .select('id, location, plan_tier')
+      .neq('plan_tier', 'workspace')
+      .limit(240)
 
-    if (error) {
-      setLoadError(error.message)
+    if (fpErr) {
+      setLoadError(fpErr.message)
       setRows([])
     } else {
-      setRows(
-        (data ?? []).map((r) => {
-          const url = (r.avatar_url as string | null)?.trim()
-          return {
-            id: r.id as string,
-            name: String(r.name ?? '').trim() || 'Freelancer',
-            headline: String(r.headline ?? '').trim(),
-            location: String(r.location ?? '').trim(),
-            avatarUrl: url && /^https?:\/\//i.test(url) ? url : null,
-            role: typeof r.role === 'string' ? r.role : null,
-          }
-        })
-      )
+      const candidates = (fpRows ?? []) as unknown as FreelancerDirectoryRow[]
+      const ids = [
+        ...new Set(
+          candidates
+            .map((r) => (typeof r.id === 'string' ? r.id.trim() : ''))
+            .filter((x) => x.length > 0)
+        ),
+      ]
+      if (ids.length === 0) {
+        setRows([])
+        setLoading(false)
+        return
+      }
+      const { data: profiles, error: pErr } = await supabase
+        .from('profiles')
+        .select('id, name, headline, location, avatar_url, role')
+        .in('id', ids)
+        .neq('role', 'company')
+        .neq('role', 'ceo')
+        .order('name', { ascending: true })
+      if (pErr) {
+        setLoadError(pErr.message)
+        setRows([])
+      } else {
+        const fpById = new Map<string, FreelancerDirectoryRow>()
+        for (const fp of candidates) {
+          if (typeof fp.id === 'string' && fp.id.trim()) fpById.set(fp.id.trim(), fp)
+        }
+        setRows(
+          (profiles ?? []).map((r) => {
+            const id = String(r.id)
+            const fp = fpById.get(id)
+            const url = (r.avatar_url as string | null)?.trim()
+            const profileLoc = String(r.location ?? '').trim()
+            const fpLoc = fp?.location ? String(fp.location).trim() : ''
+            return {
+              id,
+              name: String(r.name ?? '').trim() || 'Freelancer',
+              headline: String(r.headline ?? '').trim(),
+              location: profileLoc || fpLoc,
+              avatarUrl: url && /^https?:\/\//i.test(url) ? url : null,
+              role: typeof r.role === 'string' ? r.role : null,
+            }
+          })
+        )
+      }
     }
     setLoading(false)
   }, [router])

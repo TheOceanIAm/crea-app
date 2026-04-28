@@ -420,6 +420,18 @@ export async function loadPublicProfile(userId: string): Promise<{
   const normalizedProfilesRow = row ? normalizeRawProfileRow(row) : null
   const mergedRow = mergeProfileRows(mergeProfileRows(normalizedProfilesRow, fpRow), cpRow)
 
+  const planTier =
+    String(
+      (fpRow as Record<string, unknown> | null)?.plan_tier ??
+        (rpcPayload as Record<string, unknown> | null)?.plan_tier ??
+        ''
+    )
+      .trim()
+      .toLowerCase() || null
+  if (planTier === 'workspace' && user?.id !== trimmed) {
+    return { profile: null, error: null }
+  }
+
   if (rpcError && !mergedRow && !rpcPayload) {
     return { profile: null, error: rpcError.message }
   }
