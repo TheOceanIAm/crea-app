@@ -809,6 +809,8 @@ export function ProductionTab({
   )
 }
 
+export default ProductionTab
+
 function WrapNotesBlock({
   prodDay,
   saving,

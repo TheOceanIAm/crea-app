@@ -178,8 +178,11 @@ export default function DashboardScreen() {
         setName(profile?.name ?? '')
         const resolvedRole = resolveAppRole(profile?.role, user)
         setRole(resolvedRole || null)
+        const resolvedFreelancerPlan = isFreelancerProfile(resolvedRole)
+          ? resolveFreelancerPlanFromUser(user)
+          : 'starter'
         if (isFreelancerProfile(resolvedRole)) {
-          setFreelancerPlan(resolveFreelancerPlanFromUser(user))
+          setFreelancerPlan(resolvedFreelancerPlan)
         } else {
           setFreelancerPlan('starter')
         }
@@ -230,6 +233,11 @@ export default function DashboardScreen() {
           ])
           setIncome(null)
         } else {
+          if (isFreelancerWorkspaceOnlyPlan(resolvedFreelancerPlan)) {
+            setStats([])
+            setIncome(null)
+            return
+          }
           const { count: appCount } = await supabase
             .from('job_applications').select('*', { count: 'exact', head: true })
             .eq('freelancer_id', user.id).eq('status', 'pending')
@@ -467,6 +475,9 @@ export default function DashboardScreen() {
     )
   }
 
+  const workspaceOnlyDashboard =
+    isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
@@ -494,7 +505,7 @@ export default function DashboardScreen() {
           </View>
         </View>
 
-        {income ? (
+        {!workspaceOnlyDashboard && income ? (
           <>
             <Text style={styles.sectionTitle}>Income overview</Text>
             <View style={styles.incomeRow}>
@@ -515,22 +526,24 @@ export default function DashboardScreen() {
         ) : null}
 
         {/* Stats */}
-        <View style={styles.statsRow}>
-          {stats.map((s, i) => (
-            <View key={i} style={styles.statCard}>
-              <Text style={styles.statLabel}>{s.label}</Text>
-              <Text
-                style={[
-                  styles.statValue,
-                  isCompanyProfile(role) && stats.length > 2 ? styles.statValueTight : null,
-                ]}
-              >
-                {s.value}
-              </Text>
-              <Text style={styles.statSub}>{s.sub}</Text>
-            </View>
-          ))}
-        </View>
+        {!workspaceOnlyDashboard ? (
+          <View style={styles.statsRow}>
+            {stats.map((s, i) => (
+              <View key={i} style={styles.statCard}>
+                <Text style={styles.statLabel}>{s.label}</Text>
+                <Text
+                  style={[
+                    styles.statValue,
+                    isCompanyProfile(role) && stats.length > 2 ? styles.statValueTight : null,
+                  ]}
+                >
+                  {s.value}
+                </Text>
+                <Text style={styles.statSub}>{s.sub}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <Text style={styles.sectionTitle}>Quick actions</Text>
         <View style={styles.actionsGrid}>

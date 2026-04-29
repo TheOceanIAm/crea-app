@@ -171,12 +171,12 @@ Deno.serve(async (req) => {
       )
     }
 
-    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
+    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? Deno.env.get('OPENAI_API_KEY')
     if (!anthropicKey) {
       return new Response(
         JSON.stringify({
           error: 'Anthropic not configured',
-          hint: 'Set ANTHROPIC_API_KEY for Edge Functions',
+          hint: 'Set ANTHROPIC_API_KEY (or OPENAI_API_KEY fallback) for Edge Functions',
         }),
         { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       )
