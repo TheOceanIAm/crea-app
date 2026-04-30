@@ -214,6 +214,9 @@ export default function ProfileScreen() {
   const [taxNumber, setTaxNumber] = useState('')
   const [vatRegistered, setVatRegistered] = useState(false)
   const [savingInvoice, setSavingInvoice] = useState(false)
+  const [annualBudgetAmount, setAnnualBudgetAmount] = useState('')
+  const [annualBudgetCurrency, setAnnualBudgetCurrency] = useState('EUR')
+  const [annualBudgetYear, setAnnualBudgetYear] = useState(String(new Date().getFullYear()))
 
   const [notif, setNotif] = useState<NotificationSettings>({ ...DEFAULT_NOTIFICATION_SETTINGS })
   const [savingNotif, setSavingNotif] = useState(false)
@@ -268,7 +271,7 @@ export default function ProfileScreen() {
     const { data, error } = await supabase
       .from('profiles')
       .select(
-        'name, role, headline, location, bio, skills, equipment, avatar_url, day_rate_amount, half_day_rate_amount, rates_currency, rates_notes, portfolio_website, portfolio_instagram, portfolio_linkedin, portfolio_vimeo, portfolio_behance, portfolio_projects, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, tax_number, vat_registered, notification_settings, subscription_tier'
+        'name, role, headline, location, bio, skills, equipment, avatar_url, day_rate_amount, half_day_rate_amount, rates_currency, rates_notes, portfolio_website, portfolio_instagram, portfolio_linkedin, portfolio_vimeo, portfolio_behance, portfolio_projects, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, tax_number, vat_registered, annual_budget_amount, annual_budget_currency, annual_budget_year, notification_settings, subscription_tier'
       )
       .eq('id', user.id)
       .single()
@@ -296,6 +299,9 @@ export default function ProfileScreen() {
       setInvoiceAddress('')
       setTaxNumber('')
       setVatRegistered(false)
+      setAnnualBudgetAmount('')
+      setAnnualBudgetCurrency('EUR')
+      setAnnualBudgetYear(String(new Date().getFullYear()))
       setNotif({ ...DEFAULT_NOTIFICATION_SETTINGS })
       setSubscriptionTier('starter')
       setDayRate('')
@@ -324,6 +330,11 @@ export default function ProfileScreen() {
       setInvoiceAddress(data?.invoice_address ?? '')
       setTaxNumber(data?.tax_number ?? '')
       setVatRegistered(Boolean(data?.vat_registered))
+      setAnnualBudgetAmount(data?.annual_budget_amount != null ? String(data.annual_budget_amount) : '')
+      setAnnualBudgetCurrency((data?.annual_budget_currency as string) || 'EUR')
+      setAnnualBudgetYear(
+        data?.annual_budget_year != null ? String(data.annual_budget_year) : String(new Date().getFullYear())
+      )
       setNotif(parseNotificationSettings(data?.notification_settings))
       const dbTier = String((data?.subscription_tier as string) || '')
         .trim()
@@ -539,6 +550,40 @@ export default function ProfileScreen() {
       return
     }
     Alert.alert('Saved', 'Invoice details were saved.')
+  }
+
+  const saveAnnualBudget = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+    const rawAmount = annualBudgetAmount.trim()
+    const parsedAmount = rawAmount === '' ? null : Number(rawAmount.replace(',', '.'))
+    if (parsedAmount != null && (!Number.isFinite(parsedAmount) || parsedAmount < 0)) {
+      Alert.alert('Budget', 'Please enter a valid non-negative yearly budget.')
+      return
+    }
+    const parsedYear = Number(annualBudgetYear.trim())
+    if (!Number.isInteger(parsedYear) || parsedYear < 2000 || parsedYear > 3000) {
+      Alert.alert('Budget', 'Please enter a valid budget year (e.g. 2026).')
+      return
+    }
+    const currency = annualBudgetCurrency.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'EUR'
+    setSavingInvoice(true)
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        annual_budget_amount: parsedAmount,
+        annual_budget_currency: currency,
+        annual_budget_year: parsedYear,
+      })
+      .eq('id', user.id)
+    setSavingInvoice(false)
+    if (error) {
+      Alert.alert('Save failed', error.message)
+      return
+    }
+    Alert.alert('Saved', 'Annual budget was updated.')
   }
 
   const writeNotificationSettings = async (
@@ -1291,6 +1336,40 @@ export default function ProfileScreen() {
                 </View>
               </View>
 
+              <View style={styles.sectionCard}>
+                <Text style={styles.cardTitle}>Annual budget</Text>
+                <Text style={styles.cardSubtitle}>
+                  Used in Invoice budget overview (year budget, active project costs, paid/caused, overdue).
+                </Text>
+                <Text style={styles.fieldLabel}>Year</Text>
+                <TextInput
+                  style={styles.input}
+                  value={annualBudgetYear}
+                  onChangeText={setAnnualBudgetYear}
+                  placeholder="2026"
+                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  keyboardType="number-pad"
+                />
+                <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Currency</Text>
+                <TextInput
+                  style={styles.input}
+                  value={annualBudgetCurrency}
+                  onChangeText={setAnnualBudgetCurrency}
+                  placeholder="EUR"
+                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  autoCapitalize="characters"
+                />
+                <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Budget amount</Text>
+                <TextInput
+                  style={styles.input}
+                  value={annualBudgetAmount}
+                  onChangeText={setAnnualBudgetAmount}
+                  placeholder="e.g. 250000"
+                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+
               <TouchableOpacity
                 style={[styles.primaryBtn, savingInvoice && styles.btnDisabled]}
                 onPress={saveInvoiceBank}
@@ -1300,6 +1379,18 @@ export default function ProfileScreen() {
                   <ActivityIndicator color="#0a0a0a" />
                 ) : (
                   <Text style={styles.primaryBtnText}>Save changes</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.secondaryBtn, savingInvoice && styles.btnDisabled]}
+                onPress={saveAnnualBudget}
+                disabled={savingInvoice}
+              >
+                {savingInvoice ? (
+                  <ActivityIndicator color="#FFDC00" />
+                ) : (
+                  <Text style={styles.secondaryBtnText}>Save annual budget</Text>
                 )}
               </TouchableOpacity>
 
@@ -1320,6 +1411,44 @@ export default function ProfileScreen() {
               <Text style={styles.cardSubtitle}>
                 Bank details are for freelancer invoices. As a company, use the invoice list in the Invoices tab.
               </Text>
+              <Text style={styles.fieldLabel}>Budget year</Text>
+              <TextInput
+                style={styles.input}
+                value={annualBudgetYear}
+                onChangeText={setAnnualBudgetYear}
+                placeholder="2026"
+                placeholderTextColor="rgba(255,255,255,0.28)"
+                keyboardType="number-pad"
+              />
+              <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Budget currency</Text>
+              <TextInput
+                style={styles.input}
+                value={annualBudgetCurrency}
+                onChangeText={setAnnualBudgetCurrency}
+                placeholder="EUR"
+                placeholderTextColor="rgba(255,255,255,0.28)"
+                autoCapitalize="characters"
+              />
+              <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Annual budget</Text>
+              <TextInput
+                style={styles.input}
+                value={annualBudgetAmount}
+                onChangeText={setAnnualBudgetAmount}
+                placeholder="e.g. 500000"
+                placeholderTextColor="rgba(255,255,255,0.28)"
+                keyboardType="decimal-pad"
+              />
+              <TouchableOpacity
+                style={[styles.secondaryBtn, savingInvoice && styles.btnDisabled]}
+                onPress={saveAnnualBudget}
+                disabled={savingInvoice}
+              >
+                {savingInvoice ? (
+                  <ActivityIndicator color="#FFDC00" />
+                ) : (
+                  <Text style={styles.secondaryBtnText}>Save annual budget</Text>
+                )}
+              </TouchableOpacity>
               <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.navigate('/(tabs)/invoices')}>
                 <Text style={styles.secondaryBtnText}>Open invoices</Text>
               </TouchableOpacity>
