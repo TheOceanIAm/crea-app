@@ -32,3 +32,17 @@ export function openInvoicePayOnWeb(invoiceId: string): boolean {
   Linking.openURL(target).catch(() => {})
   return true
 }
+
+/** Opens CREA Pay with Apple Pay preselection hint (handled by web if supported). */
+export function openInvoiceApplePayOnWeb(invoiceId: string): boolean {
+  const payBase = getCreaPayBaseUrl()
+  const webBase = getCreaWebBaseUrl()
+  const target = payBase
+    ? `${payBase}/invoices/${invoiceId}?method=apple_pay`
+    : webBase
+      ? `${webBase}/invoices/${invoiceId}?pay=1&method=apple_pay`
+      : ''
+  if (!target) return false
+  Linking.openURL(target).catch(() => {})
+  return true
+}

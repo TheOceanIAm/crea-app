@@ -16,7 +16,7 @@ import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isCeoProfile, resolveAppRole } from '@/lib/profileRole'
-import { openInvoicePayOnWeb } from '@/lib/creaWeb'
+import { openInvoiceApplePayOnWeb, openInvoicePayOnWeb } from '@/lib/creaWeb'
 import {
   formatDate,
   formatDateTime,
@@ -183,6 +183,21 @@ export default function InvoiceDetailScreen() {
     pollAttemptsRef.current = 0
   }
 
+  const openApplePayQuick = () => {
+    if (!id || typeof id !== 'string') return
+    const ok = openInvoiceApplePayOnWeb(id)
+    if (!ok) {
+      Alert.alert(
+        'CREA Pay not configured',
+        'Set EXPO_PUBLIC_CREA_WEB_URL (or EXPO_PUBLIC_CREA_PAY_URL) to open the payment flow.'
+      )
+      return
+    }
+    setPaymentSyncPending(true)
+    setPaymentSyncTimedOut(false)
+    pollAttemptsRef.current = 0
+  }
+
   useEffect(() => {
     if (!paymentSyncPending) return
     const timer = setInterval(() => {
@@ -335,8 +350,18 @@ export default function InvoiceDetailScreen() {
                   disabled={statusBusy}
                   onPress={openCreaPay}
                 >
-                  <Text style={styles.actionBtnPrimaryText}>Pay with CREA Pay</Text>
+                  <Text style={styles.actionBtnPrimaryText}>Pay now (recommended)</Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, statusBusy && styles.dim]}
+                  disabled={statusBusy}
+                  onPress={openApplePayQuick}
+                >
+                  <Text style={styles.actionBtnText}>Quick pay with Apple Pay</Text>
+                </TouchableOpacity>
+                <Text style={styles.flowHint}>
+                  Recommended opens full CREA Pay with payment method selection (incl. company cards).
+                </Text>
                 {paymentSyncPending ? (
                   <Text style={styles.syncHint}>Waiting for CREA Pay confirmation…</Text>
                 ) : null}
@@ -449,4 +474,5 @@ const styles = StyleSheet.create({
   syncWarnText: { color: 'rgba(255,255,255,0.65)', fontSize: 12, lineHeight: 17, marginBottom: 10 },
   syncRefreshBtn: { alignSelf: 'flex-start', width: '100%' },
   syncMeta: { marginTop: 2, fontSize: 11, color: 'rgba(255,255,255,0.35)' },
+  flowHint: { marginTop: -2, fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 18 },
 })
