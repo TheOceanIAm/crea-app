@@ -15,6 +15,61 @@ type Body = {
 
 const MAX_SHOTS = 60
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+const DEFAULT_ANTHROPIC_MODELS = ['claude-3-7-sonnet-latest', 'claude-3-5-sonnet-latest', 'claude-3-haiku-20240307']
+
+function anthropicModelCandidates(): string[] {
+  const fromSingle = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim()
+  if (fromSingle) return [fromSingle]
+  const fromList = (Deno.env.get('ANTHROPIC_MODEL_FALLBACKS') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (fromList.length > 0) return fromList
+  return DEFAULT_ANTHROPIC_MODELS
+}
+
+async function callAnthropicMessages(opts: {
+  apiKey: string
+  maxTokens: number
+  temperature: number
+  system: string
+  messages: Array<{ role: string; content: string }>
+}): Promise<{ ok: true; data: unknown } | { ok: false; status: number; text: string }> {
+  let lastStatus = 0
+  let lastText = ''
+  for (const model of anthropicModelCandidates()) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': opts.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: opts.maxTokens,
+        temperature: opts.temperature,
+        system: opts.system,
+        messages: opts.messages,
+      }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      return { ok: true, data }
+    }
+    const t = await res.text()
+    lastStatus = res.status
+    lastText = t
+    const low = t.toLowerCase()
+    const modelUnsupported =
+      (low.includes('model:') || low.includes('model')) &&
+      (low.includes('not found') || low.includes('not supported') || low.includes('invalid') || low.includes('model:'))
+    if (!modelUnsupported) {
+      return { ok: false, status: res.status, text: t }
+    }
+  }
+  return { ok: false, status: lastStatus || 502, text: lastText || 'No Anthropic model candidate succeeded.' }
+}
 
 function okJson(payload: Record<string, unknown>) {
   return new Response(JSON.stringify(payload), {
@@ -37,6 +92,40 @@ function failJson(error: string, opts?: { hint?: string; status?: number; detail
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     },
   )
+}
+
+function summarizeAnthropicError(rawText: string): { message: string; hint?: string } {
+  const t = rawText.trim()
+  if (!t) return { message: 'Anthropic request failed' }
+  try {
+    const parsed = JSON.parse(t) as {
+      error?: { message?: string }
+      message?: string
+    }
+    const msg = parsed?.error?.message?.trim() || parsed?.message?.trim() || 'Anthropic request failed'
+    const lower = msg.toLowerCase()
+    if (lower.includes('invalid') && lower.includes('api key')) {
+      return {
+        message: msg,
+        hint: 'ANTHROPIC_API_KEY appears invalid for this project. Re-set secret and redeploy the function.',
+      }
+    }
+    if (lower.includes('credit') || lower.includes('quota') || lower.includes('billing')) {
+      return {
+        message: msg,
+        hint: 'Anthropic billing/quota appears exhausted. Check your Anthropic usage and limits.',
+      }
+    }
+    if (lower.includes('rate limit') || lower.includes('too many requests')) {
+      return {
+        message: msg,
+        hint: 'Anthropic rate limit reached. Wait a moment and retry.',
+      }
+    }
+    return { message: msg }
+  } catch {
+    return { message: t.slice(0, 600) }
+  }
 }
 
 function extractJsonObject(raw: string): unknown {
@@ -197,31 +286,20 @@ Deno.serve(async (req) => {
 {"shots":[{"scene_nr":"","description":"","lens":"","location":"","framing":"","audio_notes":""}]}
 Rules: Use empty strings for unknown fields. At most ${MAX_SHOTS} shots. Preserve order from the source.`
 
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-3-5-sonnet-latest',
-          max_tokens: 2400,
-          temperature: 0.2,
-          system: `${sys}\n\nOutput ONLY JSON. No markdown fences.`,
-          messages: [{ role: 'user', content: markdown.slice(0, 12000) }],
-        }),
+      const ai = await callAnthropicMessages({
+        apiKey: anthropicKey,
+        maxTokens: 2400,
+        temperature: 0.2,
+        system: `${sys}\n\nOutput ONLY JSON. No markdown fences.`,
+        messages: [{ role: 'user', content: markdown.slice(0, 12000) }],
       })
-
-      if (!res.ok) {
-        const t = await res.text()
-        return failJson('Anthropic error', {
-          details: t,
-          status: 502,
-        })
+      if (!ai.ok) {
+        const t = ai.text
+        const s = summarizeAnthropicError(t)
+        return failJson(s.message, { hint: s.hint, details: t.slice(0, 1200), status: ai.status || 502 })
       }
 
-      const completion = await res.json()
+      const completion = ai.data
       const raw = extractAnthropicText(completion)
       let parsed: { shots?: ShotPayload[] }
       try {
@@ -291,45 +369,32 @@ Rules:
 - default_call_time / default_location: use when the sheet gives one crew report time or one base for everyone.
 - notes (REQUIRED if the markdown contains them — never omit): copy and condense into plain text (no JSON inside notes) the parts of the markdown that are NOT per-person overrides: full **day timeline** with times, **location list** with addresses/parking, **travel legs** (from → to, approx distance, drive times normal vs rush if stated, suggested depart times), meals/catering window, cast vs crew timing if present, emergency/hospital line, weather line. Aim for dense, scannable paragraphs or bullet lines; max about 9000 characters in notes. If the markdown has no extra logistics, notes may be empty string.`
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-sonnet-latest',
-        max_tokens: 3000,
-        temperature: 0.2,
-        system: `${sys}\n\nOutput ONLY JSON. No markdown fences.`,
-        messages: [
-          {
-            role: 'user',
-            content: `Call sheet markdown:\n${markdown.slice(0, 14000)}\n\nCrew (match "name" to entries; profile_id is for your reasoning only, do not invent ids):\n${crewLines}`,
-          },
-        ],
-      }),
+    const ai = await callAnthropicMessages({
+      apiKey: anthropicKey,
+      maxTokens: 3000,
+      temperature: 0.2,
+      system: `${sys}\n\nOutput ONLY JSON. No markdown fences.`,
+      messages: [
+        {
+          role: 'user',
+          content: `Call sheet markdown:\n${markdown.slice(0, 14000)}\n\nCrew (match "name" to entries; profile_id is for your reasoning only, do not invent ids):\n${crewLines}`,
+        },
+      ],
     })
 
-    if (!res.ok) {
-      const t = await res.text()
-      return new Response(JSON.stringify({ error: 'Anthropic error', details: t }), {
-        status: 502,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    if (!ai.ok) {
+      const t = ai.text
+      const s = summarizeAnthropicError(t)
+      return failJson(s.message, { hint: s.hint, details: t.slice(0, 1200), status: ai.status || 502 })
     }
 
-    const completion = await res.json()
+    const completion = ai.data
     const raw = extractAnthropicText(completion)
     let parsed: CallsheetPayload
     try {
       parsed = extractJsonObject(raw) as CallsheetPayload
     } catch {
-      return new Response(JSON.stringify({ error: 'Could not parse AI response as JSON' }), {
-        status: 502,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('Could not parse AI response as JSON', { status: 502 })
     }
 
     const entries = Array.isArray(parsed.entries) ? parsed.entries : []
@@ -363,23 +428,17 @@ Rules:
       .maybeSingle()
 
     if (exErr) {
-      return new Response(JSON.stringify({ error: exErr.message }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson(exErr.message, { status: 400 })
     }
 
     const companyId = String((proj as { company_id?: string }).company_id ?? '')
 
     if (!existing) {
       if (user.id !== companyId) {
-        return new Response(
-          JSON.stringify({
-            error: 'No production day for this date yet',
-            hint: 'The company account must create a production day for this date (or apply from web as company), then you can re-apply.',
-          }),
-          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-        )
+        return failJson('No production day for this date yet', {
+          hint: 'The company account must create a production day for this date (or apply from web as company), then you can re-apply.',
+          status: 409,
+        })
       }
       const mergedNotes = notesAi
       const { error: insDayErr } = await supabase.from('production_days').insert({
@@ -390,22 +449,16 @@ Rules:
         call_sheet: nextSheet,
       })
       if (insDayErr) {
-        return new Response(JSON.stringify({ error: insDayErr.message }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
+        return failJson(insDayErr.message, { status: 400 })
       }
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          tool: 'callsheet',
-          date: shootDate,
-          crewUpdated: Object.keys(nextSheet).length,
-          matchedNames: used.size,
-          createdDay: true,
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      )
+      return okJson({
+        ok: true,
+        tool: 'callsheet',
+        date: shootDate,
+        crewUpdated: Object.keys(nextSheet).length,
+        matchedNames: used.size,
+        createdDay: true,
+      })
     }
 
     const prevSheet = (existing.call_sheet as Record<string, { call_time?: string; location?: string }>) ?? {}
@@ -427,23 +480,17 @@ Rules:
       .eq('id', existing.id)
 
     if (upErr) {
-      return new Response(JSON.stringify({ error: upErr.message }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson(upErr.message, { status: 400 })
     }
 
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        tool: 'callsheet',
-        date: shootDate,
-        crewUpdated: Object.keys(nextSheet).length,
-        matchedNames: used.size,
-        createdDay: false,
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-    )
+    return okJson({
+      ok: true,
+      tool: 'callsheet',
+      date: shootDate,
+      crewUpdated: Object.keys(nextSheet).length,
+      matchedNames: used.size,
+      createdDay: false,
+    })
   } catch (e) {
     return failJson(String(e), { status: 500 })
   }

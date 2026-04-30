@@ -662,7 +662,13 @@ export default function ProjectWorkspaceScreen() {
                   briefOutputs={project.brief_ai_outputs}
                 />
               )}
-              {tab === 'crew' && <ProjectCrewTab projectId={project.id} canManage={canManageCrew} />}
+              {tab === 'crew' && (
+                <ProjectCrewTab
+                  projectId={project.id}
+                  canManage={canManageCrew}
+                  workspaceOnly={workspaceOnlyPlan}
+                />
+              )}
               {tab === 'files' && <ProjectFilesTab projectId={project.id} />}
             </View>
           </View>

@@ -8,6 +8,7 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  Modal,
 } from 'react-native'
 import { UserMinus } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
@@ -20,7 +21,32 @@ type Member = {
   profiles: { name: string | null; avatar_url: string | null } | null
 }
 
-type Props = { projectId: string; canManage: boolean }
+type ManualCrew = {
+  id: string
+  project_id: string
+  name: string
+  member_role: string
+  email: string | null
+  phone: string | null
+}
+
+type CrewRow =
+  | {
+      source: 'registered'
+      id: string
+      member_role: string
+      name: string
+      subtitle: string
+    }
+  | {
+      source: 'manual'
+      id: string
+      member_role: string
+      name: string
+      subtitle: string
+    }
+
+type Props = { projectId: string; canManage: boolean; workspaceOnly?: boolean }
 
 const roleLabel = (r: string) => {
   if (r === 'company') return 'Client'
@@ -28,25 +54,72 @@ const roleLabel = (r: string) => {
   return 'Crew'
 }
 
-export function ProjectCrewTab({ projectId, canManage }: Props) {
-  const [rows, setRows] = useState<Member[]>([])
+export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: Props) {
+  const [rows, setRows] = useState<CrewRow[]>([])
   const [loading, setLoading] = useState(true)
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [manualName, setManualName] = useState('')
+  const [manualRole, setManualRole] = useState('crew')
+  const [manualEmail, setManualEmail] = useState('')
+  const [manualPhone, setManualPhone] = useState('')
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('project_members')
-      .select('id, profile_id, member_role, profiles(name, avatar_url)')
-      .eq('project_id', projectId)
-      .order('member_role', { ascending: true })
+    const [registeredRes, manualRes] = await Promise.all([
+      supabase
+        .from('project_members')
+        .select('id, profile_id, member_role, profiles(name, avatar_url)')
+        .eq('project_id', projectId)
+        .order('member_role', { ascending: true }),
+      supabase
+        .from('project_manual_crew')
+        .select('id, project_id, name, member_role, email, phone')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true }),
+    ])
 
-    if (error) {
-      Alert.alert('Crew', error.message)
+    if (registeredRes.error) {
+      Alert.alert('Crew', registeredRes.error.message)
       setRows([])
-    } else {
-      setRows((data as unknown as Member[]) ?? [])
+      setLoading(false)
+      return
     }
+    if (manualRes.error) {
+      Alert.alert('Crew', manualRes.error.message)
+      setRows([])
+      setLoading(false)
+      return
+    }
+
+    const registered = ((registeredRes.data as unknown as Member[]) ?? []).map((m) => {
+      const prof = m.profiles as
+        | { name: string | null; avatar_url: string | null }
+        | { name: string | null; avatar_url: string | null }[]
+        | null
+        | undefined
+      const p = Array.isArray(prof) ? prof[0] : prof
+      return {
+        source: 'registered' as const,
+        id: m.id,
+        member_role: m.member_role,
+        name: p?.name || 'Member',
+        subtitle: roleLabel(m.member_role),
+      }
+    })
+
+    const manual = ((manualRes.data as ManualCrew[]) ?? []).map((m) => {
+      const details = [m.email?.trim() || '', m.phone?.trim() || ''].filter(Boolean).join(' · ')
+      return {
+        source: 'manual' as const,
+        id: m.id,
+        member_role: m.member_role || 'crew',
+        name: m.name,
+        subtitle: details || roleLabel(m.member_role || 'crew'),
+      }
+    })
+
+    setRows([...registered, ...manual])
     setLoading(false)
   }, [projectId])
 
@@ -73,7 +146,47 @@ export function ProjectCrewTab({ projectId, canManage }: Props) {
     Alert.alert('Added', 'They now have access to this project workspace.')
   }
 
-  const removeCrew = (m: Member) => {
+  const addManualCrew = async () => {
+    if (busy) return
+    const name = manualName.trim()
+    if (name.length < 2) {
+      Alert.alert('Add crew', 'Please enter at least 2 characters for the name.')
+      return
+    }
+    const memberRole = manualRole.trim() || 'crew'
+    const mail = manualEmail.trim().toLowerCase()
+    const phone = manualPhone.trim()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      Alert.alert('Add crew', 'Please sign in again.')
+      return
+    }
+    setBusy(true)
+    const { error } = await supabase.from('project_manual_crew').insert({
+      project_id: projectId,
+      name,
+      member_role: memberRole,
+      email: mail || null,
+      phone: phone || null,
+      created_by: user.id,
+    })
+    setBusy(false)
+    if (error) {
+      Alert.alert('Could not add', error.message)
+      return
+    }
+    setManualName('')
+    setManualRole('crew')
+    setManualEmail('')
+    setManualPhone('')
+    setModalOpen(false)
+    load()
+    Alert.alert('Added', 'Crew member was added to this project.')
+  }
+
+  const removeCrew = (m: CrewRow) => {
     if (m.member_role !== 'crew') return
     Alert.alert('Remove crew member', 'They will lose access to this project.', [
       { text: 'Cancel', style: 'cancel' },
@@ -81,7 +194,10 @@ export function ProjectCrewTab({ projectId, canManage }: Props) {
         text: 'Remove',
         style: 'destructive',
         onPress: async () => {
-          const { error } = await supabase.from('project_members').delete().eq('id', m.id)
+          const { error } =
+            m.source === 'manual'
+              ? await supabase.from('project_manual_crew').delete().eq('id', m.id)
+              : await supabase.from('project_members').delete().eq('id', m.id)
           if (error) {
             Alert.alert('Remove failed', error.message)
             return
@@ -104,38 +220,44 @@ export function ProjectCrewTab({ projectId, canManage }: Props) {
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {canManage && (
         <>
-          <Text style={styles.label}>Invite by email</Text>
-          <Text style={styles.hint}>They must already have a Crea account with this email.</Text>
-          <View style={styles.addRow}>
-            <TextInput
-              style={styles.input}
-              placeholder="name@studio.com"
-              placeholderTextColor="rgba(255,255,255,0.25)"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-            <TouchableOpacity style={[styles.addBtn, busy && styles.dim]} onPress={addByEmail} disabled={busy}>
-              <Text style={styles.addBtnText}>Add</Text>
-            </TouchableOpacity>
-          </View>
+          {workspaceOnly ? (
+            <>
+              <Text style={styles.label}>Add crew</Text>
+              <Text style={styles.hint}>Workspace mode: add external crew manually without requiring a CREA account.</Text>
+              <TouchableOpacity style={[styles.addBtnWide, busy && styles.dim]} onPress={() => setModalOpen(true)}>
+                <Text style={styles.addBtnText}>ADD CREW</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>Invite by email</Text>
+              <Text style={styles.hint}>They must already have a Crea account with this email.</Text>
+              <View style={styles.addRow}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="name@studio.com"
+                  placeholderTextColor="rgba(255,255,255,0.25)"
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+                <TouchableOpacity style={[styles.addBtn, busy && styles.dim]} onPress={addByEmail} disabled={busy}>
+                  <Text style={styles.addBtnText}>Add</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </>
       )}
 
       <Text style={styles.label}>People on this project</Text>
       {rows.map((m) => {
-        const prof = m.profiles as
-          | { name: string | null; avatar_url: string | null }
-          | { name: string | null; avatar_url: string | null }[]
-          | null
-          | undefined
-        const p = Array.isArray(prof) ? prof[0] : prof
         return (
           <View key={m.id} style={styles.row}>
             <View style={styles.rowText}>
-              <Text style={styles.name}>{p?.name || 'Member'}</Text>
-              <Text style={styles.role}>{roleLabel(m.member_role)}</Text>
+              <Text style={styles.name}>{m.name}</Text>
+              <Text style={styles.role}>{m.subtitle}</Text>
             </View>
             {canManage && m.member_role === 'crew' ? (
               <TouchableOpacity onPress={() => removeCrew(m)} hitSlop={8}>
@@ -145,6 +267,54 @@ export function ProjectCrewTab({ projectId, canManage }: Props) {
           </View>
         )
       })}
+
+      <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Add crew</Text>
+            <Text style={styles.modalHint}>Add a non-CREA crew contact to this project.</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Name"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={manualName}
+              onChangeText={setManualName}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Role (e.g. Gaffer)"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={manualRole}
+              onChangeText={setManualRole}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Email (optional)"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={manualEmail}
+              onChangeText={setManualEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Phone (optional)"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={manualPhone}
+              onChangeText={setManualPhone}
+              keyboardType="phone-pad"
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setModalOpen(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalSave, busy && styles.dim]} onPress={addManualCrew} disabled={busy}>
+                <Text style={styles.modalSaveText}>{busy ? 'Saving…' : 'Save'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   )
 }
@@ -182,6 +352,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addBtnText: { fontWeight: '800', color: '#0a0a0a', fontSize: 15 },
+  addBtnWide: {
+    borderRadius: 12,
+    backgroundColor: '#FFDC00',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginBottom: 24,
+  },
   dim: { opacity: 0.5 },
   row: {
     flexDirection: 'row',
@@ -194,4 +372,46 @@ const styles = StyleSheet.create({
   rowText: { flex: 1 },
   name: { fontSize: 16, fontWeight: '600', color: '#fff' },
   role: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 2 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    backgroundColor: '#111',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 16,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 6 },
+  modalHint: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 14 },
+  modalInput: {
+    backgroundColor: '#0a0a0a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 10,
+  },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
+  modalCancel: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  modalCancelText: { color: 'rgba(255,255,255,0.75)', fontWeight: '700' },
+  modalSave: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#FFDC00',
+  },
+  modalSaveText: { color: '#0a0a0a', fontWeight: '800' },
 })

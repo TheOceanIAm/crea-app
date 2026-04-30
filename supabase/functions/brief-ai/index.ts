@@ -23,6 +23,27 @@ type ProjectRow = {
   scheduling_end_date: string | null
 }
 
+const DEFAULT_ANTHROPIC_MODELS = ['claude-3-7-sonnet-latest', 'claude-3-5-sonnet-latest', 'claude-3-haiku-20240307']
+
+function anthropicModelCandidates(): string[] {
+  const fromSingle = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim()
+  if (fromSingle) return [fromSingle]
+  const fromList = (Deno.env.get('ANTHROPIC_MODEL_FALLBACKS') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (fromList.length > 0) return fromList
+  return DEFAULT_ANTHROPIC_MODELS
+}
+
+function isModelUnsupportedError(rawText: string): boolean {
+  const low = rawText.toLowerCase()
+  return (
+    (low.includes('model:') || low.includes('model')) &&
+    (low.includes('not found') || low.includes('not supported') || low.includes('invalid') || low.includes('model:'))
+  )
+}
+
 function extractAnthropicText(payload: unknown): string {
   const content = (payload as { content?: Array<{ type?: string; text?: string }> })?.content
   if (!Array.isArray(content)) return ''
@@ -83,27 +104,34 @@ function promptsForTool(tool: ToolId): { system: string; userLead: string } {
 }
 
 async function callClaude(opts: { apiKey: string; system: string; user: string }): Promise<string> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': opts.apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-3-5-sonnet-latest',
-      max_tokens: 2400,
-      temperature: 0.45,
-      system: opts.system,
-      messages: [{ role: 'user', content: opts.user }],
-    }),
-  })
-  if (!res.ok) {
+  let lastErr = 'Anthropic request failed'
+  let lastStatus = 500
+  for (const model of anthropicModelCandidates()) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': opts.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 2400,
+        temperature: 0.45,
+        system: opts.system,
+        messages: [{ role: 'user', content: opts.user }],
+      }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      return extractAnthropicText(data)
+    }
     const t = await res.text()
-    throw new Error(`Anthropic error (${res.status}): ${t}`)
+    lastErr = t
+    lastStatus = res.status
+    if (!isModelUnsupportedError(t)) break
   }
-  const data = await res.json()
-  return extractAnthropicText(data)
+  throw new Error(`Anthropic error (${lastStatus}): ${lastErr}`)
 }
 
 Deno.serve(async (req) => {
