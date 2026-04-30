@@ -20,6 +20,8 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import type { FreelancerPublicProfilePayload } from '@/lib/freelancerPublicProfileTypes'
 import { isCeoProfile, isFreelancerProfile } from '@/lib/profileRole'
 import { parsePublicProfileWidgets } from '@/lib/publicProfileWidgets'
+import type { PublicProfileWidgets } from '@/lib/publicProfileWidgets'
+import { loadLiveCeoWidgets } from '@/lib/ceoLiveWidgets'
 
 function strTrim(v: string | null | undefined): string {
   if (v == null) return ''
@@ -35,6 +37,7 @@ export default function PublicProfileShareScreen() {
   const [error, setError] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [authUserId, setAuthUserId] = useState<string | null>(null)
+  const [liveWidgets, setLiveWidgets] = useState<PublicProfileWidgets | null>(null)
 
   useEffect(() => {
     void supabase.auth.getUser().then(({ data }) => setAuthUserId(data.user?.id ?? null))
@@ -67,6 +70,28 @@ export default function PublicProfileShareScreen() {
       cancelled = true
     }
   }, [userId])
+
+  const ceo = isCeoProfile(profile?.role ?? null)
+  const widgetsBase = useMemo(
+    () => parsePublicProfileWidgets(profile?.public_profile_widgets),
+    [profile?.public_profile_widgets]
+  )
+  const widgets = liveWidgets ?? widgetsBase
+
+  useEffect(() => {
+    let cancelled = false
+    if (!profile || !ceo) {
+      setLiveWidgets(null)
+      return
+    }
+    void (async () => {
+      const next = await loadLiveCeoWidgets(widgetsBase)
+      if (!cancelled) setLiveWidgets(next)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [ceo, profile, widgetsBase])
 
   if (loading) {
     return (
@@ -106,8 +131,6 @@ export default function PublicProfileShareScreen() {
 
   const name = strTrim(profile.name) || 'Crea member'
   const avatarUri = profile.avatar_url?.trim() ?? ''
-  const ceo = isCeoProfile(profile.role)
-  const widgets = parsePublicProfileWidgets(profile.public_profile_widgets)
 
   if (ceo) {
     return (

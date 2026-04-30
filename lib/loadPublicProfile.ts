@@ -34,6 +34,8 @@ export const PROFILE_PUBLIC_KEYS = [
   'open_to_remote',
   'open_to_travel',
   'years_experience',
+  'plan_tier',
+  'subscription_tier',
 ] as const
 
 const PROFILE_PUBLIC_SELECT = PROFILE_PUBLIC_KEYS.join(',')
@@ -125,6 +127,31 @@ function normalizeRawProfileRow(row: Record<string, unknown>): Record<string, un
   }
   if (!isMeaningfulValue(o.availability_calendar) && isMeaningfulValue(o.availability)) {
     o.availability_calendar = o.availability
+  }
+  if (!isMeaningfulValue(o.day_rate_amount)) {
+    if (isMeaningfulValue(o.day_rate)) o.day_rate_amount = o.day_rate
+    else if (isMeaningfulValue(o.daily_rate)) o.day_rate_amount = o.daily_rate
+    else if (isMeaningfulValue(o.dayRate)) o.day_rate_amount = o.dayRate
+    else if (isMeaningfulValue(o.dailyRate)) o.day_rate_amount = o.dailyRate
+    else if (isMeaningfulValue(o.rate_per_day)) o.day_rate_amount = o.rate_per_day
+  }
+  if (!isMeaningfulValue(o.half_day_rate_amount)) {
+    if (isMeaningfulValue(o.half_day_rate)) o.half_day_rate_amount = o.half_day_rate
+    else if (isMeaningfulValue(o.half_day)) o.half_day_rate_amount = o.half_day
+    else if (isMeaningfulValue(o.halfDayRate)) o.half_day_rate_amount = o.halfDayRate
+    else if (isMeaningfulValue(o.rate_half_day)) o.half_day_rate_amount = o.rate_half_day
+  }
+  if (!isMeaningfulValue(o.rates_currency)) {
+    if (isMeaningfulValue(o.rate_currency)) o.rates_currency = o.rate_currency
+    else if (isMeaningfulValue(o.currency)) o.rates_currency = o.currency
+    else if (isMeaningfulValue(o.ratesCurrency)) o.rates_currency = o.ratesCurrency
+  }
+  if (!isMeaningfulValue(o.plan_tier)) {
+    if (isMeaningfulValue(o.subscription_tier)) o.plan_tier = o.subscription_tier
+    else if (isMeaningfulValue(o.planTier)) o.plan_tier = o.planTier
+  }
+  if (!isMeaningfulValue(o.subscription_tier) && isMeaningfulValue(o.plan_tier)) {
+    o.subscription_tier = o.plan_tier
   }
 
   // Web / alternate APIs: website & socials under different keys (incl. camelCase on freelancer_profiles).

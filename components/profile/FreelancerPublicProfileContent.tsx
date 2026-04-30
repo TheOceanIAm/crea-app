@@ -277,6 +277,14 @@ export function FreelancerPublicProfileContent({
   const cur = profileNorm.rates_currency ?? 'EUR'
   const dayRate = profileNorm.day_rate_amount ?? null
   const halfDay = profileNorm.half_day_rate_amount ?? null
+  const publicPlanTier = String(
+    (profileNorm as Record<string, unknown>).plan_tier ??
+      (profileNorm as Record<string, unknown>).subscription_tier ??
+      'starter'
+  )
+    .trim()
+    .toLowerCase()
+  const canShowPublicRates = publicPlanTier !== 'workspace'
   const availabilityStatus = strTrim(profileNorm.availability_status)
   const availabilityDetails = strTrim(profileNorm.availability_details)
   const shareMessage = `${name} — view on Crea`
@@ -386,12 +394,8 @@ export function FreelancerPublicProfileContent({
           {isFreelancer ? (
             <View style={styles.statsRow}>
               <View style={styles.statCell}>
-                <Text style={styles.statValue}>
-                  {(profileNorm.workspace_projects_count ?? 0) > 0
-                    ? String(profileNorm.workspace_projects_count)
-                    : String(profileNorm.portfolio_items_count ?? 0)}
-                </Text>
-                <Text style={styles.statLabel}>PROJECTS</Text>
+                <Text style={styles.statValue}>{dayRate != null ? money(dayRate, cur) : '—'}</Text>
+                <Text style={styles.statLabel}>DAY RATE</Text>
               </View>
             </View>
           ) : null}
@@ -490,20 +494,6 @@ export function FreelancerPublicProfileContent({
               )}
             </View>
           </>
-        ) : null}
-
-        {isFreelancer && (dayRate != null || halfDay != null) ? (
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>Day rate</Text>
-            {dayRate != null ? (
-              <Text style={styles.rateMain}>
-                {money(dayRate, cur)} <Text style={styles.ratePer}>per day</Text>
-              </Text>
-            ) : null}
-            {halfDay != null ? (
-              <Text style={styles.rateSub}>Half day: {money(halfDay, cur)}</Text>
-            ) : null}
-          </View>
         ) : null}
 
         {isFreelancer && availabilityDetails ? (

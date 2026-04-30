@@ -237,6 +237,18 @@ export default function ProfileScreen() {
   const ceo = isCeoProfile(role)
   const company = isCompanyProfile(role)
   const workspacePlan = freelancer && subscriptionTier === 'workspace'
+  const companyPlanTier = useMemo(() => {
+    if (!company) return ''
+    const t = String(subscriptionTier || '')
+      .trim()
+      .toLowerCase()
+    // Backward compatibility for older company rows still carrying freelancer tier names.
+    if (t === 'starter' || t === 'workspace') return 'studio'
+    if (t === 'pro') return 'agency'
+    if (t === 'premium') return 'business'
+    if (t === 'studio' || t === 'agency' || t === 'business' || t === 'enterprise') return t
+    return 'studio'
+  }, [company, subscriptionTier])
 
   const visibleMenuItems = useMemo(() => {
     if (ceo) return MENU_ITEMS.filter((item) => !CEO_HIDDEN_MENU_IDS.includes(item.id))
@@ -1471,7 +1483,9 @@ export default function ProfileScreen() {
             <>
               <View style={styles.trialBanner}>
                 <Text style={styles.trialBannerText}>
-                  <Text style={styles.trialBannerStrong}>Trial:</Text> Until <Text style={styles.trialBannerStrong}>{TRIAL_END_LABEL}</Text> you can use Crea without a paid plan. After that, pick a plan below — billing starts after checkout.
+                  <Text style={styles.trialBannerStrong}>Trial:</Text> Until{' '}
+                  <Text style={styles.trialBannerStrong}>{TRIAL_END_LABEL}</Text> you can use Crea without a paid plan.
+                  After that, pick a plan below - billing starts after checkout.
                 </Text>
               </View>
 
@@ -1485,22 +1499,38 @@ export default function ProfileScreen() {
                 <View style={styles.currentPlanBox}>
                   <Text style={styles.currentPlanLabel}>Current plan</Text>
                   <Text style={styles.currentPlanName}>
-                    {subscriptionTier === 'workspace'
-                      ? 'Workspace'
-                      : subscriptionTier === 'pro'
-                        ? 'Pro'
-                        : subscriptionTier === 'premium'
-                          ? 'Premium'
-                          : 'Starter'}
+                    {company
+                      ? companyPlanTier === 'enterprise'
+                        ? 'Enterprise'
+                        : companyPlanTier === 'business'
+                          ? 'Business'
+                          : companyPlanTier === 'agency'
+                            ? 'Agency'
+                            : 'Studio'
+                      : subscriptionTier === 'workspace'
+                        ? 'Workspace'
+                        : subscriptionTier === 'pro'
+                          ? 'Pro'
+                          : subscriptionTier === 'premium'
+                            ? 'Premium'
+                            : 'Starter'}
                   </Text>
                   <Text style={styles.currentPlanDesc}>
-                    {subscriptionTier === 'workspace'
-                      ? 'Private workspace mode: no marketplace visibility.'
-                      : subscriptionTier === 'pro'
-                      ? 'Job Feed+, post jobs, 5 active bookings per month.'
-                      : subscriptionTier === 'premium'
-                        ? 'Verified, liability cover, maximum visibility — tier coming soon.'
-                        : 'Basic job feed, 2 active bookings per month, no job postings — upgrade for more.'}
+                    {company
+                      ? companyPlanTier === 'enterprise'
+                        ? 'Custom package for large companies with dedicated account support.'
+                        : companyPlanTier === 'business'
+                          ? 'Scale plan with unlimited listings/pool and legal + insurance features.'
+                          : companyPlanTier === 'agency'
+                            ? 'Growth plan for agencies with more listings, larger crew pool and integrations.'
+                            : 'Core plan for studios with essential hiring workflow and contract generator.'
+                      : subscriptionTier === 'workspace'
+                        ? 'Solo workspace for your own projects - not visible in the talent pool or marketplace.'
+                        : subscriptionTier === 'pro'
+                          ? 'Everything in Starter + post project listings, 5 active bookings/month, Project feed+.'
+                          : subscriptionTier === 'premium'
+                            ? 'Everything in Pro including verified badge, liability insurance, legal docs, and tax/accounting tools.'
+                            : 'Basic profile, basic project feed, 2 active bookings/month, standard support.'}
                   </Text>
                 </View>
 
@@ -1509,55 +1539,118 @@ export default function ProfileScreen() {
                 </Text>
                 <TouchableOpacity
                   style={styles.secondaryBtn}
-                  onPress={() =>
-                    Alert.alert(
-                      'Pricing',
-                      'Full plan comparison will ship with the web version / Stripe checkout.'
-                    )
-                  }
+                  onPress={() => Linking.openURL('https://creaservices.de/pricing').catch(() => {})}
                 >
                   <Text style={styles.secondaryBtnText}>View comparison</Text>
                 </TouchableOpacity>
 
-                <PlanRow
-                  title="Starter"
-                  price="9 € / month"
-                  desc="Basic job feed, 2 active bookings per month, no job postings."
-                  cta="Checkout after trial"
-                  current={subscriptionTier === 'starter' || subscriptionTier === 'workspace'}
-                  onPress={() =>
-                    Alert.alert(
-                      'Stripe',
-                      'Checkout will connect to Stripe price IDs (env). Until then, the trial plan stays active.'
-                    )
-                  }
-                />
-                <PlanRow
-                  title="Pro"
-                  price="19 € / month"
-                  desc="Job Feed+, post jobs, 5 active bookings per month."
-                  cta="Checkout after trial"
-                  current={subscriptionTier === 'pro'}
-                  onPress={() =>
-                    Alert.alert(
-                      'Stripe',
-                      'Checkout will connect to Stripe price IDs (env). Until then, the trial plan stays active.'
-                    )
-                  }
-                />
-                <PlanRow
-                  title="Premium"
-                  price="49 € / month"
-                  desc="Verified badge, insurance, maximum visibility — coming soon."
-                  cta="Coming soon"
-                  current={subscriptionTier === 'premium'}
-                  disabled
-                  onPress={() => Alert.alert('Premium', 'This tier is coming soon.')}
-                />
+                {company ? (
+                  <>
+                    <PlanRow
+                      title="Studio"
+                      price="€89 / month"
+                      desc="Up to 5 active project listings, crew pool up to 20, contract generator, standard support."
+                      cta="Checkout after trial"
+                      current={companyPlanTier === 'studio'}
+                      onPress={() =>
+                        Alert.alert(
+                          'Stripe',
+                          'Checkout for Studio will connect to Stripe company price IDs (env).'
+                        )
+                      }
+                    />
+                    <PlanRow
+                      title="Agency"
+                      price="€129 / month"
+                      desc="Up to 15 listings, crew pool up to 50, team access (up to 3 users), integrations + priority support."
+                      cta="Checkout after trial"
+                      current={companyPlanTier === 'agency'}
+                      onPress={() =>
+                        Alert.alert(
+                          'Stripe',
+                          'Checkout for Agency will connect to Stripe company price IDs (env).'
+                        )
+                      }
+                    />
+                    <PlanRow
+                      title="Business"
+                      price="€249 / month"
+                      desc="Unlimited listings/pool, legal automation, company insurance, team access (up to 5 users)."
+                      cta="Coming soon"
+                      current={companyPlanTier === 'business'}
+                      disabled
+                      onPress={() => Alert.alert('Business', 'This tier is coming soon.')}
+                    />
+                    <PlanRow
+                      title="Enterprise"
+                      price="Custom pricing"
+                      desc="Tailored setup for large companies: dedicated account manager, custom legal setup and integrations."
+                      cta="Contact sales"
+                      current={companyPlanTier === 'enterprise'}
+                      onPress={() =>
+                        Linking.openURL(
+                          'mailto:sales@creaservices.de?subject=Enterprise%20Plan%20Inquiry%20-%20Crea'
+                        ).catch(() => {})
+                      }
+                    />
+                  </>
+                ) : (
+                  <>
+                    <PlanRow
+                      title="Workspace"
+                      price="€0 / month"
+                      desc="Solo workspace mode: private workflow, no talent-pool visibility, no marketplace DMs."
+                      cta="Use workspace"
+                      current={subscriptionTier === 'workspace'}
+                      onPress={() =>
+                        Alert.alert(
+                          'Workspace',
+                          'Workspace is free solo mode and not discoverable in the public marketplace.'
+                        )
+                      }
+                    />
+                    <PlanRow
+                      title="Starter"
+                      price="€9 / month"
+                      desc="Basic profile, basic project feed, 2 active bookings/month, standard support."
+                      cta="Checkout after trial"
+                      current={subscriptionTier === 'starter'}
+                      onPress={() =>
+                        Alert.alert(
+                          'Stripe',
+                          'Checkout will connect to Stripe price IDs (env). Until then, the trial plan stays active.'
+                        )
+                      }
+                    />
+                    <PlanRow
+                      title="Pro"
+                      price="€19 / month"
+                      desc="Everything in Starter + post project listings, 5 active bookings/month, Project feed+."
+                      cta="Checkout after trial"
+                      current={subscriptionTier === 'pro'}
+                      onPress={() =>
+                        Alert.alert(
+                          'Stripe',
+                          'Checkout will connect to Stripe price IDs (env). Until then, the trial plan stays active.'
+                        )
+                      }
+                    />
+                    <PlanRow
+                      title="Premium"
+                      price="€49 / month"
+                      desc="Everything in Pro, plus verified badge, liability insurance, legal docs and tax/accounting tools."
+                      cta="Coming soon"
+                      current={subscriptionTier === 'premium'}
+                      disabled
+                      onPress={() => Alert.alert('Premium', 'This tier is coming soon.')}
+                    />
+                  </>
+                )}
 
                 <Text style={styles.stripeFoot}>
-                  Change plans with an active subscription in the Stripe customer portal. Add Starter and Pro price IDs
-                  in env for checkout.
+                  {company
+                    ? 'Change plans with an active subscription in the Stripe customer portal. Add Studio and Agency company price IDs in env for checkout.'
+                    : 'Change plans with an active subscription in the Stripe customer portal. Add Starter and Pro price IDs in env for checkout.'}
                 </Text>
               </View>
             </>

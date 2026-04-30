@@ -27,6 +27,8 @@ export type FreelancerPublicProfilePayload = {
   open_to_remote?: boolean | null
   open_to_travel?: boolean | null
   years_experience?: number | null
+  plan_tier?: string | null
+  subscription_tier?: string | null
   workspace_projects_count?: number | null
   portfolio_items_count?: number | null
 }
