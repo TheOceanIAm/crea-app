@@ -10,6 +10,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import { useFocusEffect } from '@react-navigation/native'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
@@ -205,6 +206,12 @@ export default function InvoicesListScreen() {
   useEffect(() => {
     load()
   }, [load])
+
+  useFocusEffect(
+    useCallback(() => {
+      void load()
+    }, [load])
+  )
 
   const onRefresh = () => {
     setRefreshing(true)

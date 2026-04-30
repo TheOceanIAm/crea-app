@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -7,13 +7,16 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  AppState,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useFocusEffect } from '@react-navigation/native'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isCeoProfile, resolveAppRole } from '@/lib/profileRole'
+import { openInvoicePayOnWeb } from '@/lib/creaWeb'
 import {
   formatDate,
   formatDateTime,
@@ -45,6 +48,11 @@ export default function InvoiceDetailScreen() {
   const [forbidden, setForbidden] = useState(false)
   const [viewerRole, setViewerRole] = useState<'company' | 'freelancer' | 'ceo' | null>(null)
   const [statusBusy, setStatusBusy] = useState(false)
+  const [paymentSyncPending, setPaymentSyncPending] = useState(false)
+  const [paymentSyncTimedOut, setPaymentSyncTimedOut] = useState(false)
+  const [lastPaymentCheckAt, setLastPaymentCheckAt] = useState<Date | null>(null)
+  const pollAttemptsRef = useRef(0)
+  const MAX_PAYMENT_SYNC_POLLS = 20
 
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
@@ -117,6 +125,12 @@ export default function InvoiceDetailScreen() {
     load()
   }, [load])
 
+  useFocusEffect(
+    useCallback(() => {
+      void load()
+    }, [load])
+  )
+
   const goBack = () => {
     if (router.canGoBack()) {
       router.back()
@@ -136,6 +150,92 @@ export default function InvoiceDetailScreen() {
       return
     }
     setInvoice((prev) => (prev ? { ...prev, status: next } : prev))
+  }
+
+  const refreshInvoiceStatusOnce = useCallback(async (): Promise<string | null> => {
+    if (!id || typeof id !== 'string') return null
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('status')
+      .eq('id', id)
+      .maybeSingle()
+    if (error || !data) return null
+    const nextStatus = String((data as { status?: string }).status ?? '').toLowerCase() || null
+    if (nextStatus) {
+      setInvoice((prev) => (prev ? { ...prev, status: nextStatus } : prev))
+    }
+    setLastPaymentCheckAt(new Date())
+    return nextStatus
+  }, [id])
+
+  const openCreaPay = () => {
+    if (!id || typeof id !== 'string') return
+    const ok = openInvoicePayOnWeb(id)
+    if (!ok) {
+      Alert.alert(
+        'CREA Pay not configured',
+        'Set EXPO_PUBLIC_CREA_WEB_URL (or EXPO_PUBLIC_CREA_PAY_URL) to open the payment flow.'
+      )
+      return
+    }
+    setPaymentSyncPending(true)
+    setPaymentSyncTimedOut(false)
+    pollAttemptsRef.current = 0
+  }
+
+  useEffect(() => {
+    if (!paymentSyncPending) return
+    const timer = setInterval(() => {
+      void (async () => {
+        pollAttemptsRef.current += 1
+        const status = await refreshInvoiceStatusOnce()
+        if (status === 'paid') {
+          setPaymentSyncPending(false)
+          setPaymentSyncTimedOut(false)
+          Alert.alert('Payment confirmed', 'Invoice status is now paid.')
+          return
+        }
+        if (pollAttemptsRef.current >= MAX_PAYMENT_SYNC_POLLS) {
+          setPaymentSyncPending(false)
+          setPaymentSyncTimedOut(true)
+        }
+      })()
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [paymentSyncPending, refreshInvoiceStatusOnce])
+
+  useEffect(() => {
+    if (!paymentSyncPending) return
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return
+      void (async () => {
+        const status = await refreshInvoiceStatusOnce()
+        if (status === 'paid') {
+          setPaymentSyncPending(false)
+          setPaymentSyncTimedOut(false)
+          Alert.alert('Payment confirmed', 'Invoice status is now paid.')
+        }
+      })()
+    })
+    return () => sub.remove()
+  }, [paymentSyncPending, refreshInvoiceStatusOnce])
+
+  useEffect(() => {
+    const current = String(invoice?.status ?? '').toLowerCase()
+    if (current === 'paid') {
+      if (paymentSyncPending) setPaymentSyncPending(false)
+      if (paymentSyncTimedOut) setPaymentSyncTimedOut(false)
+    }
+  }, [invoice?.status, paymentSyncPending, paymentSyncTimedOut])
+
+  const manualRefreshPaymentStatus = async () => {
+    const next = await refreshInvoiceStatusOnce()
+    if (next === 'paid') {
+      setPaymentSyncTimedOut(false)
+      Alert.alert('Payment confirmed', 'Invoice status is now paid.')
+      return
+    }
+    Alert.alert('Still pending', 'Payment is still pending. Please check again shortly.')
   }
 
   if (loading) {
@@ -229,14 +329,49 @@ export default function InvoiceDetailScreen() {
               </TouchableOpacity>
             )}
             {(status === 'pending' || status === 'overdue') && (
-              <TouchableOpacity
-                style={[styles.actionBtnPrimary, statusBusy && styles.dim]}
-                disabled={statusBusy}
-                onPress={() => setInvoiceStatus('paid')}
-              >
-                <Text style={styles.actionBtnPrimaryText}>Mark as paid</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  style={[styles.actionBtnPrimary, statusBusy && styles.dim]}
+                  disabled={statusBusy}
+                  onPress={openCreaPay}
+                >
+                  <Text style={styles.actionBtnPrimaryText}>Pay with CREA Pay</Text>
+                </TouchableOpacity>
+                {paymentSyncPending ? (
+                  <Text style={styles.syncHint}>Waiting for CREA Pay confirmation…</Text>
+                ) : null}
+                {paymentSyncTimedOut ? (
+                  <View style={styles.syncCard}>
+                    <Text style={styles.syncWarnTitle}>Payment still pending</Text>
+                    <Text style={styles.syncWarnText}>
+                      We could not confirm payment automatically yet. You can refresh status manually.
+                    </Text>
+                    <TouchableOpacity
+                      style={[styles.actionBtn, styles.syncRefreshBtn]}
+                      onPress={manualRefreshPaymentStatus}
+                      disabled={statusBusy}
+                    >
+                      <Text style={styles.actionBtnText}>Refresh payment status</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+                {lastPaymentCheckAt ? (
+                  <Text style={styles.syncMeta}>
+                    Last checked: {lastPaymentCheckAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                ) : null}
+                <TouchableOpacity
+                  style={[styles.actionBtn, statusBusy && styles.dim]}
+                  disabled={statusBusy}
+                  onPress={() => setInvoiceStatus('paid')}
+                >
+                  <Text style={styles.actionBtnText}>Mark as paid (manual)</Text>
+                </TouchableOpacity>
+              </>
             )}
+            {status === 'paid' ? (
+              <Text style={styles.paidHint}>Paid via CREA Pay or manual confirmation.</Text>
+            ) : null}
           </View>
         )}
       </ScrollView>
@@ -290,4 +425,28 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontStyle: 'italic',
   },
+  paidHint: {
+    marginTop: 2,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    lineHeight: 18,
+  },
+  syncHint: {
+    marginTop: -2,
+    fontSize: 12,
+    color: 'rgba(255,220,0,0.7)',
+    lineHeight: 18,
+  },
+  syncCard: {
+    marginTop: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.25)',
+    backgroundColor: 'rgba(255,220,0,0.06)',
+    padding: 12,
+  },
+  syncWarnTitle: { color: '#FFDC00', fontSize: 13, fontWeight: '800', marginBottom: 4 },
+  syncWarnText: { color: 'rgba(255,255,255,0.65)', fontSize: 12, lineHeight: 17, marginBottom: 10 },
+  syncRefreshBtn: { alignSelf: 'flex-start', width: '100%' },
+  syncMeta: { marginTop: 2, fontSize: 11, color: 'rgba(255,255,255,0.35)' },
 })
