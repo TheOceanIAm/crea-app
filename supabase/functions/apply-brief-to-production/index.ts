@@ -16,11 +16,45 @@ type Body = {
 const MAX_SHOTS = 60
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
+function okJson(payload: Record<string, unknown>) {
+  return new Response(JSON.stringify(payload), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
+function failJson(error: string, opts?: { hint?: string; status?: number; details?: string }) {
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      error,
+      ...(opts?.hint ? { hint: opts.hint } : {}),
+      ...(opts?.details ? { details: opts.details } : {}),
+      ...(opts?.status ? { status: opts.status } : {}),
+    }),
+    {
+      // Keep HTTP 200 so mobile client can always parse structured error body.
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    },
+  )
+}
+
 function extractJsonObject(raw: string): unknown {
   const t = raw.trim()
   const fence = /^```(?:json)?\s*([\s\S]*?)```$/m.exec(t)
   const s = fence ? fence[1].trim() : t
-  return JSON.parse(s)
+  try {
+    return JSON.parse(s)
+  } catch {
+    // Some model responses wrap JSON with extra prose. Try the first JSON object span.
+    const start = s.indexOf('{')
+    const end = s.lastIndexOf('}')
+    if (start >= 0 && end > start) {
+      const candidate = s.slice(start, end + 1)
+      return JSON.parse(candidate)
+    }
+    throw new Error('Could not extract JSON object')
+  }
 }
 
 function extractAnthropicText(payload: unknown): string {
@@ -103,10 +137,7 @@ Deno.serve(async (req) => {
   try {
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing auth' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('Missing auth', { status: 401 })
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
@@ -120,30 +151,18 @@ Deno.serve(async (req) => {
       error: uerr,
     } = await supabase.auth.getUser()
     if (uerr || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('Unauthorized', { status: 401 })
     }
 
     const { projectId, tool, shootDate, replaceShots } = (await req.json()) as Body
     if (!projectId || !tool || !shootDate) {
-      return new Response(JSON.stringify({ error: 'projectId, tool, and shootDate (YYYY-MM-DD) are required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('projectId, tool, and shootDate (YYYY-MM-DD) are required', { status: 400 })
     }
     if (!ISO_DATE.test(shootDate)) {
-      return new Response(JSON.stringify({ error: 'shootDate must be YYYY-MM-DD' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('shootDate must be YYYY-MM-DD', { status: 400 })
     }
     if (tool !== 'shotlist' && tool !== 'callsheet') {
-      return new Response(JSON.stringify({ error: 'tool must be shotlist or callsheet' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('tool must be shotlist or callsheet', { status: 400 })
     }
 
     const { data: proj, error: perr } = await supabase
@@ -153,33 +172,24 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     if (perr || !proj) {
-      return new Response(JSON.stringify({ error: 'Project not found or forbidden' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('Project not found or forbidden', { status: 403 })
     }
 
     const outputs = (proj.brief_ai_outputs as Record<string, string> | null) ?? {}
     const markdown = (outputs[tool] ?? '').trim()
     if (!markdown) {
-      return new Response(
-        JSON.stringify({
-          error: 'No saved Brief AI output for this tool',
-          hint: 'Generate the shotlist or call sheet in Brief AI first, then apply.',
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      )
+      return failJson('No saved Brief AI output for this tool', {
+        hint: 'Generate the shotlist or call sheet in Brief AI first, then apply.',
+        status: 400,
+      })
     }
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? Deno.env.get('OPENAI_API_KEY')
     if (!anthropicKey) {
-      return new Response(
-        JSON.stringify({
-          error: 'Anthropic not configured',
-          hint: 'Set ANTHROPIC_API_KEY (or OPENAI_API_KEY fallback) for Edge Functions',
-        }),
-        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      )
+      return failJson('Anthropic not configured', {
+        hint: 'Set ANTHROPIC_API_KEY (or OPENAI_API_KEY fallback) for Edge Functions',
+        status: 503,
+      })
     }
 
     if (tool === 'shotlist') {
@@ -205,9 +215,9 @@ Rules: Use empty strings for unknown fields. At most ${MAX_SHOTS} shots. Preserv
 
       if (!res.ok) {
         const t = await res.text()
-        return new Response(JSON.stringify({ error: 'Anthropic error', details: t }), {
+        return failJson('Anthropic error', {
+          details: t,
           status: 502,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
 
@@ -217,17 +227,11 @@ Rules: Use empty strings for unknown fields. At most ${MAX_SHOTS} shots. Preserv
       try {
         parsed = extractJsonObject(raw) as { shots?: ShotPayload[] }
       } catch {
-        return new Response(JSON.stringify({ error: 'Could not parse AI response as JSON' }), {
-          status: 502,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
+        return failJson('Could not parse AI response as JSON', { status: 502 })
       }
       const shots = Array.isArray(parsed.shots) ? parsed.shots.slice(0, MAX_SHOTS) : []
       if (shots.length === 0) {
-        return new Response(JSON.stringify({ error: 'AI returned no shots' }), {
-          status: 422,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
+        return failJson('AI returned no shots', { status: 422 })
       }
 
       if (replaceShots === true) {
@@ -237,10 +241,7 @@ Rules: Use empty strings for unknown fields. At most ${MAX_SHOTS} shots. Preserv
           .eq('project_id', projectId)
           .eq('shoot_date', shootDate)
         if (delErr) {
-          return new Response(JSON.stringify({ error: delErr.message }), {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          })
+          return failJson(delErr.message, { status: 400 })
         }
       }
 
@@ -253,15 +254,10 @@ Rules: Use empty strings for unknown fields. At most ${MAX_SHOTS} shots. Preserv
 
       const { error: insErr } = await supabase.from('production_shots').insert(rows)
       if (insErr) {
-        return new Response(JSON.stringify({ error: insErr.message }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
+        return failJson(insErr.message, { status: 400 })
       }
 
-      return new Response(JSON.stringify({ ok: true, tool: 'shotlist', shotsInserted: rows.length, shootDate }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return okJson({ ok: true, tool: 'shotlist', shotsInserted: rows.length, shootDate })
     }
 
     // callsheet
@@ -449,9 +445,6 @@ Rules:
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     )
   } catch (e) {
-    return new Response(JSON.stringify({ error: String(e) }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return failJson(String(e), { status: 500 })
   }
 })

@@ -79,6 +79,36 @@ type ApplyBriefProdResult = {
   createdDay?: boolean
 }
 
+async function readFunctionErrorDetails(error: unknown): Promise<{ message: string; hint?: string } | null> {
+  const e = error as { context?: { json?: () => Promise<unknown>; text?: () => Promise<string> } } | null
+  const ctx = e?.context
+  if (!ctx) return null
+  try {
+    if (typeof ctx.json === 'function') {
+      const body = (await ctx.json()) as { error?: unknown; hint?: unknown; details?: unknown } | null
+      const msg =
+        typeof body?.error === 'string'
+          ? body.error
+          : typeof body?.details === 'string'
+            ? body.details
+            : null
+      if (msg) {
+        return {
+          message: msg,
+          hint: typeof body?.hint === 'string' ? body.hint : undefined,
+        }
+      }
+    }
+    if (typeof ctx.text === 'function') {
+      const t = await ctx.text()
+      if (t.trim()) return { message: t.trim() }
+    }
+  } catch {
+    // no-op: fall back to generic error below
+  }
+  return null
+}
+
 function parseIsoDateInput(raw: string): string | null {
   const t = raw.trim()
   if (!t) return null
@@ -263,9 +293,12 @@ export default function ProjectWorkspaceScreen() {
     })
     setApplyingProd(false)
     if (error) {
+      const details = await readFunctionErrorDetails(error)
       Alert.alert(
         'Apply failed',
-        `${error.message}\n\nDeploy the apply-brief-to-production Edge Function (see deploy-supabase.sh) and set ANTHROPIC_API_KEY.`
+        details
+          ? [details.message, details.hint].filter(Boolean).join('\n\n')
+          : `${error.message}\n\nDeploy the apply-brief-to-production Edge Function (see deploy-supabase.sh) and set ANTHROPIC_API_KEY.`
       )
       return
     }
