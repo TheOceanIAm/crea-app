@@ -7,6 +7,8 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  TextInput,
+  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -117,6 +119,10 @@ export default function InvoicesListScreen() {
   const [budgetOverview, setBudgetOverview] = useState<BudgetOverview | null>(null)
   const [showBudgetOverview, setShowBudgetOverview] = useState(false)
   const [monthlyPaid, setMonthlyPaid] = useState<MonthlyPoint[]>([])
+  const [annualBudgetAmount, setAnnualBudgetAmount] = useState('')
+  const [annualBudgetCurrency, setAnnualBudgetCurrency] = useState('EUR')
+  const [annualBudgetYear, setAnnualBudgetYear] = useState(String(new Date().getFullYear()))
+  const [savingAnnualBudget, setSavingAnnualBudget] = useState(false)
 
   const load = useCallback(async () => {
     setError(null)
@@ -182,6 +188,13 @@ export default function InvoicesListScreen() {
           typeof profileBudgetRow?.annual_budget_year === 'number'
             ? profileBudgetRow.annual_budget_year
             : null
+        setAnnualBudgetAmount(budgetAmount != null ? String(budgetAmount) : '')
+        setAnnualBudgetCurrency(
+          typeof profileBudgetRow?.annual_budget_currency === 'string'
+            ? profileBudgetRow.annual_budget_currency.toUpperCase()
+            : 'EUR'
+        )
+        setAnnualBudgetYear(budgetYear != null ? String(budgetYear) : String(new Date().getFullYear()))
         setBudgetOverview(
           computeBudgetOverview((projectRows as ProjectBudgetRow[]) ?? [], (data as InvoiceRow[]) ?? [], {
             amount: budgetAmount,
@@ -216,6 +229,41 @@ export default function InvoicesListScreen() {
   const onRefresh = () => {
     setRefreshing(true)
     load()
+  }
+
+  const saveAnnualBudget = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+    const rawAmount = annualBudgetAmount.trim()
+    const parsedAmount = rawAmount === '' ? null : Number(rawAmount.replace(',', '.'))
+    if (parsedAmount != null && (!Number.isFinite(parsedAmount) || parsedAmount < 0)) {
+      Alert.alert('Budget', 'Please enter a valid non-negative yearly budget.')
+      return
+    }
+    const parsedYear = Number(annualBudgetYear.trim())
+    if (!Number.isInteger(parsedYear) || parsedYear < 2000 || parsedYear > 3000) {
+      Alert.alert('Budget', 'Please enter a valid budget year (e.g. 2026).')
+      return
+    }
+    const currency = annualBudgetCurrency.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'EUR'
+    setSavingAnnualBudget(true)
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        annual_budget_amount: parsedAmount,
+        annual_budget_currency: currency,
+        annual_budget_year: parsedYear,
+      })
+      .eq('id', user.id)
+    setSavingAnnualBudget(false)
+    if (error) {
+      Alert.alert('Save failed', error.message)
+      return
+    }
+    Alert.alert('Saved', 'Annual budget was updated.')
+    await load()
   }
 
   if (loading) {
@@ -257,154 +305,200 @@ export default function InvoicesListScreen() {
         </View>
       </View>
 
-      {perspective && (
-        <Text style={styles.hint}>
-          {perspective === 'company'
-            ? 'Received from freelancers'
-            : 'Invoices you send to clients'}
-        </Text>
-      )}
-
-      {showBudgetOverview && budgetOverview ? (
-        <View style={styles.overviewCard}>
-          {perspective === 'company' ? (
-            <>
-              <Text style={styles.overviewTitle}>Budget overview</Text>
-              <Text style={styles.overviewSub}>All invoices and active job listings</Text>
-
-              <View style={styles.kpiGrid}>
-                <View style={[styles.kpiCard, styles.kpiPaid]}>
-                  <Text style={styles.kpiLabel}>Total paid</Text>
-                  <Text style={[styles.kpiValue, styles.kpiValuePaid]}>
-                    {money(budgetOverview.paidInvoices, budgetOverview.currency)}
-                  </Text>
-                  <Text style={styles.kpiMeta}>{rows.filter((r) => String(r.status).toLowerCase() === 'paid').length} invoices</Text>
-                </View>
-                <View style={[styles.kpiCard, styles.kpiPending]}>
-                  <Text style={styles.kpiLabel}>Pending</Text>
-                  <Text style={[styles.kpiValue, styles.kpiValuePending]}>
-                    {money(budgetOverview.pendingCosts, budgetOverview.currency)}
-                  </Text>
-                  <Text style={styles.kpiMeta}>
-                    {rows.filter((r) => String(r.status).toLowerCase() === 'pending').length} invoices
-                  </Text>
-                </View>
-                <View style={[styles.kpiCard, styles.kpiOverdue]}>
-                  <Text style={styles.kpiLabel}>Overdue</Text>
-                  <Text style={[styles.kpiValue, styles.kpiValueOverdue]}>
-                    {money(budgetOverview.overdueCosts, budgetOverview.currency)}
-                  </Text>
-                  <Text style={styles.kpiMeta}>
-                    {rows.filter((r) => String(r.status).toLowerCase() === 'overdue').length} invoices
-                  </Text>
-                </View>
-                <View style={[styles.kpiCard, styles.kpiActive]}>
-                  <Text style={styles.kpiLabel}>Est. active</Text>
-                  <Text style={[styles.kpiValue, styles.kpiValueActive]}>
-                    {money(budgetOverview.activeProjectCosts, budgetOverview.currency)}
-                  </Text>
-                  <Text style={styles.kpiMeta}>{budgetOverview.projects} open jobs/projects</Text>
-                </View>
-              </View>
-
-              <View style={styles.legendBar} />
-              <View style={styles.legendRow}>
-                <Text style={styles.legendItem}>● Paid</Text>
-                <Text style={styles.legendItem}>● Pending</Text>
-                <Text style={styles.legendItem}>● Overdue</Text>
-                <Text style={styles.legendItem}>● Est. Active</Text>
-              </View>
-
-              <View style={styles.yearBudgetWrap}>
-                <Text style={styles.overviewLabel}>
-                  Annual budget {budgetOverview.annualBudgetYear ? `(${budgetOverview.annualBudgetYear})` : ''}
-                </Text>
-                <Text style={styles.yearBudgetValue}>
-                  {budgetOverview.annualBudget != null
-                    ? money(budgetOverview.annualBudget, budgetOverview.currency)
-                    : 'Not set in profile'}
-                </Text>
-                <Text style={styles.overviewMeta}>
-                  Caused costs: {money(budgetOverview.causedCosts, budgetOverview.currency)}
-                </Text>
-              </View>
-            </>
-          ) : (
-            <>
-              <Text style={styles.overviewTitle}>Earnings overview</Text>
-              <Text style={styles.overviewSub}>
-                Year to date{budgetOverview.annualBudgetYear ? ` · ${budgetOverview.annualBudgetYear}` : ''}
-              </Text>
-              <View style={styles.kpiGridFreelancer}>
-                <View style={styles.kpiCardFreelancer}>
-                  <Text style={styles.kpiLabel}>Total earned</Text>
-                  <Text style={[styles.kpiValue, styles.kpiValuePending]}>
-                    {money(budgetOverview.paidInvoices, budgetOverview.currency)}
-                  </Text>
-                  <Text style={styles.kpiMeta}>
-                    {budgetOverview.annualBudgetYear ? `${budgetOverview.annualBudgetYear} YTD` : 'YTD'}
-                  </Text>
-                </View>
-                <View style={styles.kpiCardFreelancer}>
-                  <Text style={styles.kpiLabel}>Pending</Text>
-                  <Text style={styles.kpiValue}>{money(budgetOverview.pendingCosts, budgetOverview.currency)}</Text>
-                  <Text style={styles.kpiMeta}>
-                    {rows.filter((r) => String(r.status).toLowerCase() === 'pending').length} invoices
-                  </Text>
-                </View>
-                <View style={styles.kpiCardFreelancer}>
-                  <Text style={styles.kpiLabel}>Avg per project</Text>
-                  <Text style={styles.kpiValue}>
-                    {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length > 0
-                      ? money(
-                          budgetOverview.paidInvoices /
-                            rows.filter((r) => String(r.status).toLowerCase() === 'paid').length,
-                          budgetOverview.currency
-                        )
-                      : '—'}
-                  </Text>
-                  <Text style={styles.kpiMeta}>
-                    {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length} paid
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.monthlyCard}>
-                <Text style={styles.monthlyTitle}>Monthly earnings (paid)</Text>
-                <View style={styles.monthsRow}>
-                  {monthlyPaid.map((m) => (
-                    <View key={m.label} style={styles.monthCol}>
-                      <View style={styles.monthBar} />
-                      <Text style={styles.monthLabel}>{m.label}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.historyHeader}>
-                <Text style={styles.historyTitle}>Invoice history</Text>
-                <TouchableOpacity onPress={() => router.push('/(tabs)/invoices/new')}>
-                  <Text style={styles.historyCta}>Send invoice (completed projects) →</Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
-        </View>
-      ) : null}
-
-      {error ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorTitle}>Couldn’t load invoices</Text>
-          <Text style={styles.errorText}>{error}</Text>
-          <Text style={styles.errorHint}>
-            In Supabase, ensure the invoices table has company_id and freelancer_id columns (depending on role).
-          </Text>
-        </View>
-      ) : null}
-
       <FlatList
         data={rows}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <>
+            {perspective && (
+              <Text style={styles.hint}>
+                {perspective === 'company'
+                  ? 'Received from freelancers'
+                  : 'Invoices you send to clients'}
+              </Text>
+            )}
+            {showBudgetOverview && budgetOverview ? (
+              <View style={styles.overviewCard}>
+                {perspective === 'company' ? (
+                  <>
+                    <Text style={styles.overviewTitle}>Budget overview</Text>
+                    <Text style={styles.overviewSub}>All invoices and active job listings</Text>
+                    <View style={styles.kpiGrid}>
+                      <View style={[styles.kpiCard, styles.kpiPaid]}>
+                        <Text style={styles.kpiLabel}>Total paid</Text>
+                        <Text style={[styles.kpiValue, styles.kpiValuePaid]}>
+                          {money(budgetOverview.paidInvoices, budgetOverview.currency)}
+                        </Text>
+                        <Text style={styles.kpiMeta}>
+                          {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length} invoices
+                        </Text>
+                      </View>
+                      <View style={[styles.kpiCard, styles.kpiPending]}>
+                        <Text style={styles.kpiLabel}>Pending</Text>
+                        <Text style={[styles.kpiValue, styles.kpiValuePending]}>
+                          {money(budgetOverview.pendingCosts, budgetOverview.currency)}
+                        </Text>
+                        <Text style={styles.kpiMeta}>
+                          {rows.filter((r) => String(r.status).toLowerCase() === 'pending').length} invoices
+                        </Text>
+                      </View>
+                      <View style={[styles.kpiCard, styles.kpiOverdue]}>
+                        <Text style={styles.kpiLabel}>Overdue</Text>
+                        <Text style={[styles.kpiValue, styles.kpiValueOverdue]}>
+                          {money(budgetOverview.overdueCosts, budgetOverview.currency)}
+                        </Text>
+                        <Text style={styles.kpiMeta}>
+                          {rows.filter((r) => String(r.status).toLowerCase() === 'overdue').length} invoices
+                        </Text>
+                      </View>
+                      <View style={[styles.kpiCard, styles.kpiActive]}>
+                        <Text style={styles.kpiLabel}>Est. active</Text>
+                        <Text style={[styles.kpiValue, styles.kpiValueActive]}>
+                          {money(budgetOverview.activeProjectCosts, budgetOverview.currency)}
+                        </Text>
+                        <Text style={styles.kpiMeta}>{budgetOverview.projects} open jobs/projects</Text>
+                      </View>
+                    </View>
+                    <View style={styles.legendBar} />
+                    <View style={styles.legendRow}>
+                      <Text style={styles.legendItem}>● Paid</Text>
+                      <Text style={styles.legendItem}>● Pending</Text>
+                      <Text style={styles.legendItem}>● Overdue</Text>
+                      <Text style={styles.legendItem}>● Est. Active</Text>
+                    </View>
+                    <View style={styles.yearBudgetWrap}>
+                      <Text style={styles.overviewLabel}>
+                        Annual budget {budgetOverview.annualBudgetYear ? `(${budgetOverview.annualBudgetYear})` : ''}
+                      </Text>
+                      <Text style={styles.yearBudgetValue}>
+                        {budgetOverview.annualBudget != null
+                          ? money(budgetOverview.annualBudget, budgetOverview.currency)
+                          : 'Not set in profile'}
+                      </Text>
+                      <Text style={styles.overviewMeta}>
+                        Caused costs: {money(budgetOverview.causedCosts, budgetOverview.currency)}
+                      </Text>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.overviewTitle}>Earnings overview</Text>
+                    <Text style={styles.overviewSub}>
+                      Year to date{budgetOverview.annualBudgetYear ? ` · ${budgetOverview.annualBudgetYear}` : ''}
+                    </Text>
+                    <View style={styles.kpiGridFreelancer}>
+                      <View style={styles.kpiCardFreelancer}>
+                        <Text style={styles.kpiLabel}>Total earned</Text>
+                        <Text style={[styles.kpiValue, styles.kpiValuePending]}>
+                          {money(budgetOverview.paidInvoices, budgetOverview.currency)}
+                        </Text>
+                        <Text style={styles.kpiMeta}>
+                          {budgetOverview.annualBudgetYear ? `${budgetOverview.annualBudgetYear} YTD` : 'YTD'}
+                        </Text>
+                      </View>
+                      <View style={styles.kpiCardFreelancer}>
+                        <Text style={styles.kpiLabel}>Pending</Text>
+                        <Text style={styles.kpiValue}>{money(budgetOverview.pendingCosts, budgetOverview.currency)}</Text>
+                        <Text style={styles.kpiMeta}>
+                          {rows.filter((r) => String(r.status).toLowerCase() === 'pending').length} invoices
+                        </Text>
+                      </View>
+                      <View style={styles.kpiCardFreelancer}>
+                        <Text style={styles.kpiLabel}>Avg per project</Text>
+                        <Text style={styles.kpiValue}>
+                          {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length > 0
+                            ? money(
+                                budgetOverview.paidInvoices /
+                                  rows.filter((r) => String(r.status).toLowerCase() === 'paid').length,
+                                budgetOverview.currency
+                              )
+                            : '—'}
+                        </Text>
+                        <Text style={styles.kpiMeta}>
+                          {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length} paid
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.monthlyCard}>
+                      <Text style={styles.monthlyTitle}>Monthly earnings (paid)</Text>
+                      <View style={styles.monthsRow}>
+                        {monthlyPaid.map((m) => (
+                          <View key={m.label} style={styles.monthCol}>
+                            <View style={styles.monthBar} />
+                            <Text style={styles.monthLabel}>{m.label}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                    <View style={styles.historyHeader}>
+                      <Text style={styles.historyTitle}>Invoice history</Text>
+                      <TouchableOpacity onPress={() => router.push('/(tabs)/invoices/new')}>
+                        <Text style={styles.historyCta}>Send invoice (completed projects) →</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </View>
+            ) : null}
+            {perspective === 'company' ? (
+              <View style={styles.annualBudgetCard}>
+                <Text style={styles.annualBudgetTitle}>Annual budget</Text>
+                <Text style={styles.annualBudgetSub}>
+                  Set yearly company budget here (moved from Settings -> Invoice & bank).
+                </Text>
+                <Text style={styles.fieldLabel}>Year</Text>
+                <TextInput
+                  style={styles.input}
+                  value={annualBudgetYear}
+                  onChangeText={setAnnualBudgetYear}
+                  placeholder="2026"
+                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  keyboardType="number-pad"
+                />
+                <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Currency</Text>
+                <TextInput
+                  style={styles.input}
+                  value={annualBudgetCurrency}
+                  onChangeText={setAnnualBudgetCurrency}
+                  placeholder="EUR"
+                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  autoCapitalize="characters"
+                />
+                <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Amount</Text>
+                <TextInput
+                  style={styles.input}
+                  value={annualBudgetAmount}
+                  onChangeText={setAnnualBudgetAmount}
+                  placeholder="e.g. 500000"
+                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  keyboardType="decimal-pad"
+                />
+                <TouchableOpacity
+                  style={[styles.saveAnnualBudgetBtn, savingAnnualBudget && styles.btnDisabled]}
+                  onPress={saveAnnualBudget}
+                  disabled={savingAnnualBudget}
+                >
+                  {savingAnnualBudget ? (
+                    <ActivityIndicator color="#0a0a0a" />
+                  ) : (
+                    <Text style={styles.saveAnnualBudgetText}>Save annual budget</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            {error ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorTitle}>Couldn’t load invoices</Text>
+                <Text style={styles.errorText}>{error}</Text>
+                <Text style={styles.errorHint}>
+                  In Supabase, ensure the invoices table has company_id and freelancer_id columns (depending on role).
+                </Text>
+              </View>
+            ) : null}
+          </>
+        }
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFDC00" />
         }
@@ -573,7 +667,7 @@ const styles = StyleSheet.create({
   errorTitle: { color: '#ff8888', fontWeight: '700', marginBottom: 6 },
   errorText: { color: 'rgba(255,255,255,0.65)', fontSize: 13, marginBottom: 8 },
   errorHint: { color: 'rgba(255,255,255,0.35)', fontSize: 11, lineHeight: 16 },
-  list: { paddingHorizontal: 20, paddingBottom: 40, gap: 10 },
+  list: { paddingHorizontal: 20, paddingBottom: 160, gap: 10 },
   card: {
     backgroundColor: '#111111',
     borderRadius: 16,
@@ -590,4 +684,42 @@ const styles = StyleSheet.create({
   emptyWrap: { paddingTop: 48, paddingHorizontal: 12, alignItems: 'center' },
   emptyText: { color: 'rgba(255,255,255,0.45)', fontSize: 16, fontWeight: '600', marginBottom: 8 },
   emptySub: { color: 'rgba(255,255,255,0.25)', fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  annualBudgetCard: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#111111',
+    padding: 14,
+  },
+  annualBudgetTitle: { fontSize: 18, fontWeight: '800', color: '#ffffff', marginBottom: 6 },
+  annualBudgetSub: { fontSize: 12, color: 'rgba(255,255,255,0.38)', lineHeight: 18, marginBottom: 14 },
+  fieldLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  fieldLabelSpaced: { marginTop: 12 },
+  input: {
+    backgroundColor: '#0a0a0a',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#ffffff',
+    fontSize: 15,
+  },
+  saveAnnualBudgetBtn: {
+    marginTop: 14,
+    borderRadius: 100,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: '#FFDC00',
+  },
+  saveAnnualBudgetText: { color: '#0a0a0a', fontSize: 15, fontWeight: '800' },
 })

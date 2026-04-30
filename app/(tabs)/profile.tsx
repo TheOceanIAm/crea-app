@@ -1411,46 +1411,58 @@ export default function ProfileScreen() {
               <Text style={styles.cardSubtitle}>
                 Bank details are for freelancer invoices. As a company, use the invoice list in the Invoices tab.
               </Text>
-              <Text style={styles.fieldLabel}>Budget year</Text>
+              <Text style={styles.fieldLabel}>Account holder</Text>
               <TextInput
                 style={styles.input}
-                value={annualBudgetYear}
-                onChangeText={setAnnualBudgetYear}
-                placeholder="2026"
+                value={bankHolder}
+                onChangeText={setBankHolder}
+                placeholder="Company name or account holder"
                 placeholderTextColor="rgba(255,255,255,0.28)"
-                keyboardType="number-pad"
               />
-              <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Budget currency</Text>
+              <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>IBAN</Text>
               <TextInput
                 style={styles.input}
-                value={annualBudgetCurrency}
-                onChangeText={setAnnualBudgetCurrency}
-                placeholder="EUR"
+                value={bankIban}
+                onChangeText={setBankIban}
+                placeholder="DE89 …"
                 placeholderTextColor="rgba(255,255,255,0.28)"
                 autoCapitalize="characters"
               />
-              <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Annual budget</Text>
+              <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>BIC / SWIFT (optional)</Text>
               <TextInput
                 style={styles.input}
-                value={annualBudgetAmount}
-                onChangeText={setAnnualBudgetAmount}
-                placeholder="e.g. 500000"
+                value={bankBic}
+                onChangeText={setBankBic}
+                placeholder="COBADEFFXXX"
                 placeholderTextColor="rgba(255,255,255,0.28)"
-                keyboardType="decimal-pad"
+                autoCapitalize="characters"
+              />
+              <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>PayPal (optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={paypalEmail}
+                onChangeText={setPaypalEmail}
+                placeholder="billing@company.com"
+                placeholderTextColor="rgba(255,255,255,0.28)"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="default"
+                textContentType="emailAddress"
+                autoComplete="email"
               />
               <TouchableOpacity
                 style={[styles.secondaryBtn, savingInvoice && styles.btnDisabled]}
-                onPress={saveAnnualBudget}
+                onPress={saveInvoiceBank}
                 disabled={savingInvoice}
               >
                 {savingInvoice ? (
                   <ActivityIndicator color="#FFDC00" />
                 ) : (
-                  <Text style={styles.secondaryBtnText}>Save annual budget</Text>
+                  <Text style={styles.secondaryBtnText}>Save bank details</Text>
                 )}
               </TouchableOpacity>
               <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.navigate('/(tabs)/invoices')}>
-                <Text style={styles.secondaryBtnText}>Open invoices</Text>
+                <Text style={styles.secondaryBtnText}>Open invoices (annual budget)</Text>
               </TouchableOpacity>
             </View>
           )}
