@@ -49,8 +49,18 @@ export type ShadowLineFeature = {
 
 export type ShadowPolygonFeature = {
   type: 'Feature'
-  properties: { lengthMeters: number; cappedMeters: number; widthMeters: number }
+  properties: {
+    lengthMeters: number
+    cappedMeters: number
+    widthMeters: number
+    kind: 'umbra' | 'penumbra'
+  }
   geometry: { type: 'Polygon'; coordinates: [number, number][][] }
+}
+
+export type ShadowAreaFeatureCollection = {
+  type: 'FeatureCollection'
+  features: ShadowPolygonFeature[]
 }
 
 /** GeoJSON LineString from subject toward shadow tip (lon, lat order for Mapbox). */
@@ -105,7 +115,7 @@ export function shadowPolygonFeature(
 
   return {
     type: 'Feature',
-    properties: { lengthMeters: len, cappedMeters: dist, widthMeters },
+    properties: { lengthMeters: len, cappedMeters: dist, widthMeters, kind: 'umbra' },
     geometry: {
       type: 'Polygon',
       coordinates: [
@@ -118,5 +128,90 @@ export function shadowPolygonFeature(
         ],
       ],
     },
+  }
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v))
+}
+
+function makeShadowPolygon(
+  subject: LatLon,
+  bearing: number,
+  lengthMeters: number,
+  startWidthMeters: number,
+  endWidthMeters: number,
+  properties: ShadowPolygonFeature['properties']
+): ShadowPolygonFeature {
+  const perp = (bearing + 90) % 360
+  const startHalf = startWidthMeters / 2
+  const endHalf = endWidthMeters / 2
+  const tip = destinationLatLon(subject, bearing, lengthMeters)
+  const startLeft = destinationLatLon(subject, perp, startHalf)
+  const startRight = destinationLatLon(subject, perp + 180, startHalf)
+  const tipLeft = destinationLatLon(tip, perp, endHalf)
+  const tipRight = destinationLatLon(tip, perp + 180, endHalf)
+  return {
+    type: 'Feature',
+    properties,
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [startLeft.lon, startLeft.lat],
+          [tipLeft.lon, tipLeft.lat],
+          [tipRight.lon, tipRight.lat],
+          [startRight.lon, startRight.lat],
+          [startLeft.lon, startLeft.lat],
+        ],
+      ],
+    },
+  }
+}
+
+/**
+ * More realistic shadow-area approximation:
+ * - inner umbra (darker, narrower, slightly shorter)
+ * - outer penumbra (softer, wider, slightly longer)
+ */
+export function shadowAreaFeatures(
+  subject: LatLon,
+  sunAzimuthDeg: number,
+  sunAltitudeDeg: number,
+  subjectHeightM: number,
+  options?: ShadowLineOptions & { widthMeters?: number }
+): ShadowAreaFeatureCollection | null {
+  const len = shadowLengthMeters(subjectHeightM, sunAltitudeDeg)
+  if (len == null) return null
+  const cap = options?.maxShadowMeters ?? 450
+  const dist = Math.min(len, cap)
+  const baseWidth = Math.max(0.8, options?.widthMeters ?? subjectHeightM * 0.45)
+  const bearing = shadowBearingDeg(sunAzimuthDeg)
+
+  // Lower sun => broader/longer penumbra and stronger contrast.
+  const altitudeNorm = clamp(sunAltitudeDeg / 70, 0, 1)
+  const softness = 1 - altitudeNorm
+
+  const umbraLen = dist * (0.7 + 0.08 * altitudeNorm)
+  const penumbraLen = dist * (1.0 + 0.2 * softness)
+  const umbraEndW = baseWidth * (0.25 + 0.15 * altitudeNorm)
+  const penumbraEndW = baseWidth * (0.9 + 1.0 * softness)
+
+  const umbra = makeShadowPolygon(subject, bearing, umbraLen, baseWidth, umbraEndW, {
+    lengthMeters: len,
+    cappedMeters: umbraLen,
+    widthMeters: baseWidth,
+    kind: 'umbra',
+  })
+  const penumbra = makeShadowPolygon(subject, bearing, penumbraLen, baseWidth * 1.15, penumbraEndW, {
+    lengthMeters: len,
+    cappedMeters: penumbraLen,
+    widthMeters: baseWidth * 1.15,
+    kind: 'penumbra',
+  })
+
+  return {
+    type: 'FeatureCollection',
+    features: [penumbra, umbra],
   }
 }

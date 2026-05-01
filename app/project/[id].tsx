@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   TextInput,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
@@ -185,6 +187,7 @@ export default function ProjectWorkspaceScreen() {
   const [savingSchedule, setSavingSchedule] = useState(false)
   const [productionApplyDate, setProductionApplyDate] = useState('')
   const [applyingProd, setApplyingProd] = useState(false)
+  const bodyScrollRef = useRef<ScrollView | null>(null)
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
       setSunPlannerEnabled(false)
@@ -556,6 +559,13 @@ export default function ProjectWorkspaceScreen() {
       await invokeApplyBriefProduction(false)
     }
   }
+  const focusOverviewSummary = useCallback(() => {
+    if (tab !== 'overview') return
+    // Wait a tick so keyboard animation starts before we reposition the form.
+    setTimeout(() => {
+      bodyScrollRef.current?.scrollTo({ y: 260, animated: true })
+    }, 80)
+  }, [tab])
 
   if (loading) {
     return (
@@ -633,78 +643,91 @@ export default function ProjectWorkspaceScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.topRow}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-          <Text style={styles.backLabel}>Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {project.title}
-        </Text>
-      </View>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll}>
-        <View style={styles.tabRow}>
-          {tabs.map((t) => {
-            const active = tab === t.id
-            const isBrief = t.id === 'brief'
-            return (
-              <TouchableOpacity
-                key={t.id}
-                onPress={() => setTab(t.id)}
-                style={[styles.tab, active && styles.tabActive]}
-              >
-                {isBrief ? (
-                  <View style={styles.tabInner}>
-                    <Sparkles size={12} color={active ? '#0a0a0a' : '#FFDC00'} strokeWidth={ICON_STROKE} />
-                    <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
-                  </View>
-                ) : (
-                  <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
-                )}
-              </TouchableOpacity>
-            )
-          })}
+      <KeyboardAvoidingView
+        style={styles.keyboardWrap}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={12}
+      >
+        <View style={styles.topRow}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+            <Text style={styles.backLabel}>Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {project.title}
+          </Text>
         </View>
-      </ScrollView>
 
-      <View style={styles.bodyWrap}>
-        {needsFlexTab ? (
-          <View style={styles.flexFill}>
-            <View style={styles.flexTabInner}>
-              {tab === 'messages' && <ProjectMessagesTab projectId={project.id} userId={userId} />}
-              {tab === 'milestones' && (
-                <ProjectMilestonesTab
-                  projectId={project.id}
-                  onCountsChanged={load}
-                  canManage={canManageCrew}
-                />
-              )}
-              {tab === 'production' && (
-                <ProductionTab
-                  projectId={project.id}
-                  userId={userId}
-                  projectTitle={project.title}
-                  projectLocation={project.location}
-                  companyId={project.company_id}
-                  briefContext={project.brief_ai_context}
-                  briefOutputs={project.brief_ai_outputs}
-                  canUseSunPlanner={sunPlannerEnabled}
-                />
-              )}
-              {tab === 'crew' && (
-                <ProjectCrewTab
-                  projectId={project.id}
-                  canManage={canManageCrew}
-                  workspaceOnly={workspaceOnlyPlan}
-                />
-              )}
-              {tab === 'files' && <ProjectFilesTab projectId={project.id} />}
-            </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll}>
+          <View style={styles.tabRow}>
+            {tabs.map((t) => {
+              const active = tab === t.id
+              const isBrief = t.id === 'brief'
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  onPress={() => setTab(t.id)}
+                  style={[styles.tab, active && styles.tabActive]}
+                >
+                  {isBrief ? (
+                    <View style={styles.tabInner}>
+                      <Sparkles size={12} color={active ? '#0a0a0a' : '#FFDC00'} strokeWidth={ICON_STROKE} />
+                      <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
+                    </View>
+                  ) : (
+                    <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
+                  )}
+                </TouchableOpacity>
+              )
+            })}
           </View>
-        ) : (
-          <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
-            {tab === 'overview' ? statsRow : null}
+        </ScrollView>
+
+        <View style={styles.bodyWrap}>
+          {needsFlexTab ? (
+            <View style={styles.flexFill}>
+              <View style={styles.flexTabInner}>
+                {tab === 'messages' && <ProjectMessagesTab projectId={project.id} userId={userId} />}
+                {tab === 'milestones' && (
+                  <ProjectMilestonesTab
+                    projectId={project.id}
+                    onCountsChanged={load}
+                    canManage={canManageCrew}
+                  />
+                )}
+                {tab === 'production' && (
+                  <ProductionTab
+                    projectId={project.id}
+                    userId={userId}
+                    projectTitle={project.title}
+                    projectLocation={project.location}
+                    companyId={project.company_id}
+                    briefContext={project.brief_ai_context}
+                    briefOutputs={project.brief_ai_outputs}
+                    canUseSunPlanner={sunPlannerEnabled}
+                  />
+                )}
+                {tab === 'crew' && (
+                  <ProjectCrewTab
+                    projectId={project.id}
+                    canManage={canManageCrew}
+                    workspaceOnly={workspaceOnlyPlan}
+                  />
+                )}
+                {tab === 'files' && <ProjectFilesTab projectId={project.id} />}
+              </View>
+            </View>
+          ) : (
+            <ScrollView
+              ref={bodyScrollRef}
+              style={styles.body}
+              contentContainerStyle={styles.bodyContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              automaticallyAdjustKeyboardInsets
+            >
+              {tab === 'overview' ? statsRow : null}
 
             {tab === 'overview' && (
               <>
@@ -764,6 +787,7 @@ export default function ProjectWorkspaceScreen() {
                           placeholderTextColor="rgba(255,255,255,0.25)"
                           value={overviewSummary}
                           onChangeText={setOverviewSummary}
+                          onFocus={focusOverviewSummary}
                           textAlignVertical="top"
                         />
                         <TouchableOpacity
@@ -951,15 +975,17 @@ export default function ProjectWorkspaceScreen() {
                 ) : null}
               </>
             )}
-          </ScrollView>
-        )}
-      </View>
+            </ScrollView>
+          )}
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
+  keyboardWrap: { flex: 1 },
   bodyWrap: { flex: 1, paddingHorizontal: 16 },
   flexFill: { flex: 1 },
   flexTabInner: { flex: 1, minHeight: 0 },

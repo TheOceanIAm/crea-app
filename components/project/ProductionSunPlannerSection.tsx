@@ -408,45 +408,49 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
           onChangeText={setTimeInput}
         />
       </View>
-      <View style={styles.timeStepRow}>
-        <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput((v) => shiftHHmm(v, -30))}>
-          <Text style={styles.timeStepText}>-30m</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput((v) => shiftHHmm(v, -15))}>
-          <Text style={styles.timeStepText}>-15m</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput(nowHHmm())}>
-          <Text style={styles.timeStepText}>Now</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput((v) => shiftHHmm(v, 15))}>
-          <Text style={styles.timeStepText}>+15m</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput((v) => shiftHHmm(v, 30))}>
-          <Text style={styles.timeStepText}>+30m</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={styles.timeSliderWrap}>
-        <View style={styles.timeSliderHead}>
-          <Text style={styles.timeSliderLabel}>Time scrub</Text>
-          <Text style={styles.timeSliderValue}>{timeInput}</Text>
-        </View>
-        {sliderNativeAvailable ? (
-          <Slider
-            minimumValue={0}
-            maximumValue={1439}
-            step={1}
-            value={sliderMinutes}
-            onValueChange={(v) => setTimeInput(minutesToHHmm(v))}
-            minimumTrackTintColor="#FFDC00"
-            maximumTrackTintColor="rgba(255,255,255,0.18)"
-            thumbTintColor="#FFDC00"
-          />
-        ) : (
-          <Text style={styles.timeSliderFallback}>
-            Slider wird nach einem neuen iOS build aktiv. Nutze bis dahin -/+ Buttons.
-          </Text>
-        )}
-      </View>
+      {plannerView !== 'shadow' ? (
+        <>
+          <View style={styles.timeStepRow}>
+            <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput((v) => shiftHHmm(v, -30))}>
+              <Text style={styles.timeStepText}>-30m</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput((v) => shiftHHmm(v, -15))}>
+              <Text style={styles.timeStepText}>-15m</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput(nowHHmm())}>
+              <Text style={styles.timeStepText}>Now</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput((v) => shiftHHmm(v, 15))}>
+              <Text style={styles.timeStepText}>+15m</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput((v) => shiftHHmm(v, 30))}>
+              <Text style={styles.timeStepText}>+30m</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.timeSliderWrap}>
+            <View style={styles.timeSliderHead}>
+              <Text style={styles.timeSliderLabel}>Time scrub</Text>
+              <Text style={styles.timeSliderValue}>{timeInput}</Text>
+            </View>
+            {sliderNativeAvailable ? (
+              <Slider
+                minimumValue={0}
+                maximumValue={1439}
+                step={1}
+                value={sliderMinutes}
+                onValueChange={(v) => setTimeInput(minutesToHHmm(v))}
+                minimumTrackTintColor="#FFDC00"
+                maximumTrackTintColor="rgba(255,255,255,0.18)"
+                thumbTintColor="#FFDC00"
+              />
+            ) : (
+              <Text style={styles.timeSliderFallback}>
+                Slider wird nach einem neuen iOS build aktiv. Nutze bis dahin -/+ Buttons.
+              </Text>
+            )}
+          </View>
+        </>
+      ) : null}
       <TouchableOpacity style={[styles.btn, loading && styles.dim]} onPress={loadSun} disabled={loading}>
         <Text style={styles.btnText}>{loading ? 'Loading…' : 'Load sun data'}</Text>
       </TouchableOpacity>
@@ -551,6 +555,12 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
                   const h = Number(subjectHeightM.replace(',', '.'))
                   return Number.isFinite(h) && h > 0 ? h : 2
                 })()}
+                timeLabel={timeInput}
+                timeMinutes={sliderMinutes}
+                onTimeMinutesChange={(minutes) => setTimeInput(minutesToHHmm(minutes))}
+                onNudgeMinutes={(delta) => setTimeInput((v) => shiftHHmm(v, delta))}
+                onSetNow={() => setTimeInput(nowHHmm())}
+                sliderAvailable={sliderNativeAvailable}
               />
             </View>
           ) : null}
