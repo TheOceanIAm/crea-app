@@ -9,6 +9,7 @@ import {
   Image,
   RefreshControl,
   Alert,
+  Animated,
 } from 'react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -243,17 +244,38 @@ export default function MessagesScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFDC00" />}
         renderItem={({ item }) => (
           <Swipeable
-            friction={2}
+            friction={1.2}
+            rightThreshold={28}
             overshootRight={false}
-            renderRightActions={() => (
-              <View style={styles.swipeActions}>
+            renderRightActions={(progress) => (
+              <Animated.View
+                style={[
+                  styles.swipeActions,
+                  {
+                    opacity: progress.interpolate({
+                      inputRange: [0, 0.12, 1],
+                      outputRange: [0, 0.5, 1],
+                      extrapolate: 'clamp',
+                    }),
+                    transform: [
+                      {
+                        translateX: progress.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [46, 0],
+                          extrapolate: 'clamp',
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
                 <TouchableOpacity style={styles.archiveAction} onPress={() => void archiveConversation(item.id, true)}>
                   <Text style={styles.swipeActionText}>Archive</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.deleteAction} onPress={() => deleteConversation(item.id)}>
                   <Text style={styles.swipeActionText}>Delete</Text>
                 </TouchableOpacity>
-              </View>
+              </Animated.View>
             )}
           >
             <TouchableOpacity
@@ -299,17 +321,38 @@ export default function MessagesScreen() {
             contentContainerStyle={styles.list}
             renderItem={({ item }) => (
               <Swipeable
-                friction={2}
+                friction={1.2}
+                rightThreshold={28}
                 overshootRight={false}
-                renderRightActions={() => (
-                  <View style={styles.swipeActions}>
+                renderRightActions={(progress) => (
+                  <Animated.View
+                    style={[
+                      styles.swipeActions,
+                      {
+                        opacity: progress.interpolate({
+                          inputRange: [0, 0.12, 1],
+                          outputRange: [0, 0.5, 1],
+                          extrapolate: 'clamp',
+                        }),
+                        transform: [
+                          {
+                            translateX: progress.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [46, 0],
+                              extrapolate: 'clamp',
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  >
                     <TouchableOpacity style={styles.archiveAction} onPress={() => void archiveConversation(item.id, false)}>
                       <Text style={styles.swipeActionText}>Unarchive</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.deleteAction} onPress={() => deleteConversation(item.id)}>
                       <Text style={styles.swipeActionText}>Delete</Text>
                     </TouchableOpacity>
-                  </View>
+                  </Animated.View>
                 )}
               >
                 <TouchableOpacity
@@ -422,14 +465,17 @@ const styles = StyleSheet.create({
   preview: { fontSize: 13, color: 'rgba(255,255,255,0.3)' },
   swipeActions: {
     flexDirection: 'row',
-    alignItems: 'stretch',
-    marginVertical: 4,
+    alignItems: 'center',
+    height: 56,
+    marginTop: 10,
+    marginBottom: 10,
   },
   archiveAction: {
     backgroundColor: '#3a3a3a',
     justifyContent: 'center',
     alignItems: 'center',
-    width: 86,
+    width: 78,
+    height: '100%',
     borderRadius: 10,
     marginRight: 6,
   },
@@ -437,10 +483,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#b91c1c',
     justifyContent: 'center',
     alignItems: 'center',
-    width: 80,
+    width: 70,
+    height: '100%',
     borderRadius: 10,
   },
-  swipeActionText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  swipeActionText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   archivedSection: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 8 },
   archivedTitle: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '800', paddingHorizontal: 20, marginBottom: 6 },
   emptyText: { color: 'rgba(255,255,255,0.45)', fontSize: 15, textAlign: 'center' },
