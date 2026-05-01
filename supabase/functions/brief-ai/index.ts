@@ -23,7 +23,13 @@ type ProjectRow = {
   scheduling_end_date: string | null
 }
 
-const DEFAULT_ANTHROPIC_MODELS = ['claude-3-7-sonnet-latest', 'claude-3-5-sonnet-latest', 'claude-3-haiku-20240307']
+const DEFAULT_ANTHROPIC_MODELS = [
+  'claude-sonnet-4-20250514',
+  'claude-3-7-sonnet-latest',
+  'claude-3-5-sonnet-latest',
+  'claude-3-5-haiku-latest',
+  'claude-3-haiku-20240307',
+]
 
 function anthropicModelCandidates(): string[] {
   const fromSingle = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim()
@@ -134,15 +140,76 @@ async function callClaude(opts: { apiKey: string; system: string; user: string }
   throw new Error(`Anthropic error (${lastStatus}): ${lastErr}`)
 }
 
+function okJson(payload: Record<string, unknown>) {
+  return new Response(JSON.stringify(payload), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
+function failJson(error: string, opts?: { hint?: string; status?: number; details?: string }) {
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      error,
+      ...(opts?.hint ? { hint: opts.hint } : {}),
+      ...(opts?.details ? { details: opts.details } : {}),
+      ...(opts?.status ? { status: opts.status } : {}),
+    }),
+    {
+      // Keep HTTP 200 so mobile client can always parse structured error body.
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    }
+  )
+}
+
+function summarizeAnthropicError(rawText: string): { message: string; hint?: string } {
+  const t = rawText.trim()
+  if (!t) return { message: 'Anthropic request failed' }
+  try {
+    const parsed = JSON.parse(t) as {
+      error?: { message?: string }
+      message?: string
+    }
+    const msg = parsed?.error?.message?.trim() || parsed?.message?.trim() || 'Anthropic request failed'
+    const lower = msg.toLowerCase()
+    if (lower.includes('invalid') && lower.includes('api key')) {
+      return {
+        message: msg,
+        hint: 'ANTHROPIC_API_KEY appears invalid for this project. Re-set the secret and redeploy the function.',
+      }
+    }
+    if (lower.includes('credit') || lower.includes('quota') || lower.includes('billing')) {
+      return {
+        message: msg,
+        hint: 'Anthropic billing/quota appears exhausted. Check usage and limits.',
+      }
+    }
+    if (lower.includes('rate limit') || lower.includes('too many requests')) {
+      return {
+        message: msg,
+        hint: 'Anthropic rate limit reached. Wait a moment and retry.',
+      }
+    }
+    if (lower.includes('model')) {
+      return {
+        message: msg,
+        hint:
+          'No available Anthropic model matched this key. Set ANTHROPIC_MODEL_FALLBACKS to models enabled on your Anthropic account.',
+      }
+    }
+    return { message: msg }
+  } catch {
+    return { message: t.slice(0, 700) }
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   try {
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing auth' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('Missing auth', { status: 401 })
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
@@ -156,26 +223,17 @@ Deno.serve(async (req) => {
       error: userErr,
     } = await supabase.auth.getUser()
     if (userErr || !authUser) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('Unauthorized', { status: 401 })
     }
 
     const { projectId, tool, context } = (await req.json()) as Body
     const normalizedTool = String(tool ?? '').trim() as ToolId
     if (!projectId || !normalizedTool) {
-      return new Response(JSON.stringify({ error: 'projectId and tool are required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('projectId and tool are required', { status: 400 })
     }
     const allowed: ToolId[] = ['shotlist', 'tasks', 'callsheet', 'gear', 'production_report']
     if (!allowed.includes(normalizedTool)) {
-      return new Response(JSON.stringify({ error: 'Unsupported tool' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('Unsupported tool', { status: 400 })
     }
 
     const { data: project, error: projectErr } = await supabase
@@ -185,44 +243,39 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     if (projectErr || !project) {
-      return new Response(JSON.stringify({ error: 'Project not found or forbidden' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return failJson('Project not found or forbidden', { status: 403 })
     }
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? Deno.env.get('OPENAI_API_KEY')
     if (!anthropicKey) {
-      return new Response(
-        JSON.stringify({
-          error: 'Anthropic not configured',
-          hint: 'Set ANTHROPIC_API_KEY (or OPENAI_API_KEY fallback) for Edge Functions',
-        }),
-        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return failJson('Anthropic not configured', {
+        hint: 'Set ANTHROPIC_API_KEY (or OPENAI_API_KEY fallback) for Edge Functions',
+        status: 503,
+      })
     }
 
     const { system, userLead } = promptsForTool(normalizedTool)
     const userPrompt = `${userLead}\n\n${projectContextBlock(project as ProjectRow, context ?? '')}`
-    const content = await callClaude({
-      apiKey: anthropicKey,
-      system,
-      user: userPrompt.slice(0, 22000),
-    })
-    if (!content.trim()) {
-      return new Response(JSON.stringify({ error: 'No content returned from Claude.' }), {
-        status: 502,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    let content = ''
+    try {
+      content = await callClaude({
+        apiKey: anthropicKey,
+        system,
+        user: userPrompt.slice(0, 22000),
       })
+    } catch (err) {
+      const msg = String(err)
+      const marker = 'Anthropic error'
+      const raw = msg.includes(marker) ? msg.slice(msg.indexOf(marker)) : msg
+      const summary = summarizeAnthropicError(raw)
+      return failJson(summary.message, { hint: summary.hint, details: raw.slice(0, 1200), status: 502 })
+    }
+    if (!content.trim()) {
+      return failJson('No content returned from Claude.', { status: 502 })
     }
 
-    return new Response(JSON.stringify({ content }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return okJson({ ok: true, content })
   } catch (e) {
-    return new Response(JSON.stringify({ error: String(e) }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return failJson(String(e), { status: 500 })
   }
 })

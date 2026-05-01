@@ -15,7 +15,13 @@ type Body = {
 
 const MAX_SHOTS = 60
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
-const DEFAULT_ANTHROPIC_MODELS = ['claude-3-7-sonnet-latest', 'claude-3-5-sonnet-latest', 'claude-3-haiku-20240307']
+const DEFAULT_ANTHROPIC_MODELS = [
+  'claude-sonnet-4-20250514',
+  'claude-3-7-sonnet-latest',
+  'claude-3-5-sonnet-latest',
+  'claude-3-5-haiku-latest',
+  'claude-3-haiku-20240307',
+]
 
 function anthropicModelCandidates(): string[] {
   const fromSingle = (Deno.env.get('ANTHROPIC_MODEL') ?? '').trim()

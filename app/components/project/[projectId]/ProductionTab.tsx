@@ -15,6 +15,7 @@ import { ChevronLeft, ChevronRight, Clock, MapPin, Plus, Users } from 'lucide-re
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProductionWeatherSection } from '@/components/project/ProductionWeatherSection'
+import { ProductionSunPlannerSection } from '@/components/project/ProductionSunPlannerSection'
 import { BriefAiFormattedOutput } from '@/components/project/BriefAiFormattedOutput'
 
 type ShotStatus = 'open' | 'rolling' | 'done' | 'pick'
@@ -137,9 +138,15 @@ type Props = {
   companyId: string
   briefContext: string | null
   briefOutputs?: Record<string, string> | null
+  canUseSunPlanner?: boolean
 }
 
 const PRODUCTION_SECTIONS = [
+  {
+    id: 'sun' as const,
+    label: 'Sun Planner',
+    sub: 'Sunrise, sunset, golden hour, and sun-angle preview for your shoot',
+  },
   {
     id: 'weather' as const,
     label: 'Weather',
@@ -177,6 +184,7 @@ export function ProductionTab({
   companyId,
   briefContext,
   briefOutputs,
+  canUseSunPlanner = false,
 }: Props) {
   const [shootDay, setShootDay] = useState(() => todayLocalISODate())
   const [dayInput, setDayInput] = useState(() => todayLocalISODate())
@@ -538,6 +546,18 @@ export function ProductionTab({
         </View>
       ) : null}
       {openFeature === 'weather' ? <ProductionWeatherSection initialLocation={projectLocation} /> : null}
+      {openFeature === 'sun' ? (
+        canUseSunPlanner ? (
+          <ProductionSunPlannerSection initialLocation={projectLocation} />
+        ) : (
+          <View style={styles.aiDocCard}>
+            <Text style={styles.aiDocTitle}>Sun Planner</Text>
+            <Text style={styles.muted}>
+              Available for Freelancer Pro+ and Company Studio+ plans. Upgrade to unlock this feature.
+            </Text>
+          </View>
+        )
+      ) : null}
       {openFeature === 'tasks' ? (
         <View style={styles.aiDocCard}>
           <Text style={styles.aiDocTitle}>Task breakdown</Text>

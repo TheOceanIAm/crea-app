@@ -9,8 +9,10 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Linking,
 } from 'react-native'
-import { UserMinus } from 'lucide-react-native'
+import { Swipeable } from 'react-native-gesture-handler'
+import { Trash2 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 
@@ -34,9 +36,12 @@ type CrewRow =
   | {
       source: 'registered'
       id: string
+      profile_id: string
       member_role: string
       name: string
       subtitle: string
+      email: string | null
+      phone: string | null
     }
   | {
       source: 'manual'
@@ -44,6 +49,8 @@ type CrewRow =
       member_role: string
       name: string
       subtitle: string
+      email: string | null
+      phone: string | null
     }
 
 type Props = { projectId: string; canManage: boolean; workspaceOnly?: boolean }
@@ -61,9 +68,15 @@ export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: 
   const [busy, setBusy] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [manualName, setManualName] = useState('')
-  const [manualRole, setManualRole] = useState('crew')
+  const [manualRole, setManualRole] = useState('')
   const [manualEmail, setManualEmail] = useState('')
   const [manualPhone, setManualPhone] = useState('')
+  const [personModalOpen, setPersonModalOpen] = useState(false)
+  const [selectedCrew, setSelectedCrew] = useState<CrewRow | null>(null)
+  const [personName, setPersonName] = useState('')
+  const [personRole, setPersonRole] = useState('crew')
+  const [personEmail, setPersonEmail] = useState('')
+  const [personPhone, setPersonPhone] = useState('')
 
   const load = useCallback(async () => {
     const [registeredRes, manualRes] = await Promise.all([
@@ -102,20 +115,25 @@ export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: 
       return {
         source: 'registered' as const,
         id: m.id,
+        profile_id: m.profile_id,
         member_role: m.member_role,
         name: p?.name || 'Member',
         subtitle: roleLabel(m.member_role),
+        email: null,
+        phone: null,
       }
     })
 
     const manual = ((manualRes.data as ManualCrew[]) ?? []).map((m) => {
-      const details = [m.email?.trim() || '', m.phone?.trim() || ''].filter(Boolean).join(' · ')
+      const role = (m.member_role || '').trim()
       return {
         source: 'manual' as const,
         id: m.id,
         member_role: m.member_role || 'crew',
         name: m.name,
-        subtitle: details || roleLabel(m.member_role || 'crew'),
+        subtitle: role || 'Crew',
+        email: m.email?.trim() || null,
+        phone: m.phone?.trim() || null,
       }
     })
 
@@ -178,7 +196,7 @@ export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: 
       return
     }
     setManualName('')
-    setManualRole('crew')
+    setManualRole('')
     setManualEmail('')
     setManualPhone('')
     setModalOpen(false)
@@ -206,6 +224,82 @@ export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: 
         },
       },
     ])
+  }
+
+  const openPersonCard = (m: CrewRow) => {
+    setSelectedCrew(m)
+    setPersonName(m.name)
+    setPersonRole(m.member_role || 'crew')
+    setPersonEmail((m.email ?? '').trim())
+    setPersonPhone((m.phone ?? '').trim())
+    setPersonModalOpen(true)
+  }
+
+  const canEditSelected = selectedCrew?.source === 'manual'
+
+  const savePersonInfo = async () => {
+    if (!selectedCrew) return
+    if (selectedCrew.source !== 'manual') {
+      Alert.alert('Person info', 'CREA members can update their own profile details in the app profile settings.')
+      return
+    }
+    const nextName = personName.trim()
+    if (nextName.length < 2) {
+      Alert.alert('Person info', 'Please enter at least 2 characters for the name.')
+      return
+    }
+    const nextRole = personRole.trim() || 'crew'
+    const nextEmail = personEmail.trim().toLowerCase()
+    const nextPhone = personPhone.trim()
+    setBusy(true)
+    const { error } = await supabase
+      .from('project_manual_crew')
+      .update({
+        name: nextName,
+        member_role: nextRole,
+        email: nextEmail || null,
+        phone: nextPhone || null,
+      })
+      .eq('id', selectedCrew.id)
+    setBusy(false)
+    if (error) {
+      Alert.alert('Save failed', error.message)
+      return
+    }
+    setPersonModalOpen(false)
+    setSelectedCrew(null)
+    load()
+    Alert.alert('Saved', 'Crew contact info was updated.')
+  }
+
+  const callPerson = async () => {
+    const raw = personPhone.trim()
+    if (!raw) {
+      Alert.alert('Call', 'No phone number available.')
+      return
+    }
+    const url = `tel:${raw.replace(/\s+/g, '')}`
+    const canOpen = await Linking.canOpenURL(url)
+    if (!canOpen) {
+      Alert.alert('Call', 'Phone calls are not available on this device.')
+      return
+    }
+    await Linking.openURL(url)
+  }
+
+  const emailPerson = async () => {
+    const raw = personEmail.trim()
+    if (!raw) {
+      Alert.alert('Email', 'No email address available.')
+      return
+    }
+    const url = `mailto:${raw}`
+    const canOpen = await Linking.canOpenURL(url)
+    if (!canOpen) {
+      Alert.alert('Email', 'Email is not available on this device.')
+      return
+    }
+    await Linking.openURL(url)
   }
 
   if (loading) {
@@ -253,18 +347,43 @@ export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: 
 
       <Text style={styles.label}>People on this project</Text>
       {rows.map((m) => {
-        return (
-          <View key={m.id} style={styles.row}>
-            <View style={styles.rowText}>
+        const canSwipeDelete = canManage && m.member_role === 'crew'
+        const rowContent = (
+          <View style={styles.row}>
+            <TouchableOpacity style={styles.rowText} onPress={() => openPersonCard(m)}>
               <Text style={styles.name}>{m.name}</Text>
               <Text style={styles.role}>{m.subtitle}</Text>
-            </View>
-            {canManage && m.member_role === 'crew' ? (
-              <TouchableOpacity onPress={() => removeCrew(m)} hitSlop={8}>
-                <UserMinus size={20} color="rgba(255,100,100,0.9)" strokeWidth={ICON_STROKE} />
-              </TouchableOpacity>
-            ) : null}
+            </TouchableOpacity>
           </View>
+        )
+        if (!canSwipeDelete) {
+          return (
+            <View key={m.id}>
+              {rowContent}
+            </View>
+          )
+        }
+        return (
+          <Swipeable
+            key={m.id}
+            friction={2}
+            overshootRight={false}
+            renderRightActions={() => (
+              <View style={styles.swipeDeleteOuter}>
+                <TouchableOpacity
+                  style={styles.swipeDeleteBtn}
+                  onPress={() => removeCrew(m)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete crew member"
+                >
+                  <Trash2 size={20} color="#fff" strokeWidth={ICON_STROKE} />
+                  <Text style={styles.swipeDeleteLabel}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          >
+            {rowContent}
+          </Swipeable>
         )
       })}
 
@@ -311,6 +430,71 @@ export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: 
               <TouchableOpacity style={[styles.modalSave, busy && styles.dim]} onPress={addManualCrew} disabled={busy}>
                 <Text style={styles.modalSaveText}>{busy ? 'Saving…' : 'Save'}</Text>
               </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={personModalOpen} transparent animationType="fade" onRequestClose={() => setPersonModalOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Person info</Text>
+            <Text style={styles.modalHint}>
+              {canEditSelected
+                ? 'Edit contact details for this crew member.'
+                : 'This is a CREA account. Contact details are managed in the user profile.'}
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Name"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={personName}
+              onChangeText={setPersonName}
+              editable={canEditSelected}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Role"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={personRole}
+              onChangeText={setPersonRole}
+              editable={canEditSelected}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Email"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={personEmail}
+              onChangeText={setPersonEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              editable={canEditSelected}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Phone"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={personPhone}
+              onChangeText={setPersonPhone}
+              keyboardType="phone-pad"
+              editable={canEditSelected}
+            />
+            <View style={styles.contactActions}>
+              <TouchableOpacity style={styles.contactBtn} onPress={callPerson}>
+                <Text style={styles.contactBtnText}>Call</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.contactBtn} onPress={emailPerson}>
+                <Text style={styles.contactBtnText}>Email</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setPersonModalOpen(false)}>
+                <Text style={styles.modalCancelText}>Close</Text>
+              </TouchableOpacity>
+              {canEditSelected ? (
+                <TouchableOpacity style={[styles.modalSave, busy && styles.dim]} onPress={savePersonInfo} disabled={busy}>
+                  <Text style={styles.modalSaveText}>{busy ? 'Saving…' : 'Save changes'}</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </View>
         </View>
@@ -372,6 +556,20 @@ const styles = StyleSheet.create({
   rowText: { flex: 1 },
   name: { fontSize: 16, fontWeight: '600', color: '#fff' },
   role: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 2 },
+  swipeDeleteOuter: {
+    width: 86,
+    justifyContent: 'center',
+  },
+  swipeDeleteBtn: {
+    flex: 1,
+    backgroundColor: '#b91c1c',
+    borderRadius: 12,
+    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  swipeDeleteLabel: { color: '#fff', fontSize: 12, fontWeight: '700' },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.65)',
@@ -414,4 +612,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFDC00',
   },
   modalSaveText: { color: '#0a0a0a', fontWeight: '800' },
+  contactActions: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  contactBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+  },
+  contactBtnText: { color: '#fff', fontWeight: '700' },
 })

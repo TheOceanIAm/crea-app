@@ -51,6 +51,7 @@ export default function WorkspaceProjectsScreen() {
   const [editTitle, setEditTitle] = useState('')
   const [editNotes, setEditNotes] = useState('')
   const [editOutputs, setEditOutputs] = useState<Record<string, unknown>>({})
+  const [archiveOpen, setArchiveOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -187,10 +188,22 @@ export default function WorkspaceProjectsScreen() {
 
   const archiveProject = async (item: WorkspaceProject) => {
     if (actingId) return
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      setError('Please sign in again.')
+      return
+    }
     setActingId(item.id)
     setError(null)
     const next = item.status === 'archived' ? 'active' : 'archived'
-    const { error: updErr } = await supabase.from('projects').update({ status: next }).eq('id', item.id)
+    const { error: updErr } = await supabase
+      .from('projects')
+      .update({ status: next })
+      .eq('id', item.id)
+      .eq('company_id', user.id)
+      .eq('freelancer_id', user.id)
     setActingId(null)
     if (updErr) {
       setError(updErr.message)
@@ -211,9 +224,21 @@ export default function WorkspaceProjectsScreen() {
           style: 'destructive',
           onPress: () => {
             void (async () => {
+              const {
+                data: { user },
+              } = await supabase.auth.getUser()
+              if (!user) {
+                setError('Please sign in again.')
+                return
+              }
               setActingId(item.id)
               setError(null)
-              const { error: delErr } = await supabase.from('projects').delete().eq('id', item.id)
+              const { error: delErr } = await supabase
+                .from('projects')
+                .delete()
+                .eq('id', item.id)
+                .eq('company_id', user.id)
+                .eq('freelancer_id', user.id)
               setActingId(null)
               if (delErr) {
                 setError(delErr.message)
@@ -226,6 +251,34 @@ export default function WorkspaceProjectsScreen() {
       ]
     )
   }
+
+  const activeRows = rows.filter((r) => (r.status ?? 'active') !== 'archived')
+  const archivedRows = rows.filter((r) => (r.status ?? '') === 'archived')
+
+  const renderProjectCard = (item: WorkspaceProject) => (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle} numberOfLines={1}>
+        {item.title}
+      </Text>
+      <Text style={styles.cardMeta}>
+        {item.status?.toUpperCase() || 'ACTIVE'} · Updated {fmtDate(item.updated_at)}
+      </Text>
+      <View style={styles.cardActions}>
+        <TouchableOpacity style={styles.cardBtnPrimary} onPress={() => router.push(`/project/${item.id}` as Href)}>
+          <Text style={styles.cardBtnPrimaryText}>Open</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.cardBtnGhost} onPress={() => openEdit(item)}>
+          <Text style={styles.cardBtnGhostText}>Edit</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.cardBtnGhost} onPress={() => void archiveProject(item)} disabled={actingId === item.id}>
+          <Text style={styles.cardBtnGhostText}>{item.status === 'archived' ? 'Unarchive' : 'Archive'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.cardBtnDanger} onPress={() => void deleteProject(item)} disabled={actingId === item.id}>
+          <Text style={styles.cardBtnDangerText}>Delete</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  )
 
   if (loading || allowed === null) {
     return (
@@ -268,7 +321,7 @@ export default function WorkspaceProjectsScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <FlatList
-        data={rows}
+        data={activeRows}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
@@ -280,30 +333,18 @@ export default function WorkspaceProjectsScreen() {
             </TouchableOpacity>
           </View>
         }
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle} numberOfLines={1}>
-              {item.title}
-            </Text>
-            <Text style={styles.cardMeta}>
-              {item.status?.toUpperCase() || 'ACTIVE'} · Updated {fmtDate(item.updated_at)}
-            </Text>
-            <View style={styles.cardActions}>
-              <TouchableOpacity style={styles.cardBtnPrimary} onPress={() => router.push(`/project/${item.id}` as Href)}>
-                <Text style={styles.cardBtnPrimaryText}>Open</Text>
+        renderItem={({ item }) => renderProjectCard(item)}
+        ListFooterComponent={
+          archivedRows.length ? (
+            <View style={styles.archiveWrap}>
+              <TouchableOpacity style={styles.archiveHeader} onPress={() => setArchiveOpen((v) => !v)}>
+                <Text style={styles.archiveTitle}>Archived ({archivedRows.length})</Text>
+                <Text style={styles.archiveToggle}>{archiveOpen ? 'Hide' : 'Show'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.cardBtnGhost} onPress={() => openEdit(item)}>
-                <Text style={styles.cardBtnGhostText}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cardBtnGhost} onPress={() => void archiveProject(item)} disabled={actingId === item.id}>
-                <Text style={styles.cardBtnGhostText}>{item.status === 'archived' ? 'Unarchive' : 'Archive'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cardBtnDanger} onPress={() => void deleteProject(item)} disabled={actingId === item.id}>
-                <Text style={styles.cardBtnDangerText}>Delete</Text>
-              </TouchableOpacity>
+              {archiveOpen ? <View style={styles.archiveList}>{archivedRows.map((item) => <View key={item.id}>{renderProjectCard(item)}</View>)}</View> : null}
             </View>
-          </View>
-        )}
+          ) : null
+        }
       />
 
       <Modal visible={createOpen} transparent animationType="fade" onRequestClose={() => setCreateOpen(false)}>
@@ -465,6 +506,21 @@ const styles = StyleSheet.create({
   emptySub: { color: 'rgba(255,255,255,0.45)', fontSize: 13, textAlign: 'center', marginBottom: 14, lineHeight: 18 },
   emptyBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999, backgroundColor: '#FFDC00' },
   emptyBtnText: { color: '#0a0a0a', fontWeight: '800' },
+  archiveWrap: { marginTop: 14 },
+  archiveHeader: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#101010',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  archiveTitle: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '800' },
+  archiveToggle: { color: '#FFDC00', fontSize: 12, fontWeight: '700' },
+  archiveList: { marginTop: 8, gap: 10 },
   blockTitle: { fontSize: 19, color: '#fff', fontWeight: '800', marginBottom: 8 },
   blockSub: { fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 20 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 20 },

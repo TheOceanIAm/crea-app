@@ -130,7 +130,7 @@ function quickActionsForRole(
     if (opts?.freelancerPlan && isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
       return [
         {
-          label: 'New Project',
+          label: 'Projects',
           icon: AppWindow,
           href: '/(tabs)/workspace-projects',
         },

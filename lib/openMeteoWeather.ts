@@ -17,19 +17,101 @@ export type GeocodeHit = {
   label: string
 }
 
+type OpenMeteoGeoResult = {
+  name: string
+  latitude: number
+  longitude: number
+  admin1?: string
+  country?: string
+}
+
+function toGeocodeHit(r: OpenMeteoGeoResult): GeocodeHit {
+  const label = [r.name, r.admin1, r.country].filter(Boolean).join(', ')
+  return { lat: r.latitude, lon: r.longitude, label }
+}
+
+async function geocodeWithOpenMeteo(query: string): Promise<GeocodeHit | null> {
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=de&format=json`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error('Location search failed')
+  const data = (await res.json()) as { results?: OpenMeteoGeoResult[] }
+  const r = data.results?.[0]
+  if (!r) return null
+  return toGeocodeHit(r)
+}
+
+async function geocodeWithNominatim(query: string): Promise<GeocodeHit | null> {
+  const params = new URLSearchParams({
+    q: query,
+    format: 'jsonv2',
+    addressdetails: '1',
+    limit: '1',
+  })
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) return null
+  const data = (await res.json()) as Array<{ lat?: string; lon?: string; display_name?: string }>
+  const hit = data?.[0]
+  if (!hit?.lat || !hit?.lon) return null
+  const lat = Number(hit.lat)
+  const lon = Number(hit.lon)
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  return {
+    lat,
+    lon,
+    label: String(hit.display_name ?? query),
+  }
+}
+
+function buildGeocodeCandidates(query: string): string[] {
+  const q = query.trim().replace(/\s+/g, ' ')
+  if (!q) return []
+  const out = new Set<string>([q])
+
+  // Street + house number is often too specific for Open-Meteo.
+  const noHouseNumber = q.replace(/\b\d+[a-zA-Z]?\b/g, '').replace(/\s+,/g, ',').replace(/\s+/g, ' ').trim()
+  if (noHouseNumber && noHouseNumber !== q) out.add(noHouseNumber)
+
+  const parts = q.split(',').map((p) => p.trim()).filter(Boolean)
+  if (parts.length >= 2) out.add(parts.slice(1).join(', '))
+
+  const postalCity = q.match(/\b\d{5}\s+[A-Za-z\u00C0-\u024F\-\s]+\b/)
+  if (postalCity?.[0]) out.add(postalCity[0].trim())
+
+  return [...out]
+}
+
+export async function suggestLocations(query: string): Promise<GeocodeHit[]> {
+  const q = query.trim()
+  if (q.length < 3) return []
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=de&format=json`
+  const res = await fetch(url)
+  if (!res.ok) return []
+  const data = (await res.json()) as { results?: OpenMeteoGeoResult[] }
+  return (data.results ?? []).map(toGeocodeHit)
+}
+
 export async function geocodeLocation(query: string): Promise<GeocodeHit | null> {
   const q = query.trim()
   if (!q) return null
-  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=1&language=en&format=json`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error('Location search failed')
-  const data = (await res.json()) as {
-    results?: { name: string; latitude: number; longitude: number; admin1?: string; country?: string }[]
+  const candidates = buildGeocodeCandidates(q)
+
+  for (const c of candidates) {
+    try {
+      const hit = await geocodeWithOpenMeteo(c)
+      if (hit) return hit
+    } catch {
+      // Try next candidate/fallback provider.
+    }
   }
-  const r = data.results?.[0]
-  if (!r) return null
-  const label = [r.name, r.admin1, r.country].filter(Boolean).join(', ')
-  return { lat: r.latitude, lon: r.longitude, label }
+
+  for (const c of candidates) {
+    const hit = await geocodeWithNominatim(c)
+    if (hit) return hit
+  }
+
+  return null
 }
 
 export async function fetchForecast7Days(lat: number, lon: number): Promise<DailyForecastDay[]> {

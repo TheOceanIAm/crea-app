@@ -167,6 +167,7 @@ export default function ProjectWorkspaceScreen() {
   const [project, setProject] = useState<ProjectRow | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [workspaceOnlyPlan, setWorkspaceOnlyPlan] = useState(false)
+  const [sunPlannerEnabled, setSunPlannerEnabled] = useState(false)
   const [applicants, setApplicants] = useState(0)
   const [tab, setTab] = useState<TabId>('overview')
   const [tool, setTool] = useState<string>('tasks')
@@ -186,6 +187,7 @@ export default function ProjectWorkspaceScreen() {
   const [applyingProd, setApplyingProd] = useState(false)
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
+      setSunPlannerEnabled(false)
       setLoading(false)
       return
     }
@@ -195,20 +197,44 @@ export default function ProjectWorkspaceScreen() {
     if (!user) {
       setForbidden(true)
       setWorkspaceOnlyPlan(false)
+      setSunPlannerEnabled(false)
       setLoading(false)
       return
     }
     setUserId(user.id)
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role, subscription_tier')
+      .eq('id', user.id)
+      .maybeSingle()
     const role = resolveAppRole(profile?.role, user)
+    const freelancerPlan = resolveFreelancerPlanFromUser(user)
+    const freelancerSunAccess =
+      isFreelancerProfile(role) &&
+      (freelancerPlan === 'workspace' || freelancerPlan === 'pro' || freelancerPlan === 'premium')
+    const rawCompanyTier = String((profile as { subscription_tier?: string | null } | null)?.subscription_tier ?? '')
+      .trim()
+      .toLowerCase()
+    const normalizedCompanyTier =
+      rawCompanyTier === 'starter' || rawCompanyTier === 'workspace'
+        ? 'studio'
+        : rawCompanyTier === 'pro'
+          ? 'agency'
+          : rawCompanyTier === 'premium'
+            ? 'business'
+            : rawCompanyTier
+    const companySunAccess =
+      role === 'company' && ['studio', 'agency', 'business', 'enterprise'].includes(normalizedCompanyTier || 'studio')
+    setSunPlannerEnabled(freelancerSunAccess || companySunAccess)
     setWorkspaceOnlyPlan(
-      isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))
+      isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
     )
 
     const { data: row, error } = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
     if (error || !row) {
       setForbidden(true)
       setProject(null)
+      setSunPlannerEnabled(false)
       setLoading(false)
       return
     }
@@ -487,9 +513,12 @@ export default function ProjectWorkspaceScreen() {
     setGenerating(false)
 
     if (error) {
+      const details = await readFunctionErrorDetails(error)
       Alert.alert(
         'Generation failed',
-        `${error.message}\n\nDeploy the brief-ai Edge Function and set ANTHROPIC_API_KEY if you have not yet.`
+        details
+          ? [details.message, details.hint].filter(Boolean).join('\n\n')
+          : `${error.message}\n\nDeploy the brief-ai Edge Function and set ANTHROPIC_API_KEY if you have not yet.`
       )
       return
     }
@@ -660,6 +689,7 @@ export default function ProjectWorkspaceScreen() {
                   companyId={project.company_id}
                   briefContext={project.brief_ai_context}
                   briefOutputs={project.brief_ai_outputs}
+                  canUseSunPlanner={sunPlannerEnabled}
                 />
               )}
               {tab === 'crew' && (
@@ -1139,7 +1169,7 @@ const styles = StyleSheet.create({
     marginBottom: 0,
     backgroundColor: '#0a0a0a',
   },
-  briefActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  briefActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
   saveBtn: {
     paddingHorizontal: 18,
     paddingVertical: 14,
