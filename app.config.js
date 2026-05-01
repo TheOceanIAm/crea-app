@@ -1,6 +1,6 @@
 // Dynamic Expo config: Mapbox native plugin only when MAPBOX_DOWNLOADS_TOKEN is set (EAS / local prebuild).
 // @ts-check
-/** @type {import('@expo/config').ExpoConfig} */
+/** @type {{ expo: any }} */
 const appJson = require('./app.json')
 
 const basePlugins = (appJson.expo.plugins || []).filter((p) => p !== '@rnmapbox/maps')
