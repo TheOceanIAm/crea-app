@@ -446,7 +446,7 @@ export default function InvoicesListScreen() {
               <View style={styles.annualBudgetCard}>
                 <Text style={styles.annualBudgetTitle}>Annual budget</Text>
                 <Text style={styles.annualBudgetSub}>
-                  Set yearly company budget here (moved from Settings -> Invoice & bank).
+                  Set yearly company budget here (moved from Settings to Invoice and bank).
                 </Text>
                 <Text style={styles.fieldLabel}>Year</Text>
                 <TextInput
@@ -721,5 +721,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#FFDC00',
   },
+  btnDisabled: { opacity: 0.45 },
   saveAnnualBudgetText: { color: '#0a0a0a', fontSize: 15, fontWeight: '800' },
 })

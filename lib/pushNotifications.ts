@@ -1,15 +1,19 @@
-import { Platform } from 'react-native'
+import { AppState, Platform } from 'react-native'
 import Constants from 'expo-constants'
 import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
 
 if (Platform.OS !== 'web') {
+  // While the app is active, rely on in-app banners / realtime; avoid double alerts with push.
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
+    handleNotification: async () => {
+      const foreground = AppState.currentState === 'active'
+      return {
+        shouldShowAlert: !foreground,
+        shouldPlaySound: !foreground,
+        shouldSetBadge: true,
+      }
+    },
   })
 }
 

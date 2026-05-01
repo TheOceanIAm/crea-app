@@ -20,6 +20,7 @@ import { getCreaWebBaseUrl, openProjectOnWeb } from '@/lib/creaWeb'
 import { jobShareUrl } from '@/lib/shareLinks'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 
 type JobRow = {
   id: string
@@ -179,11 +180,15 @@ export default function JobDetailScreen() {
   const onApply = async () => {
     if (!uid || !job) return
     setApplyBusy(true)
-    const { error } = await supabase.from('job_applications').insert({
-      job_id: job.id,
-      freelancer_id: uid,
-      status: 'pending',
-    })
+    const { data: insertedApp, error } = await supabase
+      .from('job_applications')
+      .insert({
+        job_id: job.id,
+        freelancer_id: uid,
+        status: 'pending',
+      })
+      .select('id')
+      .single()
     setApplyBusy(false)
     if (error) {
       Alert.alert('Could not apply', error.message)
@@ -191,6 +196,9 @@ export default function JobDetailScreen() {
     }
     setApplied(true)
     setApplicantsCount((c) => c + 1)
+    if (insertedApp?.id) {
+      void notifyExpoEvent({ kind: 'job_application', applicationId: insertedApp.id })
+    }
     Alert.alert('Applied', 'The company will see your application.')
   }
 
@@ -236,6 +244,7 @@ export default function JobDetailScreen() {
       return
     }
     setProjectId(inserted.id)
+    void notifyExpoEvent({ kind: 'workspace_ready', projectId: inserted.id })
     Alert.alert('Workspace ready', 'Open it to use milestones, crew chat, files, and Brief AI in the app.')
   }
 

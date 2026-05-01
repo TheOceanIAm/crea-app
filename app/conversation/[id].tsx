@@ -87,12 +87,16 @@ export default function ConversationThreadScreen() {
     }
 
     // Mark incoming unread messages as read when opening thread.
-    await supabase
+    const { error: readErr } = await supabase
       .from('messages')
       .update({ read: true })
       .eq('conversation_id', conversationId)
       .eq('read', false)
       .neq('sender_id', uid)
+      .select('id')
+    if (readErr) {
+      console.warn('[conversation] mark read', readErr.message)
+    }
 
     const { data: msgs, error } = await supabase
       .from('messages')

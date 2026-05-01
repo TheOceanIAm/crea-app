@@ -17,6 +17,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProductionWeatherSection } from '@/components/project/ProductionWeatherSection'
 import { ProductionSunPlannerSection } from '@/components/project/ProductionSunPlannerSection'
 import { BriefAiFormattedOutput } from '@/components/project/BriefAiFormattedOutput'
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 
 type ShotStatus = 'open' | 'rolling' | 'done' | 'pick'
 
@@ -410,14 +411,21 @@ export function ProductionTab({
     }
 
     const body = `📋 **Production report (${shootDay})**\n\n${content.trim()}`
-    const { error: msgErr } = await supabase.from('project_messages').insert({
-      project_id: projectId,
-      sender_id: userId,
-      body,
-    })
+    const { data: insertedMsg, error: msgErr } = await supabase
+      .from('project_messages')
+      .insert({
+        project_id: projectId,
+        sender_id: userId,
+        body,
+      })
+      .select('id')
+      .single()
     if (msgErr) {
       Alert.alert('Messages', msgErr.message)
       return
+    }
+    if (insertedMsg?.id) {
+      void notifyExpoEvent({ kind: 'project_message', messageId: insertedMsg.id })
     }
     Alert.alert('Saved', 'The report was posted to Messages for everyone.')
   }

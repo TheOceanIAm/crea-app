@@ -49,6 +49,8 @@ SQL_FILES=(
   messaging_allow_reply_to_ceo.sql
   messaging_conversation_archives.sql
   messaging_messages_delete_policy.sql
+  messaging_messages_mark_read_policy.sql
+  user_alert_reads.sql
   storage_avatars_policies.sql
   subscription_revenue.sql
   project_workspace_native.sql
@@ -61,6 +63,7 @@ SQL_FILES=(
   extend_profile_public_features.sql
   projects_scheduling_calendar.sql
   public_share_rpcs.sql
+  realtime_publication_core.sql
 )
 
 for f in "${SQL_FILES[@]}"; do
@@ -85,6 +88,10 @@ npx supabase functions deploy apply-brief-to-production --project-ref "$PROJECT_
 echo ""
 echo ">>> Deploying Edge Function notify-message-push (Expo push for new DMs) ..."
 npx supabase functions deploy notify-message-push --project-ref "$PROJECT_REF"
+
+echo ""
+echo ">>> Deploying Edge Function notify-expo-event (applications, invoices, project chat, workspace) ..."
+npx supabase functions deploy notify-expo-event --project-ref "$PROJECT_REF"
 
 echo ""
 echo "Done. If brief-ai / apply-brief-to-production need Claude:"

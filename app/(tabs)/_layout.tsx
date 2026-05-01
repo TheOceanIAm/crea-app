@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
+import { AppState, Platform, View } from 'react-native'
 import { Tabs } from 'expo-router'
-import { Briefcase, House, MessageCircle, UserRound } from 'lucide-react-native'
-import { View } from 'react-native'
+import { Bell, Briefcase, House, MessageCircle, UserRound } from 'lucide-react-native'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { countUnreadAlerts } from '@/lib/notificationsFeed'
+import { subscribeAlertsInvalidate } from '@/lib/invalidateAlerts'
+import { registerPushTokenSilently } from '@/lib/registerPushOnLaunch'
+import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
 
 export default function TabLayout() {
   const [workspaceOnlyTabs, setWorkspaceOnlyTabs] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [unreadDmCount, setUnreadDmCount] = useState(0)
+  const [unreadAlertsCount, setUnreadAlertsCount] = useState(0)
   const [companyTabs, setCompanyTabs] = useState(false)
 
   const loadUnreadDmCount = useCallback(async (uid: string) => {
@@ -47,6 +52,15 @@ export default function TabLayout() {
     setUnreadDmCount(count ?? 0)
   }, [])
 
+  const loadUnreadAlertsCount = useCallback(async (uid: string) => {
+    try {
+      const n = await countUnreadAlerts(uid)
+      setUnreadAlertsCount(n)
+    } catch {
+      setUnreadAlertsCount(0)
+    }
+  }, [])
+
   useEffect(() => {
     const load = async () => {
       const {
@@ -56,6 +70,7 @@ export default function TabLayout() {
         setWorkspaceOnlyTabs(false)
         setUserId(null)
         setUnreadDmCount(0)
+        setUnreadAlertsCount(0)
         return
       }
       setUserId(user.id)
@@ -65,10 +80,30 @@ export default function TabLayout() {
         isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))
       setWorkspaceOnlyTabs(workspaceOnly)
       setCompanyTabs(role === 'company' || role === 'ceo')
-      if (!workspaceOnly) await loadUnreadDmCount(user.id)
+      if (!workspaceOnly) {
+        await loadUnreadDmCount(user.id)
+        await loadUnreadAlertsCount(user.id)
+        void registerPushTokenSilently()
+      }
     }
     void load()
-  }, [loadUnreadDmCount])
+  }, [loadUnreadAlertsCount, loadUnreadDmCount])
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active' && userId && !workspaceOnlyTabs) {
+        void loadUnreadDmCount(userId)
+        void loadUnreadAlertsCount(userId)
+      }
+    })
+    return () => sub.remove()
+  }, [loadUnreadAlertsCount, loadUnreadDmCount, userId, workspaceOnlyTabs])
+
+  useEffect(() => {
+    return subscribeAlertsInvalidate(() => {
+      if (userId && !workspaceOnlyTabs) void loadUnreadAlertsCount(userId)
+    })
+  }, [loadUnreadAlertsCount, userId, workspaceOnlyTabs])
 
   useEffect(() => {
     if (!userId || workspaceOnlyTabs) return
@@ -80,178 +115,245 @@ export default function TabLayout() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
         void loadUnreadDmCount(userId)
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_archives' }, () => {
+        void loadUnreadDmCount(userId)
+      })
       .subscribe()
     return () => {
       void supabase.removeChannel(channel)
     }
   }, [loadUnreadDmCount, userId, workspaceOnlyTabs])
 
+  useEffect(() => {
+    if (!userId || workspaceOnlyTabs) return
+    const channel = supabase
+      .channel('tabs-unread-alerts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => {
+        void loadUnreadAlertsCount(userId)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_messages' }, () => {
+        void loadUnreadAlertsCount(userId)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, () => {
+        void loadUnreadAlertsCount(userId)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, () => {
+        void loadUnreadAlertsCount(userId)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, () => {
+        void loadUnreadAlertsCount(userId)
+      })
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'user_alert_reads',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          void loadUnreadAlertsCount(userId)
+        }
+      )
+      .subscribe()
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [loadUnreadAlertsCount, userId, workspaceOnlyTabs])
+
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: '#111111',
-          borderTopColor: 'rgba(255,255,255,0.06)',
-          borderTopWidth: 1,
-          height: 80,
-          paddingBottom: 20,
-          paddingTop: 10,
-        },
-        tabBarActiveTintColor: '#FFDC00',
-        tabBarInactiveTintColor: 'rgba(255,255,255,0.25)',
-        tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: '600',
-          letterSpacing: 0.5,
-        },
-      }}
-    >
-      <Tabs.Screen
-        name="dashboard"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <House size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
-          ),
+    <>
+      {Platform.OS !== 'web' ? <InAppNotificationBridge /> : null}
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarStyle: {
+            backgroundColor: '#111111',
+            borderTopColor: 'rgba(255,255,255,0.06)',
+            borderTopWidth: 1,
+            height: 80,
+            paddingBottom: 20,
+            paddingTop: 10,
+          },
+          tabBarActiveTintColor: '#FFDC00',
+          tabBarInactiveTintColor: 'rgba(255,255,255,0.25)',
+          tabBarLabelStyle: {
+            fontSize: 10,
+            fontWeight: '600',
+            letterSpacing: 0.5,
+          },
         }}
-      />
-      <Tabs.Screen
-        name="jobs"
-        options={{
-          href: workspaceOnlyTabs ? null : '/jobs',
-          title: companyTabs ? 'Projects' : 'Jobs',
-          tabBarIcon: ({ color, size }) => (
-            <Briefcase size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="messages"
-        options={{
-          href: workspaceOnlyTabs ? null : '/messages',
-          title: 'Messages',
-          tabBarIcon: ({ color, size }) => (
-            <View>
-              <MessageCircle size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
-              {unreadDmCount > 0 ? (
-                <View
-                  style={{
-                    position: 'absolute',
-                    top: -2,
-                    right: -4,
-                    width: 9,
-                    height: 9,
-                    borderRadius: 999,
-                    backgroundColor: '#ff2d55',
-                  }}
-                />
-              ) : null}
-            </View>
-          ),
-        }}
-      />
-      <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size }) => (
-            <UserRound size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="workspace-projects"
-        options={{
-          href: null,
-          title: 'Workspace projects',
-        }}
-      />
-      <Tabs.Screen
-        name="invoices"
-        options={{
-          href: null,
-          title: 'Invoices',
-        }}
-      />
-      <Tabs.Screen
-        name="availability"
-        options={{
-          href: null,
-          title: 'Availability',
-        }}
-      />
-      <Tabs.Screen
-        name="profile-preview"
-        options={{
-          href: null,
-          title: 'Profile preview',
-        }}
-      />
-      <Tabs.Screen
-        name="ceo-users"
-        options={{
-          href: null,
-          title: 'CEO users',
-        }}
-      />
-      <Tabs.Screen
-        name="ceo-companies"
-        options={{
-          href: null,
-          title: 'CEO companies',
-        }}
-      />
-      <Tabs.Screen
-        name="ceo-revenue"
-        options={{
-          href: null,
-          title: 'CEO revenue',
-        }}
-      />
-      <Tabs.Screen
-        name="ceo-settings"
-        options={{
-          href: null,
-          title: 'CEO settings',
-        }}
-      />
-      <Tabs.Screen
-        name="company-hub"
-        options={{
-          href: null,
-          title: 'Company tools',
-        }}
-      />
-      <Tabs.Screen
-        name="company-post-job"
-        options={{
-          href: null,
-          title: 'Post job',
-        }}
-      />
-      <Tabs.Screen
-        name="company-my-jobs"
-        options={{
-          href: null,
-          title: 'My jobs',
-        }}
-      />
-      <Tabs.Screen
-        name="company-applications"
-        options={{
-          href: null,
-          title: 'Applications',
-        }}
-      />
-      <Tabs.Screen
-        name="talent-pool"
-        options={{
-          href: null,
-          title: 'Talent pool',
-        }}
-      />
-    </Tabs>
+      >
+        <Tabs.Screen
+          name="dashboard"
+          options={{
+            title: 'Home',
+            tabBarIcon: ({ color, size }) => (
+              <House size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="jobs"
+          options={{
+            href: workspaceOnlyTabs ? null : '/jobs',
+            title: companyTabs ? 'Projects' : 'Jobs',
+            tabBarIcon: ({ color, size }) => (
+              <Briefcase size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="messages"
+          options={{
+            href: workspaceOnlyTabs ? null : '/messages',
+            title: 'Messages',
+            tabBarIcon: ({ color, size }) => (
+              <View>
+                <MessageCircle size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+                {unreadDmCount > 0 ? (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: -2,
+                      right: -4,
+                      width: 9,
+                      height: 9,
+                      borderRadius: 999,
+                      backgroundColor: '#ff2d55',
+                    }}
+                  />
+                ) : null}
+              </View>
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="notifications"
+          options={{
+            href: workspaceOnlyTabs ? null : '/notifications',
+            title: 'Alerts',
+            tabBarIcon: ({ color, size }) => (
+              <View>
+                <Bell size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+                {unreadAlertsCount > 0 ? (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: -2,
+                      right: -4,
+                      width: 9,
+                      height: 9,
+                      borderRadius: 999,
+                      backgroundColor: '#ff2d55',
+                    }}
+                  />
+                ) : null}
+              </View>
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: 'Profile',
+            tabBarIcon: ({ color, size }) => (
+              <UserRound size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="workspace-projects"
+          options={{
+            href: null,
+            title: 'Workspace projects',
+          }}
+        />
+        <Tabs.Screen
+          name="invoices"
+          options={{
+            href: null,
+            title: 'Invoices',
+          }}
+        />
+        <Tabs.Screen
+          name="availability"
+          options={{
+            href: null,
+            title: 'Availability',
+          }}
+        />
+        <Tabs.Screen
+          name="profile-preview"
+          options={{
+            href: null,
+            title: 'Profile preview',
+          }}
+        />
+        <Tabs.Screen
+          name="ceo-users"
+          options={{
+            href: null,
+            title: 'CEO users',
+          }}
+        />
+        <Tabs.Screen
+          name="ceo-companies"
+          options={{
+            href: null,
+            title: 'CEO companies',
+          }}
+        />
+        <Tabs.Screen
+          name="ceo-revenue"
+          options={{
+            href: null,
+            title: 'CEO revenue',
+          }}
+        />
+        <Tabs.Screen
+          name="ceo-settings"
+          options={{
+            href: null,
+            title: 'CEO settings',
+          }}
+        />
+        <Tabs.Screen
+          name="company-hub"
+          options={{
+            href: null,
+            title: 'Company tools',
+          }}
+        />
+        <Tabs.Screen
+          name="company-post-job"
+          options={{
+            href: null,
+            title: 'Post job',
+          }}
+        />
+        <Tabs.Screen
+          name="company-my-jobs"
+          options={{
+            href: null,
+            title: 'My jobs',
+          }}
+        />
+        <Tabs.Screen
+          name="company-applications"
+          options={{
+            href: null,
+            title: 'Applications',
+          }}
+        />
+        <Tabs.Screen
+          name="talent-pool"
+          options={{
+            href: null,
+            title: 'Talent pool',
+          }}
+        />
+      </Tabs>
+    </>
   )
 }

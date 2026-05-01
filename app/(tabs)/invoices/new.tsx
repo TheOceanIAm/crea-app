@@ -15,6 +15,7 @@ import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 
 type CompanyOption = { id: string; name: string }
 
@@ -134,6 +135,7 @@ export default function NewInvoiceScreen() {
       Alert.alert('Could not create invoice', error.message)
       return
     }
+    void notifyExpoEvent({ kind: 'invoice', invoiceId: inserted.id, event: 'received' })
     router.replace(`/(tabs)/invoices/${inserted.id}`)
   }
 

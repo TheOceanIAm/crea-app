@@ -25,6 +25,8 @@ export type NotificationSettings = {
   pushInvoicePaid: boolean
   pushNewApplication: boolean
   pushInvoiceReceived: boolean
+  /** Project crew chat (project_messages), not DMs */
+  pushProjectChat: boolean
   expoPushToken: string | null
 }
 
@@ -41,6 +43,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   pushInvoicePaid: true,
   pushNewApplication: true,
   pushInvoiceReceived: true,
+  pushProjectChat: true,
   expoPushToken: null,
 }
 
@@ -74,6 +77,7 @@ export function parseNotificationSettings(raw: unknown): NotificationSettings {
     pushInvoiceReceived: Boolean(
       o.pushInvoiceReceived ?? DEFAULT_NOTIFICATION_SETTINGS.pushInvoiceReceived
     ),
+    pushProjectChat: Boolean(o.pushProjectChat ?? DEFAULT_NOTIFICATION_SETTINGS.pushProjectChat),
     expoPushToken,
   }
 }

@@ -24,6 +24,7 @@ import {
   invoiceStatusLabel,
   statusVariant,
 } from '@/lib/invoiceFormatting'
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
 
 type InvoiceRecord = Record<string, unknown> & { id: string; status?: string }
@@ -150,6 +151,9 @@ export default function InvoiceDetailScreen() {
       return
     }
     setInvoice((prev) => (prev ? { ...prev, status: next } : prev))
+    if (viewerRole === 'company' && next === 'paid' && typeof id === 'string') {
+      void notifyExpoEvent({ kind: 'invoice', invoiceId: id, event: 'paid' })
+    }
   }
 
   const refreshInvoiceStatusOnce = useCallback(async (): Promise<string | null> => {

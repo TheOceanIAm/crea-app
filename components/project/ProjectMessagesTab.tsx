@@ -15,6 +15,7 @@ import { useFocusEffect } from 'expo-router'
 import { Send } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 
 type Row = {
   id: string
@@ -88,15 +89,22 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
     const t = body.trim()
     if (!t || sending) return
     setSending(true)
-    const { error } = await supabase.from('project_messages').insert({
-      project_id: projectId,
-      sender_id: userId,
-      body: t,
-    })
+    const { data: insertedMsg, error } = await supabase
+      .from('project_messages')
+      .insert({
+        project_id: projectId,
+        sender_id: userId,
+        body: t,
+      })
+      .select('id')
+      .single()
     setSending(false)
     if (error) {
       Alert.alert('Send failed', error.message)
       return
+    }
+    if (insertedMsg?.id) {
+      void notifyExpoEvent({ kind: 'project_message', messageId: insertedMsg.id })
     }
     setBody('')
     load()

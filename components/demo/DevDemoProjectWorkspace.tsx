@@ -494,12 +494,7 @@ export function DevDemoProjectWorkspace() {
             {tab === 'overview' ? statsRow : null}
             {tab === 'overview' && (
               <>
-                <ProjectOverviewAbout
-                  title="Demo — ACME Commercial"
-                  location="hybrid"
-                  status="in_progress"
-                  briefContext={demoOverviewBrief}
-                />
+                <ProjectOverviewAbout briefContext={demoOverviewBrief} />
                 <Text style={styles.para}>
                   This is a development-only workspace preview. Use tabs above to explore layout and flows without
                   creating database rows.

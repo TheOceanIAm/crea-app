@@ -87,7 +87,8 @@ export function InviteFreelancerDateModal({
       freelancerId,
       projectId: p.id,
       projectTitle: p.title,
-      isoDate: selectedIso,
+      isoStartDate: selectedIso,
+      isoEndDate: selectedIso,
     })
     setSending(false)
     if (r.ok) {
