@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -16,118 +16,66 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
 import { supabase } from '@/lib/supabase'
-
-type Convo = { id: string; name: string; avatar: string; lastMessage: string; time: string; unread: boolean }
-
-function timeAgo(str: string | null | undefined) {
-  if (!str) return '—'
-  const t = new Date(str).getTime()
-  if (Number.isNaN(t)) return '—'
-  const diff = Date.now() - t
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'now'
-  if (mins < 60) return `${mins}m`
-  const h = Math.floor(mins / 60)
-  if (h < 24) return `${h}h`
-  return `${Math.floor(h / 24)}d`
-}
-
-async function unreadCountForConversation(conversationId: string, userId: string): Promise<number> {
-  const { count, error } = await supabase
-    .from('messages')
-    .select('*', { count: 'exact', head: true })
-    .eq('conversation_id', conversationId)
-    .eq('read', false)
-    .neq('sender_id', userId)
-  if (error) {
-    console.warn('[messages] unread count', conversationId, error.message)
-    return 0
-  }
-  return count ?? 0
-}
+import { loadDirectMessageInbox, type ConvoRow } from '@/lib/messagesInboxLoad'
 
 export default function MessagesScreen() {
   const router = useRouter()
-  const [convos, setConvos] = useState<Convo[]>([])
+  const [convos, setConvos] = useState<ConvoRow[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [signedIn, setSignedIn] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [archived, setArchived] = useState<Convo[]>([])
+  const [archived, setArchived] = useState<ConvoRow[]>([])
   const [showArchived, setShowArchived] = useState(false)
 
-  const loadConvos = useCallback(async () => {
-    setLoadError(null)
-    const { data: auth } = await supabase.auth.getUser()
-    const user = auth.user
-    if (!user) {
-      setSignedIn(false)
-      setConvos([])
-      return
-    }
-    setSignedIn(true)
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const initialLoadingDone = useRef(false)
 
-    const { data: rows, error } = await supabase
-      .from('conversations')
-      .select('id, participant_1, participant_2, last_message, last_message_at')
-      .or(`participant_1.eq.${user.id},participant_2.eq.${user.id}`)
-      .order('last_message_at', { ascending: false, nullsFirst: false })
-      .limit(50)
-
-    if (error) {
-      console.warn('[messages] conversations query', error.message)
-      setLoadError(error.message)
-      setConvos([])
-      return
-    }
-
-    const { data: archivedRows } = await supabase
-      .from('conversation_archives')
-      .select('conversation_id')
-      .eq('user_id', user.id)
-      .eq('archived', true)
-    const archivedIds = new Set((archivedRows ?? []).map((r) => String(r.conversation_id)))
-
-    const inbox: Convo[] = []
-    const archivedConvos: Convo[] = []
-    for (const row of rows ?? []) {
-      const otherId = row.participant_1 === user.id ? row.participant_2 : row.participant_1
-      const { data: p } = await supabase
-        .from('profiles')
-        .select('name, avatar_url')
-        .eq('id', otherId)
-        .maybeSingle()
-
-      const unread = await unreadCountForConversation(String(row.id), user.id)
-
-      const convo = {
-        id: String(row.id),
-        name: (p?.name && String(p.name).trim()) || 'User',
-        avatar: typeof p?.avatar_url === 'string' ? p.avatar_url : '',
-        lastMessage: typeof row.last_message === 'string' && row.last_message.trim() ? row.last_message : 'No messages yet',
-        time: timeAgo(row.last_message_at),
-        unread: unread > 0,
+  const refreshList = useCallback(async () => {
+    try {
+      setLoadError(null)
+      const { data: auth } = await supabase.auth.getUser()
+      const user = auth.user
+      if (!user) {
+        setSignedIn(false)
+        setConvos([])
+        setArchived([])
+        return
       }
-      if (archivedIds.has(convo.id)) archivedConvos.push(convo)
-      else inbox.push(convo)
+      setSignedIn(true)
+
+    const result = await loadDirectMessageInbox(user.id)
+    if (result.ok === false) {
+      setLoadError(result.error)
+        setConvos([])
+        setArchived([])
+        return
+      }
+      setLoadError(null)
+      setConvos(result.inbox)
+      setArchived(result.archived)
+    } finally {
+      if (!initialLoadingDone.current) {
+        initialLoadingDone.current = true
+        setLoading(false)
+      }
     }
-    setConvos(inbox)
-    setArchived(archivedConvos)
   }, [])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      await loadConvos()
-    } finally {
-      setLoading(false)
-    }
-  }, [loadConvos])
+  const scheduleReload = useCallback(() => {
+    if (reloadTimer.current) clearTimeout(reloadTimer.current)
+    reloadTimer.current = setTimeout(() => void refreshList(), 320)
+  }, [refreshList])
 
   useFocusEffect(
     useCallback(() => {
-      void load()
-    }, [load])
+      void refreshList()
+      const poll = setInterval(() => void refreshList(), 8000)
+      return () => {
+        clearInterval(poll)
+        if (reloadTimer.current) clearTimeout(reloadTimer.current)
+      }
+    }, [refreshList])
   )
 
   useEffect(() => {
@@ -136,28 +84,28 @@ export default function MessagesScreen() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'conversations' },
-        () => void loadConvos()
+        () => scheduleReload()
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'messages' },
-        () => void loadConvos()
+        () => scheduleReload()
       )
       .subscribe()
 
     return () => {
       void supabase.removeChannel(channel)
     }
-  }, [loadConvos])
+  }, [scheduleReload])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
-      await loadConvos()
+      await refreshList()
     } finally {
       setRefreshing(false)
     }
-  }, [loadConvos])
+  }, [refreshList])
 
   const archiveConversation = useCallback(async (conversationId: string, nextArchived: boolean) => {
     const { data: auth } = await supabase.auth.getUser()
@@ -176,8 +124,8 @@ export default function MessagesScreen() {
       Alert.alert('Could not update', error.message)
       return
     }
-    await loadConvos()
-  }, [loadConvos])
+    await refreshList()
+  }, [refreshList])
 
   const deleteConversation = useCallback(async (conversationId: string) => {
     Alert.alert('Delete conversation', 'Delete all messages in this conversation?', [
@@ -192,11 +140,11 @@ export default function MessagesScreen() {
             return
           }
           await archiveConversation(conversationId, true)
-          await loadConvos()
+          await refreshList()
         },
       },
     ])
-  }, [archiveConversation, loadConvos])
+  }, [archiveConversation, refreshList])
 
   if (loading) {
     return (

@@ -105,6 +105,13 @@ export default function TabLayout() {
     })
   }, [loadUnreadAlertsCount, userId, workspaceOnlyTabs])
 
+  /** Polling fallback when Realtime is off or WebSocket misses events (badges stay fresh). */
+  useEffect(() => {
+    if (!userId || workspaceOnlyTabs) return
+    const id = setInterval(() => void loadUnreadDmCount(userId), 10000)
+    return () => clearInterval(id)
+  }, [loadUnreadDmCount, userId, workspaceOnlyTabs])
+
   useEffect(() => {
     if (!userId || workspaceOnlyTabs) return
     const channel = supabase

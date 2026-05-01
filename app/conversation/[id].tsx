@@ -139,8 +139,17 @@ export default function ConversationThreadScreen() {
         .from('conversations')
         .update({ last_message: t, last_message_at: new Date().toISOString() })
         .eq('id', conversationId)
-      if (inserted?.id) void requestNotifyRecipientPush(inserted.id)
-      await load()
+      if (inserted?.id) {
+        void requestNotifyRecipientPush(inserted.id)
+        const optimistic: MsgRow = {
+          id: inserted.id,
+          sender_id: me,
+          created_at: new Date().toISOString(),
+          body: t,
+        }
+        setRows((prev) => [...prev, optimistic])
+      }
+      void load()
     }
     setSending(false)
   }
