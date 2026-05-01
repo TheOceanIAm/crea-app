@@ -158,7 +158,7 @@ export default function JobsListScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Jobs</Text>
+        <Text style={styles.title}>{isCompanyUser ? 'Projects' : 'Jobs'}</Text>
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{countLabel}</Text>
         </View>
@@ -171,7 +171,7 @@ export default function JobsListScreen() {
           onPress={() => router.push('/(tabs)/company-post-job')}
         >
           <PlusCircle size={22} color="#0a0a0a" strokeWidth={ICON_STROKE} />
-          <Text style={styles.postJobBtnText}>Post job</Text>
+          <Text style={styles.postJobBtnText}>Post project</Text>
         </TouchableOpacity>
       ) : null}
 
@@ -226,7 +226,7 @@ export default function JobsListScreen() {
               {workspaceOnly
                 ? 'Workspace plan: marketplace jobs are hidden.'
                 : isCompanyUser
-                  ? 'No jobs yet. Post one above.'
+                  ? 'No projects yet. Post one above.'
                   : 'No jobs found'}
             </Text>
           </View>

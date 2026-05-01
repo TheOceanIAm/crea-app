@@ -112,9 +112,9 @@ function quickActionsForRole(
 ): QuickAction[] {
   if (isCompanyProfile(role ?? undefined)) {
     return [
-      { label: 'Post job', icon: PlusCircle, href: '/(tabs)/company-post-job' },
+      { label: 'Post project', icon: PlusCircle, href: '/(tabs)/company-post-job' },
       { label: 'Applications', icon: ClipboardList, href: '/(tabs)/company-applications' },
-      { label: 'My jobs', icon: Briefcase, href: '/(tabs)/company-my-jobs' },
+      { label: 'My projects', icon: Briefcase, href: '/(tabs)/company-my-jobs' },
       { label: 'Talent pool', icon: Users, href: '/(tabs)/talent-pool' },
       { label: 'Messages', icon: MessageCircle, href: '/(tabs)/messages' },
       { label: 'Invoices', icon: Receipt, href: '/(tabs)/invoices' },
@@ -227,7 +227,7 @@ export default function DashboardScreen() {
           }
 
           setStats([
-            { label: 'Active jobs', value: String(jobCount ?? 0), sub: 'Open' },
+            { label: 'Active projects', value: String(jobCount ?? 0), sub: 'Open' },
             { label: 'Pending apps', value: String(pendingApps), sub: 'To review' },
             { label: 'Open invoices', value: String(invCount ?? 0), sub: 'Pending' },
           ])
@@ -277,7 +277,7 @@ export default function DashboardScreen() {
     { label: 'Companies', icon: Building2, onPress: () => router.push('/(tabs)/ceo-companies' as Href) },
     { label: 'Subscriptions', icon: CircleDollarSign, onPress: () => router.push('/(tabs)/ceo-revenue' as Href) },
     { label: 'Messages', icon: MessageCircle, onPress: () => router.navigate('/(tabs)/messages') },
-    { label: 'Jobs', icon: Briefcase, onPress: () => router.navigate('/(tabs)/jobs') },
+    { label: 'Projects', icon: Briefcase, onPress: () => router.navigate('/(tabs)/jobs') },
     { label: 'Settings', icon: Settings2, onPress: () => router.push('/(tabs)/ceo-settings' as Href) },
     {
       label: 'Web admin',
@@ -325,14 +325,14 @@ export default function DashboardScreen() {
           } as Href),
       },
       {
-        label: 'Active jobs',
+        label: 'Active projects',
         value: String(snap.active_jobs),
         sub: 'Open listings',
         Icon: Briefcase,
         onPress: () => router.navigate('/(tabs)/jobs'),
       },
       {
-        label: 'Completed jobs',
+        label: 'Completed projects',
         value: String(snap.completed_jobs),
         sub: 'Closed / filled',
         Icon: CircleCheck,

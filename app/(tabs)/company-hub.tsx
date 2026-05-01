@@ -21,13 +21,13 @@ type ToolRow = { label: string; sub: string; icon: LucideIcon; href: Href }
 
 const TOOLS: ToolRow[] = [
   {
-    label: 'Post a job',
+    label: 'Post a project',
     sub: 'Create a new listing for freelancers to apply.',
     icon: PlusCircle,
     href: '/(tabs)/company-post-job',
   },
   {
-    label: 'My jobs',
+    label: 'My projects',
     sub: 'Edit status, share links, open workspaces.',
     icon: Briefcase,
     href: '/(tabs)/company-my-jobs',
@@ -128,7 +128,7 @@ export default function CompanyHubScreen() {
         <Text style={styles.kicker}>COMPANY TOOLS</Text>
         <Text style={styles.title}>Hiring workspace</Text>
         <Text style={styles.sub}>
-          Post roles, review applications, track incoming invoices, and keep your company profile up to date.
+          Post projects, review applications, track incoming invoices, and keep your company profile up to date.
         </Text>
 
         {TOOLS.map((t) => {

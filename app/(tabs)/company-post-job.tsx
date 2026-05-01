@@ -72,7 +72,7 @@ export default function CompanyPostJobScreen() {
     if (!user || !allowed) return
     const t = title.trim()
     if (!t) {
-      Alert.alert('Title', 'Please enter a job title.')
+      Alert.alert('Title', 'Please enter a project title.')
       return
     }
     let amount: number | null = null
@@ -110,7 +110,7 @@ export default function CompanyPostJobScreen() {
       )
       return
     }
-    Alert.alert('Published', 'Your job is live in the feed.', [
+    Alert.alert('Published', 'Your project is live in the feed.', [
       { text: 'OK', onPress: () => router.replace('/(tabs)/jobs') },
     ])
   }
@@ -132,7 +132,7 @@ export default function CompanyPostJobScreen() {
         </TouchableOpacity>
         <View style={styles.center}>
           <Text style={styles.blockTitle}>Companies only</Text>
-          <Text style={styles.blockSub}>Only company accounts can post jobs.</Text>
+          <Text style={styles.blockSub}>Only company accounts can post projects.</Text>
         </View>
       </SafeAreaView>
     )
@@ -146,8 +146,8 @@ export default function CompanyPostJobScreen() {
       </TouchableOpacity>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Post a job</Text>
-        <Text style={styles.sub}>Freelancers can apply from the Jobs tab. You manage applicants on the job page.</Text>
+        <Text style={styles.title}>Post a project</Text>
+        <Text style={styles.sub}>Freelancers can apply from the Jobs tab. You manage applicants on the project page.</Text>
 
         <Text style={styles.label}>Title</Text>
         <TextInput
@@ -248,7 +248,7 @@ export default function CompanyPostJobScreen() {
           {saving ? (
             <ActivityIndicator color="#0a0a0a" />
           ) : (
-            <Text style={styles.primaryBtnText}>Publish job</Text>
+            <Text style={styles.primaryBtnText}>Publish project</Text>
           )}
         </TouchableOpacity>
       </ScrollView>

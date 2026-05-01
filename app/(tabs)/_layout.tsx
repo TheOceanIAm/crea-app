@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Tabs } from 'expo-router'
 import { Briefcase, House, MessageCircle, UserRound } from 'lucide-react-native'
+import { View } from 'react-native'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
@@ -8,6 +9,43 @@ import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/
 
 export default function TabLayout() {
   const [workspaceOnlyTabs, setWorkspaceOnlyTabs] = useState(false)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [unreadDmCount, setUnreadDmCount] = useState(0)
+  const [companyTabs, setCompanyTabs] = useState(false)
+
+  const loadUnreadDmCount = useCallback(async (uid: string) => {
+    const { data: convs, error: convErr } = await supabase
+      .from('conversations')
+      .select('id, participant_1, participant_2')
+      .or(`participant_1.eq.${uid},participant_2.eq.${uid}`)
+      .limit(200)
+    if (convErr || !convs?.length) {
+      setUnreadDmCount(0)
+      return
+    }
+    const allIds = convs.map((c) => String(c.id))
+    let ids = allIds
+    const { data: archivedRows } = await supabase
+      .from('conversation_archives')
+      .select('conversation_id')
+      .eq('user_id', uid)
+      .eq('archived', true)
+    if (archivedRows?.length) {
+      const archived = new Set(archivedRows.map((r) => String(r.conversation_id)))
+      ids = allIds.filter((id) => !archived.has(id))
+    }
+    if (!ids.length) {
+      setUnreadDmCount(0)
+      return
+    }
+    const { count } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .in('conversation_id', ids)
+      .eq('read', false)
+      .neq('sender_id', uid)
+    setUnreadDmCount(count ?? 0)
+  }, [])
 
   useEffect(() => {
     const load = async () => {
@@ -16,16 +54,37 @@ export default function TabLayout() {
       } = await supabase.auth.getUser()
       if (!user) {
         setWorkspaceOnlyTabs(false)
+        setUserId(null)
+        setUnreadDmCount(0)
         return
       }
+      setUserId(user.id)
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
       const role = resolveAppRole(profile?.role, user)
       const workspaceOnly =
         isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))
       setWorkspaceOnlyTabs(workspaceOnly)
+      setCompanyTabs(role === 'company' || role === 'ceo')
+      if (!workspaceOnly) await loadUnreadDmCount(user.id)
     }
     void load()
-  }, [])
+  }, [loadUnreadDmCount])
+
+  useEffect(() => {
+    if (!userId || workspaceOnlyTabs) return
+    const channel = supabase
+      .channel('tabs-unread-dm')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        void loadUnreadDmCount(userId)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
+        void loadUnreadDmCount(userId)
+      })
+      .subscribe()
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [loadUnreadDmCount, userId, workspaceOnlyTabs])
 
   return (
     <Tabs
@@ -61,7 +120,7 @@ export default function TabLayout() {
         name="jobs"
         options={{
           href: workspaceOnlyTabs ? null : '/jobs',
-          title: 'Jobs',
+          title: companyTabs ? 'Projects' : 'Jobs',
           tabBarIcon: ({ color, size }) => (
             <Briefcase size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
           ),
@@ -73,10 +132,26 @@ export default function TabLayout() {
           href: workspaceOnlyTabs ? null : '/messages',
           title: 'Messages',
           tabBarIcon: ({ color, size }) => (
-            <MessageCircle size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+            <View>
+              <MessageCircle size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+              {unreadDmCount > 0 ? (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: -2,
+                    right: -4,
+                    width: 9,
+                    height: 9,
+                    borderRadius: 999,
+                    backgroundColor: '#ff2d55',
+                  }}
+                />
+              ) : null}
+            </View>
           ),
         }}
       />
+      <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
       <Tabs.Screen
         name="profile"
         options={{

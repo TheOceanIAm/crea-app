@@ -165,13 +165,16 @@ export default function JobDetailScreen() {
 
   const jobShareMessage = useMemo(() => {
     if (!job) return ''
-    return `Job on Crea: ${job.title}${companyName && companyName !== 'Company' ? ` — ${companyName}` : ''}`
-  }, [job, companyName])
+    const label = isCompanyProfile(role ?? undefined) ? 'Project' : 'Job'
+    return `${label} on Crea: ${job.title}${companyName && companyName !== 'Company' ? ` — ${companyName}` : ''}`
+  }, [job, companyName, role])
 
   const webBase = getCreaWebBaseUrl()
   const isOwner = job != null && uid === job.company_id
   const freelancer = isFreelancerProfile(role ?? undefined)
   const company = isCompanyProfile(role ?? undefined)
+  const listingWord = company ? 'Project' : 'Job'
+  const listingWordPlural = company ? 'Projects' : 'Jobs'
 
   const onApply = async () => {
     if (!uid || !job) return
@@ -205,7 +208,7 @@ export default function JobDetailScreen() {
       setCreateBusy(false)
       Alert.alert(
         'No applicants yet',
-        'Once a freelancer applies to this job, you can create a workspace here.'
+        'Once a freelancer applies to this project, you can create a workspace here.'
       )
       return
     }
@@ -253,11 +256,11 @@ export default function JobDetailScreen() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={12}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-          <Text style={styles.backLabel}>Jobs</Text>
+          <Text style={styles.backLabel}>{listingWordPlural}</Text>
         </TouchableOpacity>
         <View style={styles.center}>
           <Text style={styles.missTitle}>Not available</Text>
-          <Text style={styles.missSub}>You can only view jobs posted by your company.</Text>
+          <Text style={styles.missSub}>You can only view projects posted by your company.</Text>
         </View>
       </SafeAreaView>
     )
@@ -268,10 +271,10 @@ export default function JobDetailScreen() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={12}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-          <Text style={styles.backLabel}>Jobs</Text>
+          <Text style={styles.backLabel}>{listingWordPlural}</Text>
         </TouchableOpacity>
         <View style={styles.center}>
-          <Text style={styles.missTitle}>Job not found</Text>
+          <Text style={styles.missTitle}>{listingWord} not found</Text>
         </View>
       </SafeAreaView>
     )
@@ -282,13 +285,13 @@ export default function JobDetailScreen() {
       <View style={styles.topBar}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={12}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-          <Text style={styles.backLabel}>Jobs</Text>
+          <Text style={styles.backLabel}>{listingWordPlural}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.shareIconBtn}
           onPress={() => setShareOpen(true)}
           hitSlop={12}
-          accessibilityLabel="Share job"
+          accessibilityLabel={`Share ${listingWord.toLowerCase()}`}
         >
           <Share2 size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
         </TouchableOpacity>
@@ -297,10 +300,10 @@ export default function JobDetailScreen() {
       <ShareSheetModal
         visible={shareOpen}
         onClose={() => setShareOpen(false)}
-        sheetTitle="Share job"
+        sheetTitle={`Share ${listingWord.toLowerCase()}`}
         shareMessage={jobShareMessage}
         shareUrl={publicJobUrl}
-        mailSubject={`Crea job: ${job.title}`}
+        mailSubject={`Crea ${listingWord.toLowerCase()}: ${job.title}`}
       />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>

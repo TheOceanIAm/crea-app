@@ -115,7 +115,7 @@ export default function CompanyMyJobsScreen() {
         </TouchableOpacity>
         <View style={styles.center}>
           <Text style={styles.blockTitle}>Companies only</Text>
-          <Text style={styles.blockSub}>Only company accounts can manage job listings.</Text>
+          <Text style={styles.blockSub}>Only company accounts can manage project listings.</Text>
         </View>
       </SafeAreaView>
     )
@@ -129,7 +129,7 @@ export default function CompanyMyJobsScreen() {
       </TouchableOpacity>
 
       <View style={styles.header}>
-        <Text style={styles.title}>My jobs</Text>
+        <Text style={styles.title}>My projects</Text>
         <Text style={styles.count}>{rows.length} listing{rows.length === 1 ? '' : 's'}</Text>
       </View>
 
@@ -140,9 +140,9 @@ export default function CompanyMyJobsScreen() {
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>No jobs yet.</Text>
+            <Text style={styles.emptyText}>No projects yet.</Text>
             <TouchableOpacity style={styles.cta} onPress={() => router.push('/(tabs)/company-post-job')}>
-              <Text style={styles.ctaText}>Post your first job</Text>
+              <Text style={styles.ctaText}>Post your first project</Text>
             </TouchableOpacity>
           </View>
         }

@@ -46,7 +46,8 @@ SQL_FILES=(
   extend_invoices_currency.sql
   extend_invoices_timestamps.sql
   company_jobs_write.sql
-  messaging_block_inbound_to_ceo.sql
+  messaging_allow_reply_to_ceo.sql
+  messaging_conversation_archives.sql
   messaging_messages_delete_policy.sql
   storage_avatars_policies.sql
   subscription_revenue.sql

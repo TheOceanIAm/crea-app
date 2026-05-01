@@ -67,7 +67,7 @@ export default function CompanyApplicationsScreen() {
     }
     const jobMap = new Map<string, string>()
     for (const j of jobs) {
-      jobMap.set(j.id as string, String(j.title ?? '').trim() || 'Job')
+      jobMap.set(j.id as string, String(j.title ?? '').trim() || 'Project')
     }
     const jobIds = [...jobMap.keys()]
 
@@ -162,7 +162,7 @@ export default function CompanyApplicationsScreen() {
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No applications yet. Post a job to receive applicants.</Text>
+          <Text style={styles.emptyText}>No applications yet. Post a project to receive applicants.</Text>
         }
         renderItem={({ item }) => (
           <TouchableOpacity
