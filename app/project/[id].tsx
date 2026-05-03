@@ -40,6 +40,7 @@ import {
 } from '@/lib/projectStatusDisplay'
 import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
+import { freelancerSunPlannerAllowed } from '@/lib/sunPlannerWorkspaceTrial'
 
 type TabId =
   | 'overview'
@@ -170,6 +171,7 @@ export default function ProjectWorkspaceScreen() {
   const [userId, setUserId] = useState<string | null>(null)
   const [workspaceOnlyPlan, setWorkspaceOnlyPlan] = useState(false)
   const [sunPlannerEnabled, setSunPlannerEnabled] = useState(false)
+  const [sunPlannerLockedHint, setSunPlannerLockedHint] = useState<string | null>(null)
   const [applicants, setApplicants] = useState(0)
   const [tab, setTab] = useState<TabId>('overview')
   const [tool, setTool] = useState<string>('tasks')
@@ -191,6 +193,7 @@ export default function ProjectWorkspaceScreen() {
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
       setSunPlannerEnabled(false)
+      setSunPlannerLockedHint(null)
       setLoading(false)
       return
     }
@@ -201,6 +204,7 @@ export default function ProjectWorkspaceScreen() {
       setForbidden(true)
       setWorkspaceOnlyPlan(false)
       setSunPlannerEnabled(false)
+      setSunPlannerLockedHint(null)
       setLoading(false)
       return
     }
@@ -212,9 +216,27 @@ export default function ProjectWorkspaceScreen() {
       .maybeSingle()
     const role = resolveAppRole(profile?.role, user)
     const freelancerPlan = resolveFreelancerPlanFromUser(user)
-    const freelancerSunAccess =
-      isFreelancerProfile(role) &&
-      (freelancerPlan === 'workspace' || freelancerPlan === 'pro' || freelancerPlan === 'premium')
+
+    let sunTrialIso: string | null = null
+    if (isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)) {
+      const { data: trialData } = await supabase.rpc('touch_sun_planner_trial_start')
+      sunTrialIso = typeof trialData === 'string' ? trialData : null
+    }
+
+    const workspaceSunAllowed = freelancerSunPlannerAllowed(
+      freelancerPlan,
+      isFreelancerWorkspaceOnlyPlan(freelancerPlan) ? sunTrialIso : null
+    )
+    const freelancerSunAccess = isFreelancerProfile(role) && workspaceSunAllowed
+
+    if (isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan) && !workspaceSunAllowed) {
+      setSunPlannerLockedHint(
+        'Your 14-day Sun Planner trial on the Workspace plan has ended. Upgrade to the Starter plan to use Sun Planner again.'
+      )
+    } else {
+      setSunPlannerLockedHint(null)
+    }
+
     const rawCompanyTier = String((profile as { subscription_tier?: string | null } | null)?.subscription_tier ?? '')
       .trim()
       .toLowerCase()
@@ -238,6 +260,7 @@ export default function ProjectWorkspaceScreen() {
       setForbidden(true)
       setProject(null)
       setSunPlannerEnabled(false)
+      setSunPlannerLockedHint(null)
       setLoading(false)
       return
     }
@@ -705,6 +728,7 @@ export default function ProjectWorkspaceScreen() {
                     briefContext={project.brief_ai_context}
                     briefOutputs={project.brief_ai_outputs}
                     canUseSunPlanner={sunPlannerEnabled}
+                    sunPlannerLockedHint={sunPlannerLockedHint}
                   />
                 )}
                 {tab === 'crew' && (

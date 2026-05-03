@@ -140,6 +140,8 @@ type Props = {
   briefContext: string | null
   briefOutputs?: Record<string, string> | null
   canUseSunPlanner?: boolean
+  /** When Sun Planner is gated (e.g. Workspace trial ended); overrides default upgrade copy. */
+  sunPlannerLockedHint?: string | null
 }
 
 const PRODUCTION_SECTIONS = [
@@ -186,6 +188,7 @@ export function ProductionTab({
   briefContext,
   briefOutputs,
   canUseSunPlanner = false,
+  sunPlannerLockedHint,
 }: Props) {
   const [shootDay, setShootDay] = useState(() => todayLocalISODate())
   const [dayInput, setDayInput] = useState(() => todayLocalISODate())
@@ -561,7 +564,9 @@ export function ProductionTab({
           <View style={styles.aiDocCard}>
             <Text style={styles.aiDocTitle}>Sun Planner</Text>
             <Text style={styles.muted}>
-              Available for Freelancer Pro+ and Company Studio+ plans. Upgrade to unlock this feature.
+              {sunPlannerLockedHint?.trim()
+                ? sunPlannerLockedHint.trim()
+                : 'Available on Freelancer Starter+ and Company Studio+ plans. Upgrade to unlock this feature.'}
             </Text>
           </View>
         )
