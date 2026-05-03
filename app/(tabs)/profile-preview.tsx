@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -21,6 +21,8 @@ import type { FreelancerPublicProfilePayload } from '@/lib/freelancerPublicProfi
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isCeoProfile, isFreelancerProfile } from '@/lib/profileRole'
 import { parsePublicProfileWidgets } from '@/lib/publicProfileWidgets'
+import type { PublicProfileWidgets } from '@/lib/publicProfileWidgets'
+import { loadLiveCeoWidgets } from '@/lib/ceoLiveWidgets'
 import { profileShareUrl } from '@/lib/shareLinks'
 
 const TAB_BAR_HEIGHT = 80
@@ -31,6 +33,7 @@ export default function ProfilePreviewScreen() {
   const [payload, setPayload] = useState<FreelancerPublicProfilePayload | null>(null)
   const [authUserId, setAuthUserId] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
+  const [liveWidgets, setLiveWidgets] = useState<PublicProfileWidgets | null>(null)
 
   const load = useCallback(async () => {
     const {
@@ -61,6 +64,27 @@ export default function ProfilePreviewScreen() {
       load()
     }, [load])
   )
+
+  const widgetsBase = useMemo(
+    () => parsePublicProfileWidgets(payload?.public_profile_widgets),
+    [payload?.public_profile_widgets]
+  )
+  const widgets = liveWidgets ?? widgetsBase
+
+  useEffect(() => {
+    let cancelled = false
+    if (!payload || !isCeoProfile(payload.role)) {
+      setLiveWidgets(null)
+      return
+    }
+    void (async () => {
+      const next = await loadLiveCeoWidgets(widgetsBase)
+      if (!cancelled) setLiveWidgets(next)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [payload, widgetsBase])
 
   const profilePublicUrl = useMemo(() => (authUserId ? profileShareUrl(authUserId) : null), [authUserId])
   const profileCardMessage = useMemo(
@@ -155,7 +179,7 @@ export default function ProfilePreviewScreen() {
               location={payload.location}
               bio={payload.bio}
               avatarUrl={avatarUri}
-              widgets={parsePublicProfileWidgets(payload.public_profile_widgets)}
+              widgets={widgets}
             />
           </ScrollView>
         </>

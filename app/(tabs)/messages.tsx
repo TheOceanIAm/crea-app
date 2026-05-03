@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
 import { supabase } from '@/lib/supabase'
 import { loadDirectMessageInbox, type ConvoRow } from '@/lib/messagesInboxLoad'
+import { invalidateDmBadge } from '@/lib/invalidateDmBadge'
 
 export default function MessagesScreen() {
   const router = useRouter()
@@ -70,6 +71,7 @@ export default function MessagesScreen() {
   useFocusEffect(
     useCallback(() => {
       void refreshList()
+      invalidateDmBadge()
       const poll = setInterval(() => void refreshList(), 8000)
       return () => {
         clearInterval(poll)

@@ -2,6 +2,12 @@ import type { PublicProfileWidgets } from '@/lib/publicProfileWidgets'
 
 const DODGERS_TEAM_ID = 119
 
+/** Reddit requires a non-empty User-Agent or many clients get 403. */
+const FETCH_HEADERS = {
+  Accept: 'application/json',
+  'User-Agent': 'CreaApp/1.0 (contact@creaservices.de)',
+} as const
+
 type MlbGame = {
   gameDate?: string
   teams?: {
@@ -52,11 +58,32 @@ async function fetchJsonWithTimeout(url: string, timeoutMs = 8000): Promise<unkn
   const ctrl = new AbortController()
   const t = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } })
+    const res = await fetch(url, { signal: ctrl.signal, headers: FETCH_HEADERS })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return (await res.json()) as unknown
   } finally {
     clearTimeout(t)
+  }
+}
+
+function isNonFinalGame(game: MlbGame) {
+  const s = String(game.status?.detailedState || '').toLowerCase()
+  return !s.includes('final') && !s.includes('game over')
+}
+
+/** Today’s top post title from r/UpliftingNews (same source as CEO widget). */
+export async function fetchGoodNewsOfTheDayHeadline(): Promise<{ body: string; source: string } | null> {
+  try {
+    const raw = await fetchJsonWithTimeout(
+      'https://www.reddit.com/r/UpliftingNews/top.json?t=day&limit=1&raw_json=1'
+    )
+    const children = (raw as { data?: { children?: Array<{ data?: { title?: string } }> } })?.data?.children
+    const top = Array.isArray(children) ? children[0]?.data : undefined
+    const title = typeof top?.title === 'string' ? top.title.trim() : ''
+    if (!title) return null
+    return { body: title, source: 'Source: r/UpliftingNews' }
+  } catch {
+    return null
   }
 }
 
@@ -96,7 +123,9 @@ async function fetchDodgersLiveWidget(base: PublicProfileWidgets['sports']) {
     .filter((g) => isFinalGame(g))
     .filter((g) => new Date(g.gameDate || 0).getTime() <= nowTs)
     .slice(-1)[0]
-  const nextGame = sorted.find((g) => new Date(g.gameDate || 0).getTime() >= nowTs)
+  const liveOrUpcoming =
+    sorted.find((g) => isNonFinalGame(g)) ??
+    sorted.find((g) => new Date(g.gameDate || 0).getTime() >= nowTs)
 
   let wins = base.recordWins
   let losses = base.recordLosses
@@ -131,11 +160,11 @@ async function fetchDodgersLiveWidget(base: PublicProfileWidgets['sports']) {
           result: resultForDodgers(lastFinal) ?? base.lastGame.result,
         }
       : base.lastGame,
-    nextGame: nextGame
+    nextGame: liveOrUpcoming
       ? {
-          date: formatDateShort(nextGame.gameDate),
-          matchup: matchup(nextGame),
-          time: formatTimeShort(nextGame.gameDate),
+          date: formatDateShort(liveOrUpcoming.gameDate),
+          matchup: matchup(liveOrUpcoming),
+          time: formatTimeShort(liveOrUpcoming.gameDate),
         }
       : base.nextGame,
   }
@@ -143,16 +172,12 @@ async function fetchDodgersLiveWidget(base: PublicProfileWidgets['sports']) {
 
 async function fetchGoodNewsLiveWidget(base: PublicProfileWidgets['goodNews']) {
   if (!base) return null
-  const raw = await fetchJsonWithTimeout('https://www.reddit.com/r/UpliftingNews/top.json?t=day&limit=1')
-  const children = (raw as { data?: { children?: Array<{ data?: { title?: string; url?: string } }> } })?.data
-    ?.children
-  const top = Array.isArray(children) ? children[0]?.data : undefined
-  const title = typeof top?.title === 'string' ? top.title.trim() : ''
-  if (!title) return base
+  const headline = await fetchGoodNewsOfTheDayHeadline()
+  if (!headline) return base
   return {
     kicker: 'GOOD NEWS OF THE DAY',
-    body: title,
-    source: 'Source: r/UpliftingNews',
+    body: headline.body,
+    source: headline.source,
   }
 }
 

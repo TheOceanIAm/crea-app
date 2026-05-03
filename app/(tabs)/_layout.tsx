@@ -8,12 +8,17 @@ import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { countUnreadAlerts } from '@/lib/notificationsFeed'
 import { subscribeAlertsInvalidate } from '@/lib/invalidateAlerts'
+import { subscribeDmBadgeInvalidate } from '@/lib/invalidateDmBadge'
 import { registerPushTokenSilently } from '@/lib/registerPushOnLaunch'
 import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
+import { GoodNewsDailyModal } from '@/components/GoodNewsDailyModal'
+import { fetchGoodNewsOfTheDayHeadline } from '@/lib/ceoLiveWidgets'
+import { markGoodNewsModalShownToday, shouldShowGoodNewsModalToday } from '@/lib/goodNewsDailyGate'
 
 export default function TabLayout() {
   const [workspaceOnlyTabs, setWorkspaceOnlyTabs] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
+  const [goodNewsPopup, setGoodNewsPopup] = useState<{ body: string; source?: string } | null>(null)
   const [unreadDmCount, setUnreadDmCount] = useState(0)
   const [unreadAlertsCount, setUnreadAlertsCount] = useState(0)
   const [companyTabs, setCompanyTabs] = useState(false)
@@ -81,8 +86,7 @@ export default function TabLayout() {
       setWorkspaceOnlyTabs(workspaceOnly)
       setCompanyTabs(role === 'company' || role === 'ceo')
       if (!workspaceOnly) {
-        await loadUnreadDmCount(user.id)
-        await loadUnreadAlertsCount(user.id)
+        await Promise.all([loadUnreadDmCount(user.id), loadUnreadAlertsCount(user.id)])
         void registerPushTokenSilently()
       }
     }
@@ -104,6 +108,38 @@ export default function TabLayout() {
       if (userId && !workspaceOnlyTabs) void loadUnreadAlertsCount(userId)
     })
   }, [loadUnreadAlertsCount, userId, workspaceOnlyTabs])
+
+  useEffect(() => {
+    return subscribeDmBadgeInvalidate(() => {
+      if (userId && !workspaceOnlyTabs) void loadUnreadDmCount(userId)
+    })
+  }, [loadUnreadDmCount, userId, workspaceOnlyTabs])
+
+  /** First open each calendar day: uplifting headline (same source as CEO Good News widget). */
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    const tryShow = async () => {
+      const open = await shouldShowGoodNewsModalToday()
+      if (!open || cancelled) return
+      const news = await fetchGoodNewsOfTheDayHeadline()
+      if (cancelled || !news) return
+      setGoodNewsPopup(news)
+    }
+    void tryShow()
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') void tryShow()
+    })
+    return () => {
+      cancelled = true
+      sub.remove()
+    }
+  }, [userId])
+
+  const dismissGoodNewsPopup = useCallback(async () => {
+    await markGoodNewsModalShownToday()
+    setGoodNewsPopup(null)
+  }, [])
 
   /** Polling fallback when Realtime is off or WebSocket misses events (badges stay fresh). */
   useEffect(() => {
@@ -171,6 +207,12 @@ export default function TabLayout() {
   return (
     <>
       {Platform.OS !== 'web' ? <InAppNotificationBridge /> : null}
+      <GoodNewsDailyModal
+        visible={goodNewsPopup !== null}
+        body={goodNewsPopup?.body ?? ''}
+        source={goodNewsPopup?.source}
+        onDismiss={dismissGoodNewsPopup}
+      />
       <Tabs
         screenOptions={{
           headerShown: false,
