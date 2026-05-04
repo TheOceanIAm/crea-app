@@ -30,3 +30,8 @@ export function isFreelancerStarterPlan(plan: FreelancerPlan): boolean {
 export function isFreelancerTalentPoolPlan(plan: FreelancerPlan): boolean {
   return plan === 'pro' || plan === 'premium'
 }
+
+/** Lead-owned private projects (not public jobs): Workspace, Pro, Premium — not Starter. */
+export function canFreelancerCreatePrivateProjects(plan: FreelancerPlan): boolean {
+  return plan !== 'starter'
+}

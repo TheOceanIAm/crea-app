@@ -42,6 +42,8 @@ type Props = {
   ratesCurrency: string | null
   selectedIsos: ReadonlySet<string>
   onInviteSent: (conversationId: string) => void
+  /** Company accounts always true; freelancer leads need Pro or Workspace to create a private project row. */
+  canCreatePrivateProject?: boolean
 }
 
 export function BookFreelancerModal({
@@ -56,6 +58,7 @@ export function BookFreelancerModal({
   ratesCurrency,
   selectedIsos,
   onInviteSent,
+  canCreatePrivateProject = true,
 }: Props) {
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
@@ -120,6 +123,7 @@ export function BookFreelancerModal({
 
   const onCreatePrivateProject = useCallback(async () => {
     if (creatingProject || companyUserId === freelancerId) return
+    if (!canCreatePrivateProject) return
     const t =
       newProjectTitle.trim() ||
       `Collaboration — ${freelancerName.trim() || 'freelancer'}`
@@ -155,6 +159,7 @@ export function BookFreelancerModal({
     freelancerName,
     newProjectTitle,
     loadProjects,
+    canCreatePrivateProject,
   ])
 
   const onSend = async () => {
@@ -243,27 +248,36 @@ export function BookFreelancerModal({
             </View>
           ) : projects.length === 0 ? (
             <View style={styles.emptyProj}>
-              <Text style={styles.emptyProjText}>
-                No shared private project yet. Create one here — it will not appear on the public job board.
-              </Text>
-              <TextInput
-                style={styles.draftTitleInput}
-                value={newProjectTitle}
-                onChangeText={setNewProjectTitle}
-                placeholder="Project name (optional)"
-                placeholderTextColor="rgba(255,255,255,0.28)"
-              />
-              <TouchableOpacity
-                style={[styles.linkBtn, creatingProject && styles.linkBtnDim]}
-                onPress={() => void onCreatePrivateProject()}
-                disabled={creatingProject}
-              >
-                {creatingProject ? (
-                  <ActivityIndicator color="#0a0a0a" />
-                ) : (
-                  <Text style={styles.linkBtnText}>Create private project</Text>
-                )}
-              </TouchableOpacity>
+              {canCreatePrivateProject ? (
+                <>
+                  <Text style={styles.emptyProjText}>
+                    No shared private project yet. Create one here — it will not appear on the public job board.
+                  </Text>
+                  <TextInput
+                    style={styles.draftTitleInput}
+                    value={newProjectTitle}
+                    onChangeText={setNewProjectTitle}
+                    placeholder="Project name (optional)"
+                    placeholderTextColor="rgba(255,255,255,0.28)"
+                  />
+                  <TouchableOpacity
+                    style={[styles.linkBtn, creatingProject && styles.linkBtnDim]}
+                    onPress={() => void onCreatePrivateProject()}
+                    disabled={creatingProject}
+                  >
+                    {creatingProject ? (
+                      <ActivityIndicator color="#0a0a0a" />
+                    ) : (
+                      <Text style={styles.linkBtnText}>Create private project</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <Text style={styles.emptyProjText}>
+                  No shared private project yet. Creating a lead-owned private workspace requires Pro or Workspace on
+                  your account (Starter can use company job projects). Upgrade on the web, then try again.
+                </Text>
+              )}
             </View>
           ) : (
             <>

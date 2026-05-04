@@ -26,6 +26,7 @@ import { money } from '@/lib/invoiceFormatting'
 import { getCreaWebBaseUrl } from '@/lib/creaWeb'
 import { isDevDemoWorkspaceRouteEnabled } from '@/lib/devDemoWorkspace'
 import {
+  canFreelancerCreatePrivateProjects,
   isFreelancerTalentPoolPlan,
   isFreelancerWorkspaceOnlyPlan,
   resolveFreelancerPlanFromUser,
@@ -143,11 +144,21 @@ function quickActionsForRole(
       ]
     }
     if (opts?.freelancerPlan && !isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
-      base.splice(1, 0, {
-        label: 'Private projects',
-        icon: AppWindow,
-        href: '/(tabs)/workspace-projects',
-      })
+      if (canFreelancerCreatePrivateProjects(opts.freelancerPlan)) {
+        base.splice(1, 0, {
+          label: 'Private projects',
+          icon: AppWindow,
+          href: '/(tabs)/workspace-projects',
+        })
+      } else {
+        base.splice(1, 0, {
+          label: 'Private projects',
+          icon: AppWindow,
+          href: '/(tabs)/workspace-projects',
+          disabled: true,
+          hint: 'Pro or Workspace plan',
+        })
+      }
     }
     if (opts?.freelancerPlan && isFreelancerTalentPoolPlan(opts.freelancerPlan)) {
       base.splice(2, 0, { label: 'Talent pool', icon: Users, href: '/(tabs)/talent-pool' })

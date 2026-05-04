@@ -38,6 +38,7 @@ import {
   vimeoUrl,
 } from '@/lib/profilePublicLinks'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
+import { canFreelancerCreatePrivateProjects, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
 import { profileShareUrl } from '@/lib/shareLinks'
 import { supabase } from '@/lib/supabase'
@@ -118,6 +119,7 @@ export function FreelancerPublicProfileContent({
   const [portfolioFilter, setPortfolioFilter] = useState<string>('All')
   const [viewerIsCompany, setViewerIsCompany] = useState(false)
   const [viewerIsCeo, setViewerIsCeo] = useState(false)
+  const [viewerCanCreatePrivateProject, setViewerCanCreatePrivateProject] = useState(true)
   const [bookingSelection, setBookingSelection] = useState<Set<string> | null>(null)
   const [companyJobs, setCompanyJobs] = useState<
     {
@@ -162,6 +164,7 @@ export function FreelancerPublicProfileContent({
     if (!authUserId) {
       setViewerIsCompany(false)
       setViewerIsCeo(false)
+      setViewerCanCreatePrivateProject(true)
       return
     }
     ;(async () => {
@@ -175,6 +178,11 @@ export function FreelancerPublicProfileContent({
         Boolean(user && (isCompanyProfile(role) || isFreelancerProfile(role)) && !isCeoProfile(role))
       )
       setViewerIsCeo(isCeoProfile(role))
+      const plan = resolveFreelancerPlanFromUser(user)
+      const canPrivate =
+        isCompanyProfile(role) ||
+        (Boolean(user) && isFreelancerProfile(role) && canFreelancerCreatePrivateProjects(plan))
+      setViewerCanCreatePrivateProject(canPrivate)
     })()
     return () => {
       cancelled = true
@@ -755,6 +763,7 @@ export function FreelancerPublicProfileContent({
           dayRateAmount={dayRate}
           ratesCurrency={cur}
           selectedIsos={bookingSelection}
+          canCreatePrivateProject={viewerCanCreatePrivateProject}
           onInviteSent={(conversationId) => {
             setBookingSelection(null)
             router.push(`/conversation/${conversationId}`)

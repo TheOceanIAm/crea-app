@@ -231,20 +231,6 @@ export default function ProjectWorkspaceScreen() {
       sunTrialIso = typeof trialData === 'string' ? trialData : null
     }
 
-    const workspaceSunAllowed = freelancerSunPlannerAllowed(
-      freelancerPlan,
-      isFreelancerWorkspaceOnlyPlan(freelancerPlan) ? sunTrialIso : null
-    )
-    const freelancerSunAccess = isFreelancerProfile(role) && workspaceSunAllowed
-
-    if (isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan) && !workspaceSunAllowed) {
-      setSunPlannerLockedHint(
-        'Your 14-day Sun Planner trial on the Workspace plan has ended. Upgrade to the Starter plan to use Sun Planner again.'
-      )
-    } else {
-      setSunPlannerLockedHint(null)
-    }
-
     const rawCompanyTier = String((profile as { subscription_tier?: string | null } | null)?.subscription_tier ?? '')
       .trim()
       .toLowerCase()
@@ -258,7 +244,7 @@ export default function ProjectWorkspaceScreen() {
             : rawCompanyTier
     const companySunAccess =
       role === 'company' && ['studio', 'agency', 'business', 'enterprise'].includes(normalizedCompanyTier || 'studio')
-    setSunPlannerEnabled(freelancerSunAccess || companySunAccess)
+
     setWorkspaceOnlyPlan(
       isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
     )
@@ -274,6 +260,33 @@ export default function ProjectWorkspaceScreen() {
     }
 
     const p = row as ProjectRow
+    const hasCompanyJob = Boolean(p.job_id && String(p.job_id).trim().length > 0)
+
+    let nextSun = false
+    let nextSunHint: string | null = null
+    if (role === 'company') {
+      nextSun = companySunAccess
+    } else if (isFreelancerProfile(role)) {
+      if (isFreelancerWorkspaceOnlyPlan(freelancerPlan)) {
+        if (hasCompanyJob) {
+          nextSun = true
+        } else {
+          const allowedPrivate = freelancerSunPlannerAllowed(
+            freelancerPlan,
+            isFreelancerWorkspaceOnlyPlan(freelancerPlan) ? sunTrialIso : null
+          )
+          nextSun = allowedPrivate
+          if (!allowedPrivate) {
+            nextSunHint =
+              'Sun Planner & Weather: your 14-day Workspace trial on private projects has ended. Upgrade to Pro, or open a project linked to a company job for full access.'
+          }
+        }
+      } else {
+        nextSun = true
+      }
+    }
+    setSunPlannerEnabled(nextSun)
+    setSunPlannerLockedHint(nextSunHint)
     setProject(p)
     setBriefText(p.brief_ai_context ?? '')
     setOverviewSummary(

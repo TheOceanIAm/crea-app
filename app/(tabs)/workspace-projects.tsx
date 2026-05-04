@@ -16,6 +16,7 @@ import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
+import { canFreelancerCreatePrivateProjects, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 
 type WorkspaceProject = {
   id: string
@@ -38,6 +39,8 @@ export default function WorkspaceProjectsScreen() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [allowed, setAllowed] = useState<boolean | null>(null)
+  /** When allowed is false: freelancer role vs starter plan (private projects need Pro / Workspace). */
+  const [denyKind, setDenyKind] = useState<'role' | 'plan' | null>(null)
   const [rows, setRows] = useState<WorkspaceProject[]>([])
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -70,10 +73,20 @@ export default function WorkspaceProjectsScreen() {
     const role = resolveAppRole(p?.role, user)
     if (!isFreelancerProfile(role) || isCompanyProfile(role) || isCeoProfile(role)) {
       setAllowed(false)
+      setDenyKind('role')
       setRows([])
       setLoading(false)
       return
     }
+    const plan = resolveFreelancerPlanFromUser(user)
+    if (!canFreelancerCreatePrivateProjects(plan)) {
+      setAllowed(false)
+      setDenyKind('plan')
+      setRows([])
+      setLoading(false)
+      return
+    }
+    setDenyKind(null)
     setAllowed(true)
 
     const { data, error: qErr } = await supabase
@@ -114,6 +127,13 @@ export default function WorkspaceProjectsScreen() {
   const onCreate = async () => {
     const t = title.trim()
     if (!t || creating) return
+    const {
+      data: { user: u },
+    } = await supabase.auth.getUser()
+    if (!u || !canFreelancerCreatePrivateProjects(resolveFreelancerPlanFromUser(u))) {
+      Alert.alert('Private projects', 'Available on Pro or Workspace. Upgrade in your account on the web.')
+      return
+    }
     setCreating(true)
     setError(null)
     const {
@@ -290,10 +310,21 @@ export default function WorkspaceProjectsScreen() {
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
         <View style={styles.center}>
-          <Text style={styles.blockTitle}>Freelancers only</Text>
-          <Text style={styles.blockSub}>
-            Private projects are for freelancer accounts. They never appear on the public job board.
-          </Text>
+          {denyKind === 'plan' ? (
+            <>
+              <Text style={styles.blockTitle}>Upgrade for private projects</Text>
+              <Text style={styles.blockSub}>
+                Creating lead-owned private workspaces requires Pro or Workspace. Starter is for browsing jobs and working in company job workspaces. Manage your plan on the web.
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.blockTitle}>Freelancers only</Text>
+              <Text style={styles.blockSub}>
+                Private projects are for freelancer accounts. They never appear on the public job board.
+              </Text>
+            </>
+          )}
         </View>
       </SafeAreaView>
     )

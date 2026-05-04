@@ -556,7 +556,20 @@ export function ProductionTab({
           </Text>
         </View>
       ) : null}
-      {openFeature === 'weather' ? <ProductionWeatherSection initialLocation={projectLocation} /> : null}
+      {openFeature === 'weather' ? (
+        canUseSunPlanner ? (
+          <ProductionWeatherSection initialLocation={projectLocation} />
+        ) : (
+          <View style={styles.aiDocCard}>
+            <Text style={styles.aiDocTitle}>Weather</Text>
+            <Text style={styles.muted}>
+              {sunPlannerLockedHint?.trim()
+                ? sunPlannerLockedHint.trim()
+                : 'Weather follows the same plan rules as Sun Planner. Upgrade or use a company job project for full access.'}
+            </Text>
+          </View>
+        )
+      ) : null}
       {openFeature === 'sun' ? (
         canUseSunPlanner ? (
           <ProductionSunPlannerSection initialLocation={projectLocation} />
