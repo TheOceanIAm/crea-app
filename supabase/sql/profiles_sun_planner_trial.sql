@@ -1,11 +1,11 @@
--- Workspace-only freelancers: Sun Planner 14-day trial from first touch; Starter+ keeps access.
+-- Freelancers (Workspace + Starter): first touch sets trial start for Production Sun/Weather per app rules (14 days).
 -- Run in Supabase SQL Editor after deploy.
 
 alter table public.profiles
   add column if not exists sun_planner_trial_started_at timestamptz null;
 
 comment on column public.profiles.sun_planner_trial_started_at is
-  'Workspace plan: set on first Sun Planner eligibility check; trial length enforced in app (14 days).';
+  'Freelancer Workspace: Sun + Weather trial window. Freelancer Starter: Sun Planner trial only (Weather full). Trial length enforced in app (14 days).';
 
 -- Idempotent: sets start time once per user (COALESCE). SECURITY DEFINER so it works under typical RLS.
 create or replace function public.touch_sun_planner_trial_start()

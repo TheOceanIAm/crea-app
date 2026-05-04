@@ -52,7 +52,7 @@ Diese Datei ist die **Single Source of Truth** für Marketing, Website und App-K
 
 **Firma (`role === company`):** Sun über **`profiles.subscription_tier`** (normalisiert zu Studio/Agency/…); siehe `app/project/[id].tsx`.
 
-**Hinweis Technik:** Legacy-Code kann Abweichungen nutzen (z. B. `job_id`); Pricing und Kommunikation folgen der Tabelle oben.
+**Technik:** Umsetzung in `lib/sunPlannerWorkspaceTrial.ts` (Funktionen `freelancerProductionSunAllowed` / `freelancerProductionWeatherAllowed`) und `app/project/[id].tsx` — **kein** `job_id`-Bypass für Workspace; Trial-Start per `touch_sun_planner_trial_start` (Workspace + Starter).
 
 **Kommunikation Website (EN):** Workspace = private-only; Sun & Weather in Production = **14-day trial then locked**. Starter = **full Weather**; Sun Planner = **14-day trial**, full on **Pro/Premium**.
 
@@ -64,7 +64,7 @@ Diese Datei ist die **Single Source of Truth** für Marketing, Website und App-K
 |---------|------|
 | Öffentliche Jobs posten, Bewerbungen | Nur **Company**, nicht Freelancer |
 | Talent Pool | Company hat Zugriff |
-| Projekt-Workspace aus Job | Typisch `job_id` gesetzt → Crew-Einladungen, Production inkl. Sun voll für Freelancer wie oben |
+| Projekt-Workspace aus Job | Typisch `job_id` gesetzt → Crew, Marktplatz-Kontext; **Sun/Weather für Freelancer** weiter nach **§4** (Abo), nicht automatisch „voll“ durch den Job |
 
 ---
 

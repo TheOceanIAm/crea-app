@@ -139,8 +139,11 @@ type Props = {
   companyId: string
   briefContext: string | null
   briefOutputs?: Record<string, string> | null
+  canUseProductionWeather?: boolean
   canUseSunPlanner?: boolean
-  /** When Sun Planner is gated (e.g. Workspace trial ended); overrides default upgrade copy. */
+  /** When Weather (Production) is gated (e.g. Workspace trial ended). */
+  productionWeatherLockedHint?: string | null
+  /** When Sun Planner is gated (e.g. trial ended); overrides default upgrade copy. */
   sunPlannerLockedHint?: string | null
 }
 
@@ -187,7 +190,9 @@ export function ProductionTab({
   companyId,
   briefContext,
   briefOutputs,
+  canUseProductionWeather = false,
   canUseSunPlanner = false,
+  productionWeatherLockedHint,
   sunPlannerLockedHint,
 }: Props) {
   const [shootDay, setShootDay] = useState(() => todayLocalISODate())
@@ -557,15 +562,15 @@ export function ProductionTab({
         </View>
       ) : null}
       {openFeature === 'weather' ? (
-        canUseSunPlanner ? (
+        canUseProductionWeather ? (
           <ProductionWeatherSection initialLocation={projectLocation} />
         ) : (
           <View style={styles.aiDocCard}>
             <Text style={styles.aiDocTitle}>Weather</Text>
             <Text style={styles.muted}>
-              {sunPlannerLockedHint?.trim()
-                ? sunPlannerLockedHint.trim()
-                : 'Weather follows the same plan rules as Sun Planner. Upgrade or use a company job project for full access.'}
+              {productionWeatherLockedHint?.trim()
+                ? productionWeatherLockedHint.trim()
+                : 'Weather requires an upgraded plan on Workspace after the 14-day trial. Upgrade to Pro or Premium for full access.'}
             </Text>
           </View>
         )

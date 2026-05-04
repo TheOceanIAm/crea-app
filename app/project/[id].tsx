@@ -45,7 +45,10 @@ import {
   resolveFreelancerPlanFromUser,
 } from '@/lib/freelancerPlan'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
-import { freelancerSunPlannerAllowed } from '@/lib/sunPlannerWorkspaceTrial'
+import {
+  freelancerProductionSunAllowed,
+  freelancerProductionWeatherAllowed,
+} from '@/lib/sunPlannerWorkspaceTrial'
 
 type TabId =
   | 'overview'
@@ -177,7 +180,9 @@ export default function ProjectWorkspaceScreen() {
   const [workspaceOnlyPlan, setWorkspaceOnlyPlan] = useState(false)
   const [starterFreelancerPlan, setStarterFreelancerPlan] = useState(false)
   const [sunPlannerEnabled, setSunPlannerEnabled] = useState(false)
+  const [productionWeatherEnabled, setProductionWeatherEnabled] = useState(false)
   const [sunPlannerLockedHint, setSunPlannerLockedHint] = useState<string | null>(null)
+  const [productionWeatherLockedHint, setProductionWeatherLockedHint] = useState<string | null>(null)
   const [applicants, setApplicants] = useState(0)
   const [tab, setTab] = useState<TabId>('overview')
   const [tool, setTool] = useState<string>('tasks')
@@ -199,7 +204,9 @@ export default function ProjectWorkspaceScreen() {
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
       setSunPlannerEnabled(false)
+      setProductionWeatherEnabled(false)
       setSunPlannerLockedHint(null)
+      setProductionWeatherLockedHint(null)
       setLoading(false)
       return
     }
@@ -211,7 +218,9 @@ export default function ProjectWorkspaceScreen() {
       setWorkspaceOnlyPlan(false)
       setStarterFreelancerPlan(false)
       setSunPlannerEnabled(false)
+      setProductionWeatherEnabled(false)
       setSunPlannerLockedHint(null)
+      setProductionWeatherLockedHint(null)
       setLoading(false)
       return
     }
@@ -227,7 +236,10 @@ export default function ProjectWorkspaceScreen() {
     setStarterFreelancerPlan(isStarterFreelancer)
 
     let sunTrialIso: string | null = null
-    if (isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)) {
+    if (
+      isFreelancerProfile(role) &&
+      (isFreelancerWorkspaceOnlyPlan(freelancerPlan) || isFreelancerStarterPlan(freelancerPlan))
+    ) {
       const { data: trialData } = await supabase.rpc('touch_sun_planner_trial_start')
       sunTrialIso = typeof trialData === 'string' ? trialData : null
     }
@@ -257,39 +269,45 @@ export default function ProjectWorkspaceScreen() {
       setForbidden(true)
       setProject(null)
       setSunPlannerEnabled(false)
+      setProductionWeatherEnabled(false)
       setSunPlannerLockedHint(null)
+      setProductionWeatherLockedHint(null)
       setLoading(false)
       return
     }
 
     const p = row as ProjectRow
-    const hasCompanyJob = Boolean(p.job_id && String(p.job_id).trim().length > 0)
 
     let nextSun = false
+    let nextWeather = false
     let nextSunHint: string | null = null
+    let nextWeatherHint: string | null = null
     if (role === 'company') {
       nextSun = companySunAccess
+      nextWeather = companySunAccess
     } else if (isFreelancerProfile(role)) {
-      if (isFreelancerWorkspaceOnlyPlan(freelancerPlan)) {
-        if (hasCompanyJob) {
-          nextSun = true
+      nextSun = freelancerProductionSunAllowed(freelancerPlan, sunTrialIso)
+      nextWeather = freelancerProductionWeatherAllowed(freelancerPlan, sunTrialIso)
+      if (!nextSun) {
+        if (isFreelancerStarterPlan(freelancerPlan)) {
+          nextSunHint =
+            'Sun Planner: your 14-day trial has ended. Upgrade to Pro or Premium for full access.'
+        } else if (isFreelancerWorkspaceOnlyPlan(freelancerPlan)) {
+          nextSunHint =
+            'Sun Planner: your 14-day Workspace trial has ended. Upgrade to Pro or Premium for full access.'
         } else {
-          const allowedPrivate = freelancerSunPlannerAllowed(
-            freelancerPlan,
-            isFreelancerWorkspaceOnlyPlan(freelancerPlan) ? sunTrialIso : null
-          )
-          nextSun = allowedPrivate
-          if (!allowedPrivate) {
-            nextSunHint =
-              'Sun Planner & Weather: your 14-day Workspace trial on private projects has ended. Upgrade to Pro, or open a project linked to a company job for full access.'
-          }
+          nextSunHint = 'Sun Planner is not available on your current plan.'
         }
-      } else {
-        nextSun = true
+      }
+      if (!nextWeather) {
+        nextWeatherHint =
+          'Weather: your 14-day Workspace trial has ended. Upgrade to Pro or Premium for full access.'
       }
     }
     setSunPlannerEnabled(nextSun)
+    setProductionWeatherEnabled(nextWeather)
     setSunPlannerLockedHint(nextSunHint)
+    setProductionWeatherLockedHint(nextWeatherHint)
     setProject(p)
     setBriefText(p.brief_ai_context ?? '')
     setOverviewSummary(
@@ -751,7 +769,9 @@ export default function ProjectWorkspaceScreen() {
                     companyId={project.company_id}
                     briefContext={project.brief_ai_context}
                     briefOutputs={project.brief_ai_outputs}
+                    canUseProductionWeather={productionWeatherEnabled}
                     canUseSunPlanner={sunPlannerEnabled}
+                    productionWeatherLockedHint={productionWeatherLockedHint}
                     sunPlannerLockedHint={sunPlannerLockedHint}
                   />
                 )}

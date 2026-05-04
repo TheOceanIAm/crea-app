@@ -1,25 +1,40 @@
 import type { FreelancerPlan } from '@/lib/freelancerPlan'
 
-/** Trial length for Sun Planner on Workspace-only freelancer plan (days). */
-export const WORKSPACE_SUN_PLANNER_TRIAL_DAYS = 14
+/** 14-day trial for Workspace Production (Sun + Weather) and Starter Sun Planner (Sun only). */
+export const PRODUCTION_SUN_PLANNER_TRIAL_DAYS = 14
+
+/** @deprecated use PRODUCTION_SUN_PLANNER_TRIAL_DAYS */
+export const WORKSPACE_SUN_PLANNER_TRIAL_DAYS = PRODUCTION_SUN_PLANNER_TRIAL_DAYS
 
 const MS_PER_DAY = 86400000
 
+function isWithinProductionTrial(trialStartedAtIso: string | null): boolean {
+  if (!trialStartedAtIso) return false
+  const start = new Date(trialStartedAtIso).getTime()
+  if (Number.isNaN(start)) return false
+  return Date.now() < start + PRODUCTION_SUN_PLANNER_TRIAL_DAYS * MS_PER_DAY
+}
+
 /**
- * Whether a freelancer may use Sun Planner + Weather on **private** projects (no `job_id`).
- * Company job workspaces (`job_id` set) are always full access regardless of plan.
- * - Starter / Pro / Premium: always yes on private projects.
- * - Workspace: yes until WORKSPACE_SUN_PLANNER_TRIAL_DAYS after trialStartedAt (first touch via RPC).
+ * Sun Planner (Production): Pro / Premium full; Workspace & Starter within 14-day trial from `touch_sun_planner_trial_start`.
  */
-export function freelancerSunPlannerAllowed(
+export function freelancerProductionSunAllowed(
+  plan: FreelancerPlan,
+  trialStartedAtIso: string | null
+): boolean {
+  if (plan === 'pro' || plan === 'premium') return true
+  if (plan === 'workspace' || plan === 'starter') return isWithinProductionTrial(trialStartedAtIso)
+  return false
+}
+
+/**
+ * Weather (Production): Starter / Pro / Premium full; Workspace only within the same 14-day trial window as Sun.
+ */
+export function freelancerProductionWeatherAllowed(
   plan: FreelancerPlan,
   trialStartedAtIso: string | null
 ): boolean {
   if (plan === 'starter' || plan === 'pro' || plan === 'premium') return true
-  if (plan !== 'workspace') return false
-  if (!trialStartedAtIso) return false
-  const start = new Date(trialStartedAtIso).getTime()
-  if (Number.isNaN(start)) return false
-  const end = start + WORKSPACE_SUN_PLANNER_TRIAL_DAYS * MS_PER_DAY
-  return Date.now() < end
+  if (plan === 'workspace') return isWithinProductionTrial(trialStartedAtIso)
+  return false
 }
