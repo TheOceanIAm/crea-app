@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AppState, Platform, View } from 'react-native'
+import * as Notifications from 'expo-notifications'
 import { Tabs } from 'expo-router'
 import { Bell, Briefcase, House, MessageCircle, UserRound } from 'lucide-react-native'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
@@ -114,6 +115,13 @@ export default function TabLayout() {
       if (userId && !workspaceOnlyTabs) void loadUnreadDmCount(userId)
     })
   }, [loadUnreadDmCount, userId, workspaceOnlyTabs])
+
+  /** iOS home-screen badge mirrors unread DM + Alerts (tab dots stay source of truth). */
+  useEffect(() => {
+    if (Platform.OS === 'web') return
+    const total = unreadDmCount + unreadAlertsCount
+    void Notifications.setBadgeCountAsync(total).catch(() => {})
+  }, [unreadDmCount, unreadAlertsCount])
 
   /** First open each calendar day: uplifting headline (same source as CEO Good News widget). */
   useEffect(() => {

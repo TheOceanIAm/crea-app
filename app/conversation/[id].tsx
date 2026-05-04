@@ -98,7 +98,8 @@ export default function ConversationThreadScreen() {
     if (readErr) {
       console.warn('[conversation] mark read', readErr.message)
     }
-    invalidateDmBadge()
+    // Let PostgREST/RLS settle so tab-bar count query sees read=true.
+    setTimeout(() => invalidateDmBadge(), 60)
 
     const { data: msgs, error } = await supabase
       .from('messages')

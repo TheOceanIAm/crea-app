@@ -10,6 +10,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import { useFocusEffect } from '@react-navigation/native'
 import { supabase } from '@/lib/supabase'
 import {
   fetchAlertReadKeys,
@@ -75,6 +76,14 @@ export default function NotificationsScreen() {
     return () => sub.data.subscription.unsubscribe()
   }, [load])
 
+  useFocusEffect(
+    useCallback(() => {
+      void load().then(() => {
+        invalidateAlertsBadge()
+      })
+    }, [load])
+  )
+
   useEffect(() => {
     const channel = supabase
       .channel('alerts-feed-refresh')
@@ -139,6 +148,9 @@ export default function NotificationsScreen() {
       <FlatList
         data={rows}
         keyExtractor={(r) => r.id}
+        initialNumToRender={14}
+        maxToRenderPerBatch={8}
+        windowSize={7}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFDC00" />}
         renderItem={({ item }) => {
