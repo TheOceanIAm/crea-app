@@ -15,6 +15,7 @@ import {
 import { Swipeable } from 'react-native-gesture-handler'
 import { Trash2 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
 
 type Member = {
@@ -241,6 +242,7 @@ export function ProjectCrewTab({
       Alert.alert('Could not add', error.message)
       return
     }
+    void notifyExpoEvent({ kind: 'project_crew_invite', projectId, crewProfileId: profileId })
     load()
     Alert.alert('Added', 'They now have access to this project workspace.')
   }

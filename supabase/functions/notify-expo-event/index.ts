@@ -277,6 +277,70 @@ Deno.serve(async (req) => {
     })
   }
 
+  if (kind === 'project_crew_invite') {
+    const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : ''
+    const crewProfileId = typeof body.crewProfileId === 'string' ? body.crewProfileId.trim() : ''
+    if (!projectId || !crewProfileId) {
+      return new Response(JSON.stringify({ error: 'projectId and crewProfileId required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const { data: proj } = await admin
+      .from('projects')
+      .select('company_id, freelancer_id, title, job_id')
+      .eq('id', projectId)
+      .maybeSingle()
+    if (!proj) {
+      return new Response(JSON.stringify({ error: 'Project not found' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    if (proj.company_id !== user.id && proj.freelancer_id !== user.id) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const { data: mem } = await admin
+      .from('project_members')
+      .select('id')
+      .eq('project_id', projectId)
+      .eq('profile_id', crewProfileId)
+      .eq('member_role', 'crew')
+      .maybeSingle()
+    if (!mem) {
+      return new Response(JSON.stringify({ error: 'Crew membership not found' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const { data: lead } = await admin
+      .from('profiles')
+      .select('name')
+      .eq('id', proj.freelancer_id as string)
+      .maybeSingle()
+    const leadName = String(lead?.name ?? 'Project lead').trim() || 'Project lead'
+    const titleStr = String(proj.title ?? 'Project').trim() || 'Project'
+    const hasPublicJob = proj.job_id != null && String(proj.job_id).length > 0
+    const bodyStr = hasPublicJob
+      ? `You were added to «${titleStr}».`
+      : `${leadName} added you to the private project «${titleStr}».`
+    const res = await sendExpoPush({
+      recipientId: crewProfileId,
+      admin,
+      title: 'Project crew',
+      body: bodyStr,
+      data: { type: 'project_crew_invite', projectId },
+      allow: (s) => Boolean(s.pushProjectChat ?? true),
+    })
+    return new Response(JSON.stringify(res), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+
   if (kind === 'workspace_ready') {
     const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : ''
     if (!projectId) {

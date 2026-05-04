@@ -13,6 +13,7 @@ begin
     'conversations',
     'project_messages',
     'projects',
+    'project_members',
     'job_applications',
     'invoices',
     'user_alert_reads'

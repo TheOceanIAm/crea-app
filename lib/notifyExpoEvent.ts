@@ -1,6 +1,11 @@
 import { supabase } from '@/lib/supabase'
 
-export type NotifyExpoKind = 'job_application' | 'invoice' | 'project_message' | 'workspace_ready'
+export type NotifyExpoKind =
+  | 'job_application'
+  | 'invoice'
+  | 'project_message'
+  | 'workspace_ready'
+  | 'project_crew_invite'
 
 export async function notifyExpoEvent(payload: Record<string, unknown>): Promise<void> {
   try {

@@ -60,7 +60,7 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
 
   const { data: memberships } = await supabase
     .from('project_members')
-    .select('project_id, member_role, created_at')
+    .select('id, project_id, member_role, created_at')
     .eq('profile_id', userId)
     .order('created_at', { ascending: false })
     .limit(200)
@@ -76,21 +76,52 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     : { data: [] as Array<Record<string, unknown>> }
 
   const projectTitle = new Map<string, string>()
+  const projectById = new Map<string, Record<string, unknown>>()
   for (const p of projects ?? []) {
     const id = String(p.id)
     projectTitle.set(id, String(p.title || 'Project'))
+    projectById.set(id, p as Record<string, unknown>)
+  }
+
+  const leadIds = [
+    ...new Set(
+      (projects ?? [])
+        .map((p) => p.freelancer_id)
+        .filter((x): x is string => typeof x === 'string' && x.length > 0)
+    ),
+  ]
+  const { data: leadProfiles } = leadIds.length
+    ? await supabase.from('profiles').select('id, name').in('id', leadIds)
+    : { data: [] as { id: string; name: string | null }[] }
+  const leadNameById = new Map<string, string>()
+  for (const lp of leadProfiles ?? []) {
+    const n = String(lp.name ?? '').trim()
+    leadNameById.set(String(lp.id), n || 'Project lead')
   }
 
   const inviteRows: NotificationRow[] = (memberships ?? [])
     .filter((m) => String(m.member_role) === 'crew')
-    .map((m) => ({
-      id: `invite-${m.project_id}-${m.created_at}`,
-      kind: 'invite' as const,
-      projectId: String(m.project_id),
-      title: 'Project invitation',
-      body: `You were added to ${projectTitle.get(String(m.project_id)) ?? 'a project'}.`,
-      at: String(m.created_at),
-    }))
+    .map((m) => {
+      const pid = String(m.project_id)
+      const t = projectTitle.get(pid) ?? 'Project'
+      const proj = projectById.get(pid)
+      const jobId = proj?.job_id
+      const hasPublicJob = jobId != null && String(jobId).length > 0
+      const leadId =
+        typeof proj?.freelancer_id === 'string' ? String(proj.freelancer_id) : ''
+      const leadName = leadId ? leadNameById.get(leadId) ?? 'Project lead' : 'Project lead'
+      const body = hasPublicJob
+        ? `You were added to «${t}».`
+        : `${leadName} added you to the private project «${t}».`
+      return {
+        id: `invite-${String(m.id)}`,
+        kind: 'invite' as const,
+        projectId: pid,
+        title: t,
+        body,
+        at: String(m.created_at),
+      }
+    })
 
   const updateRows: NotificationRow[] = (projects ?? [])
     .filter((p) => Boolean(p.updated_at))

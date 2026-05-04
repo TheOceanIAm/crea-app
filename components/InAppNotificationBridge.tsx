@@ -129,6 +129,40 @@ export function InAppNotificationBridge() {
         )
         .on(
           'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'project_members' },
+          async (payload) => {
+            if (AppState.currentState !== 'active' || !uid) return
+            const row = payload.new as Record<string, unknown>
+            if (String(row.profile_id) !== uid) return
+            if (String(row.member_role) !== 'crew') return
+            const projectId = String(row.project_id ?? '')
+            if (!projectId) return
+            const { data: proj } = await supabase
+              .from('projects')
+              .select('title, job_id, freelancer_id')
+              .eq('id', projectId)
+              .maybeSingle()
+            const leadId = proj?.freelancer_id ? String(proj.freelancer_id) : ''
+            const { data: leadProf } = leadId
+              ? await supabase.from('profiles').select('name').eq('id', leadId).maybeSingle()
+              : { data: null }
+            const leadName = String(leadProf?.name ?? 'Project lead').trim() || 'Project lead'
+            const pt = String(proj?.title ?? 'Project').trim() || 'Project'
+            const hasJob = proj?.job_id != null && String(proj.job_id).length > 0
+            const bannerBody = hasJob
+              ? `You were added to «${pt}».`
+              : `${leadName} added you to «${pt}».`
+            invalidateAlertsBadge()
+            showBanner({
+              id: `crew-inv-${String(row.id)}`,
+              title: 'Added to project',
+              body: bannerBody,
+              onPress: () => router.push(`/project/${projectId}`),
+            })
+          }
+        )
+        .on(
+          'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'project_messages' },
           async (payload) => {
             if (AppState.currentState !== 'active' || !uid) return
