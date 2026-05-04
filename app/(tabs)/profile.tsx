@@ -53,6 +53,7 @@ import {
   parsePortfolioProjects,
 } from '@/lib/profileSettingsExtras'
 import { registerForExpoPushTokenAsync } from '@/lib/pushNotifications'
+import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
 import { resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 
 const SUPPORT_MAIL = 'mailto:support@crea.app?subject=CREA%20App%20Support'
@@ -352,13 +353,28 @@ export default function ProfileScreen() {
         .trim()
         .toLowerCase()
       const authTier = resolveFreelancerPlanFromUser(user)
-      // Web source of truth is auth metadata (`freelancer_plan`); prefer it for freelancer sessions.
-      const effectiveTier =
-        resolveAppRole(data?.role, user) === 'freelancer'
-          ? authTier
-          : dbTier === 'pro' || dbTier === 'premium'
+      const appRole = resolveAppRole(data?.role, user)
+      // Freelancers: JWT `freelancer_plan` (same as web). Companies: JWT `company_plan` → company_profiles → profiles (crea-services webhook order).
+      let effectiveTier: string
+      if (appRole === 'freelancer') {
+        effectiveTier = authTier
+      } else if (appRole === 'company') {
+        const { data: cp } = await supabase
+          .from('company_profiles')
+          .select('subscription_plan')
+          .eq('id', user.id)
+          .maybeSingle()
+        effectiveTier = resolveCompanySubscriptionPlanFromSources(
+          user,
+          data?.subscription_tier,
+          (cp as { subscription_plan?: string } | null)?.subscription_plan
+        )
+      } else {
+        effectiveTier =
+          dbTier === 'pro' || dbTier === 'premium'
             ? dbTier
             : 'starter'
+      }
       setSubscriptionTier(effectiveTier)
       setDayRate(data?.day_rate_amount != null ? String(data.day_rate_amount) : '')
       setHalfDayRate(data?.half_day_rate_amount != null ? String(data.half_day_rate_amount) : '')

@@ -38,6 +38,7 @@ import {
   projectStatusDisplayLabel,
   projectStatusVariant,
 } from '@/lib/projectStatusDisplay'
+import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
 import {
   isFreelancerStarterPlan,
   isFreelancerWorkspaceOnlyPlan,
@@ -231,17 +232,19 @@ export default function ProjectWorkspaceScreen() {
       sunTrialIso = typeof trialData === 'string' ? trialData : null
     }
 
-    const rawCompanyTier = String((profile as { subscription_tier?: string | null } | null)?.subscription_tier ?? '')
-      .trim()
-      .toLowerCase()
-    const normalizedCompanyTier =
-      rawCompanyTier === 'starter' || rawCompanyTier === 'workspace'
-        ? 'studio'
-        : rawCompanyTier === 'pro'
-          ? 'agency'
-          : rawCompanyTier === 'premium'
-            ? 'business'
-            : rawCompanyTier
+    let normalizedCompanyTier = 'studio'
+    if (role === 'company') {
+      const { data: cp } = await supabase
+        .from('company_profiles')
+        .select('subscription_plan')
+        .eq('id', user.id)
+        .maybeSingle()
+      normalizedCompanyTier = resolveCompanySubscriptionPlanFromSources(
+        user,
+        (profile as { subscription_tier?: string | null } | null)?.subscription_tier,
+        (cp as { subscription_plan?: string } | null)?.subscription_plan
+      )
+    }
     const companySunAccess =
       role === 'company' && ['studio', 'agency', 'business', 'enterprise'].includes(normalizedCompanyTier || 'studio')
 

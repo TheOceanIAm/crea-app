@@ -55,12 +55,23 @@ export default function Index() {
           return
         }
 
-        setSession(s)
+        // After checkout on the website, Supabase has new user_metadata but the local JWT can be stale until refresh.
+        let sessionToUse = s
+        try {
+          const { data: ref, error: refErr } = await supabase.auth.refreshSession()
+          if (!refErr && ref.session) {
+            sessionToUse = ref.session
+          }
+        } catch {
+          /* offline / transient — keep cached session */
+        }
+
+        setSession(sessionToUse)
 
         const { data: profile, error } = await supabase
           .from('profiles')
           .select('onboarding_completed')
-          .eq('id', s.user.id)
+          .eq('id', sessionToUse.user.id)
           .maybeSingle()
 
         if (cancelled) return
