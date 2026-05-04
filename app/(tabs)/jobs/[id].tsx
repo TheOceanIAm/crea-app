@@ -57,7 +57,6 @@ export default function JobDetailScreen() {
   const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [accessDenied, setAccessDenied] = useState(false)
-
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
       setLoading(false)
@@ -203,7 +202,7 @@ export default function JobDetailScreen() {
   }
 
   const onCreateWorkspace = async () => {
-    if (!uid || !job || !isCompanyProfile(role ?? undefined)) return
+    if (!uid || !job || !isOwner || !isCompanyProfile(role ?? undefined)) return
     setCreateBusy(true)
     const { data: apps, error: aerr } = await supabase
       .from('job_applications')

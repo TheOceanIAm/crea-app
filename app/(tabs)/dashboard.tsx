@@ -25,7 +25,12 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { money } from '@/lib/invoiceFormatting'
 import { getCreaWebBaseUrl } from '@/lib/creaWeb'
 import { isDevDemoWorkspaceRouteEnabled } from '@/lib/devDemoWorkspace'
-import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser, type FreelancerPlan } from '@/lib/freelancerPlan'
+import {
+  isFreelancerTalentPoolPlan,
+  isFreelancerWorkspaceOnlyPlan,
+  resolveFreelancerPlanFromUser,
+  type FreelancerPlan,
+} from '@/lib/freelancerPlan'
 
 type IncomeTotals = { paid: number; incoming: number; overdue: number; currency: string }
 
@@ -130,12 +135,30 @@ function quickActionsForRole(
     if (opts?.freelancerPlan && isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
       return [
         {
-          label: 'Projects',
+          label: 'Private projects',
           icon: AppWindow,
           href: '/(tabs)/workspace-projects',
         },
         { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
       ]
+    }
+    if (opts?.freelancerPlan && !isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
+      base.splice(1, 0, {
+        label: 'Private projects',
+        icon: AppWindow,
+        href: '/(tabs)/workspace-projects',
+      })
+    }
+    if (opts?.freelancerPlan && isFreelancerTalentPoolPlan(opts.freelancerPlan)) {
+      base.splice(2, 0, { label: 'Talent pool', icon: Users, href: '/(tabs)/talent-pool' })
+    } else if (opts?.freelancerPlan && !isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
+      base.splice(2, 0, {
+        label: 'Talent pool',
+        icon: Users,
+        href: '/(tabs)/talent-pool',
+        disabled: true,
+        hint: 'Only available for Pro users',
+      })
     }
     base.push({ label: 'Availability', icon: CalendarDays, href: '/(tabs)/availability' })
   }

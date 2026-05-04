@@ -107,7 +107,7 @@ export default function CompanyHubScreen() {
         </TouchableOpacity>
         <View style={styles.center}>
           <Text style={styles.blockTitle}>Companies only</Text>
-          <Text style={styles.blockSub}>Switch to a company account to use hiring tools.</Text>
+          <Text style={styles.blockSub}>Switch to a company account to use hiring tools for the public job board.</Text>
         </View>
       </SafeAreaView>
     )

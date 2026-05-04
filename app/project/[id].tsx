@@ -38,7 +38,11 @@ import {
   projectStatusDisplayLabel,
   projectStatusVariant,
 } from '@/lib/projectStatusDisplay'
-import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import {
+  isFreelancerStarterPlan,
+  isFreelancerWorkspaceOnlyPlan,
+  resolveFreelancerPlanFromUser,
+} from '@/lib/freelancerPlan'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { freelancerSunPlannerAllowed } from '@/lib/sunPlannerWorkspaceTrial'
 
@@ -170,6 +174,7 @@ export default function ProjectWorkspaceScreen() {
   const [project, setProject] = useState<ProjectRow | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [workspaceOnlyPlan, setWorkspaceOnlyPlan] = useState(false)
+  const [starterFreelancerPlan, setStarterFreelancerPlan] = useState(false)
   const [sunPlannerEnabled, setSunPlannerEnabled] = useState(false)
   const [sunPlannerLockedHint, setSunPlannerLockedHint] = useState<string | null>(null)
   const [applicants, setApplicants] = useState(0)
@@ -203,6 +208,7 @@ export default function ProjectWorkspaceScreen() {
     if (!user) {
       setForbidden(true)
       setWorkspaceOnlyPlan(false)
+      setStarterFreelancerPlan(false)
       setSunPlannerEnabled(false)
       setSunPlannerLockedHint(null)
       setLoading(false)
@@ -216,6 +222,8 @@ export default function ProjectWorkspaceScreen() {
       .maybeSingle()
     const role = resolveAppRole(profile?.role, user)
     const freelancerPlan = resolveFreelancerPlanFromUser(user)
+    const isStarterFreelancer = isFreelancerProfile(role) && isFreelancerStarterPlan(freelancerPlan)
+    setStarterFreelancerPlan(isStarterFreelancer)
 
     let sunTrialIso: string | null = null
     if (isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)) {
@@ -736,6 +744,7 @@ export default function ProjectWorkspaceScreen() {
                     projectId={project.id}
                     canManage={canManageCrew}
                     workspaceOnly={workspaceOnlyPlan}
+                    proFeaturesEnabled={!starterFreelancerPlan}
                   />
                 )}
                 {tab === 'files' && <ProjectFilesTab projectId={project.id} />}
@@ -832,28 +841,33 @@ export default function ProjectWorkspaceScreen() {
                       Inclusive shoot dates (YYYY-MM-DD). They appear as busy on the freelancer&apos;s public profile
                       while this project is active.
                     </Text>
+                    {starterFreelancerPlan ? (
+                      <Text style={styles.scheduleLockedHint}>Only available for Pro users.</Text>
+                    ) : null}
                     <TextInput
-                      style={styles.scheduleInput}
+                      style={[styles.scheduleInput, starterFreelancerPlan && styles.scheduleInputLocked]}
                       placeholder="Start date e.g. 2026-05-12"
                       placeholderTextColor="rgba(255,255,255,0.25)"
                       value={scheduleStart}
                       onChangeText={setScheduleStart}
                       autoCapitalize="none"
                       autoCorrect={false}
+                      editable={!starterFreelancerPlan}
                     />
                     <TextInput
-                      style={styles.scheduleInput}
+                      style={[styles.scheduleInput, starterFreelancerPlan && styles.scheduleInputLocked]}
                       placeholder="End date e.g. 2026-05-14"
                       placeholderTextColor="rgba(255,255,255,0.25)"
                       value={scheduleEnd}
                       onChangeText={setScheduleEnd}
                       autoCapitalize="none"
                       autoCorrect={false}
+                      editable={!starterFreelancerPlan}
                     />
                     <TouchableOpacity
-                      style={[styles.scheduleSaveBtn, savingSchedule && styles.btnDim]}
+                      style={[styles.scheduleSaveBtn, (savingSchedule || starterFreelancerPlan) && styles.btnDim]}
                       onPress={saveSchedule}
-                      disabled={savingSchedule}
+                      disabled={savingSchedule || starterFreelancerPlan}
                     >
                       <Text style={styles.scheduleSaveText}>{savingSchedule ? 'Saving…' : 'Save schedule'}</Text>
                     </TouchableOpacity>
@@ -1044,6 +1058,7 @@ const styles = StyleSheet.create({
   },
   scheduleTitle: { fontSize: 13, fontWeight: '800', color: '#fff', letterSpacing: 0.6, marginBottom: 6 },
   scheduleSub: { fontSize: 11, color: 'rgba(255,255,255,0.38)', lineHeight: 16, marginBottom: 12 },
+  scheduleLockedHint: { fontSize: 11, color: '#FFDC00', marginBottom: 10, fontWeight: '700' },
   scheduleInput: {
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
@@ -1055,6 +1070,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     backgroundColor: '#0a0a0a',
   },
+  scheduleInputLocked: { opacity: 0.55 },
   scheduleSaveBtn: {
     alignSelf: 'flex-start',
     marginTop: 4,

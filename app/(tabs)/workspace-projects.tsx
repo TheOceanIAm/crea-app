@@ -15,8 +15,7 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
-import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
-import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 
 type WorkspaceProject = {
   id: string
@@ -69,9 +68,7 @@ export default function WorkspaceProjectsScreen() {
 
     const { data: p } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
     const role = resolveAppRole(p?.role, user)
-    const workspaceOnly =
-      isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))
-    if (!workspaceOnly) {
+    if (!isFreelancerProfile(role) || isCompanyProfile(role) || isCeoProfile(role)) {
       setAllowed(false)
       setRows([])
       setLoading(false)
@@ -83,7 +80,6 @@ export default function WorkspaceProjectsScreen() {
       .from('projects')
       .select('id, title, status, updated_at, brief_ai_context, brief_ai_outputs')
       .eq('company_id', user.id)
-      .eq('freelancer_id', user.id)
       .order('updated_at', { ascending: false })
 
     if (qErr) {
@@ -203,7 +199,6 @@ export default function WorkspaceProjectsScreen() {
       .update({ status: next })
       .eq('id', item.id)
       .eq('company_id', user.id)
-      .eq('freelancer_id', user.id)
     setActingId(null)
     if (updErr) {
       setError(updErr.message)
@@ -238,7 +233,6 @@ export default function WorkspaceProjectsScreen() {
                 .delete()
                 .eq('id', item.id)
                 .eq('company_id', user.id)
-                .eq('freelancer_id', user.id)
               setActingId(null)
               if (delErr) {
                 setError(delErr.message)
@@ -296,8 +290,10 @@ export default function WorkspaceProjectsScreen() {
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
         <View style={styles.center}>
-          <Text style={styles.blockTitle}>Workspace plan only</Text>
-          <Text style={styles.blockSub}>This area is available for freelancers on the Workspace plan.</Text>
+          <Text style={styles.blockTitle}>Freelancers only</Text>
+          <Text style={styles.blockSub}>
+            Private projects are for freelancer accounts. They never appear on the public job board.
+          </Text>
         </View>
       </SafeAreaView>
     )
@@ -316,8 +312,10 @@ export default function WorkspaceProjectsScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.title}>Projects</Text>
-      <Text style={styles.sub}>Private workspace projects only (not public job listings).</Text>
+      <Text style={styles.title}>Private projects</Text>
+      <Text style={styles.sub}>
+        Your workspaces with collaborators — not listed on the public Jobs board (unlike company job posts).
+      </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <FlatList
@@ -351,7 +349,9 @@ export default function WorkspaceProjectsScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>New project</Text>
-            <Text style={styles.modalSub}>Opens your private workspace, not a public job listing.</Text>
+            <Text style={styles.modalSub}>
+              Creates a private workspace only. It will not appear on the Jobs tab for other users.
+            </Text>
 
             <Text style={styles.fieldLabel}>Project name</Text>
             <TextInput

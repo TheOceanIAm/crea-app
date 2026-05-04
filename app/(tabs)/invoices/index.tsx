@@ -323,42 +323,50 @@ export default function InvoicesListScreen() {
               <View style={styles.overviewCard}>
                 {perspective === 'company' ? (
                   <>
-                    <Text style={styles.overviewTitle}>Budget overview</Text>
-                    <Text style={styles.overviewSub}>All invoices and active job listings</Text>
-                    <View style={styles.kpiGrid}>
-                      <View style={[styles.kpiCard, styles.kpiPaid]}>
-                        <Text style={styles.kpiLabel}>Total paid</Text>
-                        <Text style={[styles.kpiValue, styles.kpiValuePaid]}>
+                    <Text style={styles.overviewTitleCompany}>Budget overview</Text>
+                    <Text style={styles.overviewSubCompany}>All invoices and active job listings</Text>
+                    <View style={styles.kpiStackCompany}>
+                      <View style={[styles.kpiStatRow, styles.kpiStatRowCompany, styles.kpiRowAccentPaid]}>
+                        <View style={styles.kpiStatLeft}>
+                          <Text style={styles.kpiStatLabel}>Total paid</Text>
+                          <Text style={styles.kpiStatMeta}>
+                            {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length} invoices
+                          </Text>
+                        </View>
+                        <Text style={[styles.kpiStatValue, styles.kpiStatValuePaid]}>
                           {money(budgetOverview.paidInvoices, budgetOverview.currency)}
                         </Text>
-                        <Text style={styles.kpiMeta}>
-                          {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length} invoices
-                        </Text>
                       </View>
-                      <View style={[styles.kpiCard, styles.kpiPending]}>
-                        <Text style={styles.kpiLabel}>Pending</Text>
-                        <Text style={[styles.kpiValue, styles.kpiValuePending]}>
+                      <View style={[styles.kpiStatRow, styles.kpiStatRowCompany, styles.kpiRowAccentPending]}>
+                        <View style={styles.kpiStatLeft}>
+                          <Text style={styles.kpiStatLabel}>Pending</Text>
+                          <Text style={styles.kpiStatMeta}>
+                            {rows.filter((r) => String(r.status).toLowerCase() === 'pending').length} invoices
+                          </Text>
+                        </View>
+                        <Text style={[styles.kpiStatValue, styles.kpiStatValuePendingMuted]}>
                           {money(budgetOverview.pendingCosts, budgetOverview.currency)}
                         </Text>
-                        <Text style={styles.kpiMeta}>
-                          {rows.filter((r) => String(r.status).toLowerCase() === 'pending').length} invoices
-                        </Text>
                       </View>
-                      <View style={[styles.kpiCard, styles.kpiOverdue]}>
-                        <Text style={styles.kpiLabel}>Overdue</Text>
-                        <Text style={[styles.kpiValue, styles.kpiValueOverdue]}>
+                      <View style={[styles.kpiStatRow, styles.kpiStatRowCompany, styles.kpiRowAccentOverdue]}>
+                        <View style={styles.kpiStatLeft}>
+                          <Text style={styles.kpiStatLabel}>Overdue</Text>
+                          <Text style={styles.kpiStatMeta}>
+                            {rows.filter((r) => String(r.status).toLowerCase() === 'overdue').length} invoices
+                          </Text>
+                        </View>
+                        <Text style={[styles.kpiStatValue, styles.kpiStatValueOverdue]}>
                           {money(budgetOverview.overdueCosts, budgetOverview.currency)}
                         </Text>
-                        <Text style={styles.kpiMeta}>
-                          {rows.filter((r) => String(r.status).toLowerCase() === 'overdue').length} invoices
-                        </Text>
                       </View>
-                      <View style={[styles.kpiCard, styles.kpiActive]}>
-                        <Text style={styles.kpiLabel}>Est. active</Text>
-                        <Text style={[styles.kpiValue, styles.kpiValueActive]}>
+                      <View style={[styles.kpiStatRow, styles.kpiStatRowCompany, styles.kpiStatRowLast, styles.kpiRowAccentActive]}>
+                        <View style={styles.kpiStatLeft}>
+                          <Text style={styles.kpiStatLabel}>Est. active</Text>
+                          <Text style={styles.kpiStatMeta}>{budgetOverview.projects} open jobs/projects</Text>
+                        </View>
+                        <Text style={[styles.kpiStatValue, styles.kpiStatValueActive]}>
                           {money(budgetOverview.activeProjectCosts, budgetOverview.currency)}
                         </Text>
-                        <Text style={styles.kpiMeta}>{budgetOverview.projects} open jobs/projects</Text>
                       </View>
                     </View>
                     <View style={styles.legendBar} />
@@ -384,30 +392,41 @@ export default function InvoicesListScreen() {
                   </>
                 ) : (
                   <>
-                    <Text style={styles.overviewTitle}>Earnings overview</Text>
-                    <Text style={styles.overviewSub}>
+                    <Text style={styles.overviewTitleFreelancer}>Earnings overview</Text>
+                    <Text style={styles.overviewSubFreelancer}>
                       Year to date{budgetOverview.annualBudgetYear ? ` · ${budgetOverview.annualBudgetYear}` : ''}
                     </Text>
-                    <View style={styles.kpiGridFreelancer}>
-                      <View style={styles.kpiCardFreelancer}>
-                        <Text style={styles.kpiLabel}>Total earned</Text>
-                        <Text style={[styles.kpiValue, styles.kpiValuePending]}>
+                    <View style={styles.kpiStackFreelancer}>
+                      <View style={styles.kpiStatRow}>
+                        <View style={styles.kpiStatLeft}>
+                          <Text style={styles.kpiStatLabel}>Total earned</Text>
+                          <Text style={styles.kpiStatMeta}>
+                            {budgetOverview.annualBudgetYear ? `${budgetOverview.annualBudgetYear} YTD` : 'YTD'}
+                          </Text>
+                        </View>
+                        <Text style={[styles.kpiStatValue, styles.kpiStatValueEarned]}>
                           {money(budgetOverview.paidInvoices, budgetOverview.currency)}
                         </Text>
-                        <Text style={styles.kpiMeta}>
-                          {budgetOverview.annualBudgetYear ? `${budgetOverview.annualBudgetYear} YTD` : 'YTD'}
+                      </View>
+                      <View style={styles.kpiStatRow}>
+                        <View style={styles.kpiStatLeft}>
+                          <Text style={styles.kpiStatLabel}>Pending</Text>
+                          <Text style={styles.kpiStatMeta}>
+                            {rows.filter((r) => String(r.status).toLowerCase() === 'pending').length} invoices
+                          </Text>
+                        </View>
+                        <Text style={[styles.kpiStatValue, styles.kpiStatValuePendingMuted]}>
+                          {money(budgetOverview.pendingCosts, budgetOverview.currency)}
                         </Text>
                       </View>
-                      <View style={styles.kpiCardFreelancer}>
-                        <Text style={styles.kpiLabel}>Pending</Text>
-                        <Text style={styles.kpiValue}>{money(budgetOverview.pendingCosts, budgetOverview.currency)}</Text>
-                        <Text style={styles.kpiMeta}>
-                          {rows.filter((r) => String(r.status).toLowerCase() === 'pending').length} invoices
-                        </Text>
-                      </View>
-                      <View style={styles.kpiCardFreelancer}>
-                        <Text style={styles.kpiLabel}>Avg per project</Text>
-                        <Text style={styles.kpiValue}>
+                      <View style={[styles.kpiStatRow, styles.kpiStatRowLast]}>
+                        <View style={styles.kpiStatLeft}>
+                          <Text style={styles.kpiStatLabel}>Avg per project</Text>
+                          <Text style={styles.kpiStatMeta}>
+                            {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length} paid
+                          </Text>
+                        </View>
+                        <Text style={styles.kpiStatValue}>
                           {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length > 0
                             ? money(
                                 budgetOverview.paidInvoices /
@@ -416,23 +435,25 @@ export default function InvoicesListScreen() {
                               )
                             : '—'}
                         </Text>
-                        <Text style={styles.kpiMeta}>
-                          {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length} paid
-                        </Text>
                       </View>
                     </View>
                     <View style={styles.monthlyCard}>
                       <Text style={styles.monthlyTitle}>Monthly earnings (paid)</Text>
-                      <View style={styles.monthsRow}>
+                      <View style={styles.monthsGrid}>
                         {monthlyPaid.map((m) => (
-                          <View key={m.label} style={styles.monthCol}>
-                            <View style={styles.monthBar} />
+                          <View key={m.label} style={styles.monthCell}>
+                            <View
+                              style={[
+                                styles.monthBar,
+                                m.value > 0 && { backgroundColor: 'rgba(255,220,0,0.45)' },
+                              ]}
+                            />
                             <Text style={styles.monthLabel}>{m.label}</Text>
                           </View>
                         ))}
                       </View>
                     </View>
-                    <View style={styles.historyHeader}>
+                    <View style={styles.historyHeaderFreelancer}>
                       <Text style={styles.historyTitle}>Invoice history</Text>
                       <TouchableOpacity onPress={() => router.push('/(tabs)/invoices/new')}>
                         <Text style={styles.historyCta}>Send invoice (completed projects) →</Text>
@@ -574,86 +595,121 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.08)',
     backgroundColor: '#0f0f10',
   },
-  overviewTitle: {
+  overviewTitleCompany: {
     color: '#FFDC00',
-    fontSize: 26,
-    fontWeight: '900',
-    letterSpacing: 0.5,
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
     marginBottom: 4,
   },
-  overviewSub: { color: 'rgba(255,255,255,0.45)', fontSize: 14, marginBottom: 14 },
-  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
-  kpiGridFreelancer: { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  kpiCard: {
-    width: '48%',
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 12,
-    backgroundColor: '#121212',
-  },
-  kpiCardFreelancer: {
-    flex: 1,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    padding: 12,
-    backgroundColor: '#141416',
-  },
-  kpiPaid: { borderColor: 'rgba(0,230,120,0.35)' },
-  kpiPending: { borderColor: 'rgba(255,220,0,0.35)' },
-  kpiOverdue: { borderColor: 'rgba(255,90,90,0.35)' },
-  kpiActive: { borderColor: 'rgba(120,120,255,0.35)' },
-  kpiLabel: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    letterSpacing: 1.3,
+  overviewSubCompany: { color: 'rgba(255,255,255,0.42)', fontSize: 12, marginBottom: 12, lineHeight: 17 },
+  overviewTitleFreelancer: {
+    color: '#FFDC00',
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
-    marginBottom: 6,
+    marginBottom: 4,
   },
-  kpiValue: { fontSize: 27, fontWeight: '900', marginBottom: 4 },
-  kpiValuePaid: { color: '#00df6f' },
-  kpiValuePending: { color: '#FFDC00' },
-  kpiValueOverdue: { color: '#ff5a5a' },
-  kpiValueActive: { color: '#888bff' },
-  kpiMeta: { color: 'rgba(255,255,255,0.35)', fontSize: 12 },
+  overviewSubFreelancer: { color: 'rgba(255,255,255,0.42)', fontSize: 12, marginBottom: 12, lineHeight: 17 },
+  kpiStackCompany: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#121214',
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  kpiStackFreelancer: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#121214',
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  kpiStatRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  kpiStatRowCompany: { paddingVertical: 11 },
+  kpiStatRowLast: { borderBottomWidth: 0 },
+  kpiRowAccentPaid: { borderLeftWidth: 3, borderLeftColor: 'rgba(0,230,120,0.5)' },
+  kpiRowAccentPending: { borderLeftWidth: 3, borderLeftColor: 'rgba(255,220,0,0.45)' },
+  kpiRowAccentOverdue: { borderLeftWidth: 3, borderLeftColor: 'rgba(255,90,90,0.5)' },
+  kpiRowAccentActive: { borderLeftWidth: 3, borderLeftColor: 'rgba(120,120,255,0.45)' },
+  kpiStatLeft: { flex: 1, minWidth: 0 },
+  kpiStatLabel: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  },
+  kpiStatMeta: { color: 'rgba(255,255,255,0.32)', fontSize: 11, marginTop: 3 },
+  kpiStatValue: { fontSize: 17, fontWeight: '800', color: 'rgba(255,255,255,0.88)' },
+  kpiStatValueEarned: { color: '#00df6f' },
+  kpiStatValuePaid: { color: '#00df6f' },
+  kpiStatValuePendingMuted: { color: '#FFDC00' },
+  kpiStatValueOverdue: { color: '#ff6b6b' },
+  kpiStatValueActive: { color: '#9b9dff' },
   legendBar: { height: 14, borderRadius: 8, backgroundColor: '#1a1a1b', marginBottom: 10 },
   legendRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 12 },
-  legendItem: { color: 'rgba(255,255,255,0.5)', fontSize: 12 },
+  legendItem: { color: 'rgba(255,255,255,0.42)', fontSize: 10 },
   monthlyCard: {
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: '#141416',
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#121214',
     padding: 12,
     marginBottom: 12,
   },
   monthlyTitle: {
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 12,
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 10,
+    fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 1.3,
+    letterSpacing: 1.1,
     marginBottom: 10,
   },
-  monthsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 4 },
-  monthCol: { alignItems: 'center', gap: 6 },
-  monthBar: { width: 22, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.1)' },
-  monthLabel: { color: 'rgba(255,255,255,0.25)', fontSize: 10 },
-  historyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  historyTitle: {
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
+  monthsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 10,
+    columnGap: 6,
+    justifyContent: 'space-between',
   },
-  historyCta: { color: '#d8bf46', fontSize: 13, fontWeight: '600' },
+  monthCell: { width: '23%', maxWidth: 72, alignItems: 'center', gap: 5 },
+  monthBar: { width: '100%', maxWidth: 28, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.08)' },
+  monthLabel: { color: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: '700' },
+  historyHeaderFreelancer: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingTop: 4,
+  },
+  historyTitle: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+  },
+  historyCta: { color: '#FFDC00', fontSize: 12, fontWeight: '600' },
   yearBudgetWrap: {
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.08)',
     paddingTop: 12,
   },
   overviewLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 12, marginBottom: 4 },
-  yearBudgetValue: { fontSize: 20, fontWeight: '900', color: '#ffffff', marginBottom: 6 },
+  yearBudgetValue: { fontSize: 16, fontWeight: '800', color: '#ffffff', marginBottom: 6 },
   overviewMeta: { color: 'rgba(255,255,255,0.55)', fontSize: 12 },
   errorBox: {
     marginHorizontal: 20,

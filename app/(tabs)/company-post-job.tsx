@@ -132,7 +132,10 @@ export default function CompanyPostJobScreen() {
         </TouchableOpacity>
         <View style={styles.center}>
           <Text style={styles.blockTitle}>Companies only</Text>
-          <Text style={styles.blockSub}>Only company accounts can post projects.</Text>
+          <Text style={styles.blockSub}>
+            The public job board is for company accounts. Freelancers create private projects (Dashboard → Private
+            projects) and invite others there — those listings never appear in Jobs.
+          </Text>
         </View>
       </SafeAreaView>
     )

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Alert,
   Modal,
   Linking,
+  Image,
 } from 'react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { Trash2 } from 'lucide-react-native'
@@ -53,7 +54,12 @@ type CrewRow =
       phone: string | null
     }
 
-type Props = { projectId: string; canManage: boolean; workspaceOnly?: boolean }
+type Props = {
+  projectId: string
+  canManage: boolean
+  workspaceOnly?: boolean
+  proFeaturesEnabled?: boolean
+}
 
 const roleLabel = (r: string) => {
   if (r === 'company') return 'Client'
@@ -61,10 +67,31 @@ const roleLabel = (r: string) => {
   return 'Crew'
 }
 
-export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: Props) {
+function crewAvatarInitial(name: string | null | undefined) {
+  const t = (name ?? '').trim()
+  return t ? t.charAt(0).toUpperCase() : '?'
+}
+
+function crewAvatarUri(raw: string | null | undefined): string | null {
+  const u = (raw ?? '').trim()
+  return u && /^https?:\/\//i.test(u) ? u : null
+}
+
+export function ProjectCrewTab({
+  projectId,
+  canManage,
+  workspaceOnly = false,
+  proFeaturesEnabled = true,
+}: Props) {
   const [rows, setRows] = useState<CrewRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [email, setEmail] = useState('')
+  const [crewSearch, setCrewSearch] = useState('')
+  const [crewSearchResults, setCrewSearchResults] = useState<
+    { id: string; name: string | null; avatar_url: string | null }[]
+  >([])
+  const [crewSearchLoading, setCrewSearchLoading] = useState(false)
+  const [crewDropdownOpen, setCrewDropdownOpen] = useState(false)
+  const crewBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [busy, setBusy] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [manualName, setManualName] = useState('')
@@ -146,20 +173,74 @@ export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: 
     load()
   }, [load])
 
-  const addByEmail = async () => {
-    const e = email.trim().toLowerCase()
-    if (!e || busy) return
+  useEffect(() => {
+    if (!proFeaturesEnabled || !canManage) {
+      setCrewSearchResults([])
+      return
+    }
+    const q = crewSearch.trim()
+    if (q.length < 2) {
+      setCrewSearchResults([])
+      setCrewSearchLoading(false)
+      return
+    }
+    setCrewSearchLoading(true)
+    const t = setTimeout(() => {
+      void (async () => {
+        const { data, error } = await supabase.rpc('search_freelancers_for_project_crew', {
+          p_project_id: projectId,
+          p_query: q,
+        })
+        setCrewSearchLoading(false)
+        if (error) {
+          setCrewSearchResults([])
+          return
+        }
+        const list = (data ?? []) as { id: string; name: string | null; avatar_url: string | null }[]
+        setCrewSearchResults(
+          list.map((r) => ({
+            id: r.id,
+            name: r.name,
+            avatar_url: r.avatar_url,
+          }))
+        )
+      })()
+    }, 320)
+    return () => clearTimeout(t)
+  }, [crewSearch, projectId, proFeaturesEnabled, canManage])
+
+  const clearCrewBlurTimer = () => {
+    if (crewBlurTimerRef.current) {
+      clearTimeout(crewBlurTimerRef.current)
+      crewBlurTimerRef.current = null
+    }
+  }
+
+  const scheduleCloseCrewDropdown = () => {
+    clearCrewBlurTimer()
+    crewBlurTimerRef.current = setTimeout(() => setCrewDropdownOpen(false), 220)
+  }
+
+  const addByProfileId = async (profileId: string) => {
+    if (!proFeaturesEnabled) {
+      Alert.alert('Crew invite', 'Only available for Pro users.')
+      return
+    }
+    if (busy) return
+    clearCrewBlurTimer()
+    setCrewDropdownOpen(false)
+    setCrewSearch('')
+    setCrewSearchResults([])
     setBusy(true)
-    const { error } = await supabase.rpc('add_project_crew_by_email', {
+    const { error } = await supabase.rpc('add_project_crew_by_profile_id', {
       p_project_id: projectId,
-      p_email: e,
+      p_profile_id: profileId,
     })
     setBusy(false)
     if (error) {
       Alert.alert('Could not add', error.message)
       return
     }
-    setEmail('')
     load()
     Alert.alert('Added', 'They now have access to this project workspace.')
   }
@@ -324,22 +405,87 @@ export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: 
             </>
           ) : (
             <>
-              <Text style={styles.label}>Invite by email</Text>
-              <Text style={styles.hint}>They must already have a Crea account with this email.</Text>
-              <View style={styles.addRow}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="name@studio.com"
-                  placeholderTextColor="rgba(255,255,255,0.25)"
-                  value={email}
-                  onChangeText={setEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-                <TouchableOpacity style={[styles.addBtn, busy && styles.dim]} onPress={addByEmail} disabled={busy}>
-                  <Text style={styles.addBtnText}>Add</Text>
-                </TouchableOpacity>
+              <Text style={styles.label}>Add crew</Text>
+              <Text style={styles.hint}>
+                Search freelancers on Crea by name, or add someone without an account (name, email, phone for your
+                records).
+              </Text>
+              {!proFeaturesEnabled ? (
+                <Text style={styles.proHint}>Only available for Pro users.</Text>
+              ) : null}
+              <View style={[styles.searchBlock, crewDropdownOpen && crewSearch.trim().length >= 2 && styles.searchBlockOpen]}>
+                <View style={styles.inputWithSpinner}>
+                  <TextInput
+                    style={styles.crewSearchInput}
+                    placeholder="Type a name…"
+                    placeholderTextColor="rgba(255,255,255,0.25)"
+                    value={crewSearch}
+                    onChangeText={setCrewSearch}
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    editable={proFeaturesEnabled}
+                    onFocus={() => {
+                      clearCrewBlurTimer()
+                      setCrewDropdownOpen(true)
+                    }}
+                    onBlur={scheduleCloseCrewDropdown}
+                  />
+                  {crewSearchLoading && proFeaturesEnabled ? (
+                    <ActivityIndicator style={styles.inputSpinner} color="#FFDC00" size="small" />
+                  ) : null}
+                </View>
+                {proFeaturesEnabled && crewDropdownOpen && crewSearch.trim().length >= 2 ? (
+                  <View style={styles.dropdown} pointerEvents="box-none">
+                    {crewSearchResults.length === 0 && !crewSearchLoading ? (
+                      <Text style={styles.dropdownEmpty}>No matches</Text>
+                    ) : (
+                      <ScrollView
+                        style={styles.dropdownScroll}
+                        keyboardShouldPersistTaps="handled"
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator={false}
+                      >
+                        {crewSearchResults.map((item) => {
+                          const uri = crewAvatarUri(item.avatar_url)
+                          const label = (item.name ?? '').trim() || 'Freelancer'
+                          return (
+                            <TouchableOpacity
+                              key={item.id}
+                              style={styles.dropdownRow}
+                              activeOpacity={0.75}
+                              onPressIn={clearCrewBlurTimer}
+                              onPress={() => void addByProfileId(item.id)}
+                            >
+                              <View style={styles.dropdownAvatarWrap}>
+                                {uri ? (
+                                  <Image source={{ uri }} style={styles.dropdownAvatar} />
+                                ) : (
+                                  <View style={styles.dropdownAvatarPh}>
+                                    <Text style={styles.dropdownAvatarLetter}>{crewAvatarInitial(item.name)}</Text>
+                                  </View>
+                                )}
+                              </View>
+                              <Text style={styles.dropdownName} numberOfLines={1}>
+                                {label}
+                              </Text>
+                            </TouchableOpacity>
+                          )
+                        })}
+                      </ScrollView>
+                    )}
+                  </View>
+                ) : null}
               </View>
+              <TouchableOpacity
+                style={[styles.addExternalBtn, (!proFeaturesEnabled || busy) && styles.dim]}
+                onPress={() => {
+                  if (!proFeaturesEnabled) return
+                  setModalOpen(true)
+                }}
+                disabled={!proFeaturesEnabled || busy}
+              >
+                <Text style={styles.addExternalBtnText}>Add crew without a Crea account</Text>
+              </TouchableOpacity>
             </>
           )}
         </>
@@ -390,8 +536,11 @@ export function ProjectCrewTab({ projectId, canManage, workspaceOnly = false }: 
       <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Add crew</Text>
-            <Text style={styles.modalHint}>Add a non-CREA crew contact to this project.</Text>
+            <Text style={styles.modalTitle}>Add crew (no Crea account)</Text>
+            <Text style={styles.modalHint}>
+              For people not on Crea yet. Name and role are shown on the crew list; email and phone are stored so you can
+              reach them outside the app.
+            </Text>
             <TextInput
               style={styles.modalInput}
               placeholder="Name"
@@ -516,7 +665,67 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   hint: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginBottom: 12 },
-  addRow: { flexDirection: 'row', gap: 8, marginBottom: 24 },
+  proHint: { fontSize: 12, color: '#FFDC00', marginBottom: 10, fontWeight: '700' },
+  searchBlock: { marginBottom: 12, position: 'relative', zIndex: 20 },
+  searchBlockOpen: { marginBottom: 8 },
+  inputWithSpinner: { position: 'relative', width: '100%' },
+  crewSearchInput: {
+    width: '100%',
+    minHeight: 48,
+    backgroundColor: '#111',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    paddingRight: 40,
+    color: '#fff',
+    fontSize: 15,
+  },
+  inputSpinner: { position: 'absolute', right: 14, top: '50%', marginTop: -10 },
+  dropdown: {
+    marginTop: 6,
+    maxHeight: 220,
+    backgroundColor: '#111',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+    elevation: 10,
+  },
+  dropdownScroll: { maxHeight: 220 },
+  dropdownEmpty: { paddingVertical: 14, paddingHorizontal: 12, fontSize: 13, color: 'rgba(255,255,255,0.45)' },
+  dropdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  dropdownAvatarWrap: { width: 36, height: 36 },
+  dropdownAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#222' },
+  dropdownAvatarPh: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropdownAvatarLetter: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  dropdownName: { flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' },
+  addExternalBtn: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginBottom: 24,
+  },
+  addExternalBtnText: { color: 'rgba(255,255,255,0.85)', fontWeight: '700', fontSize: 14 },
   input: {
     flex: 1,
     backgroundColor: '#111',

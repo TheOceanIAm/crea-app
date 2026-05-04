@@ -37,7 +37,7 @@ import {
   normalizeExternalUrl,
   vimeoUrl,
 } from '@/lib/profilePublicLinks'
-import { isCeoProfile, isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
+import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
 import { profileShareUrl } from '@/lib/shareLinks'
 import { supabase } from '@/lib/supabase'
@@ -171,7 +171,9 @@ export function FreelancerPublicProfileContent({
       const { data: p } = await supabase.from('profiles').select('role').eq('id', authUserId).maybeSingle()
       if (cancelled) return
       const role = resolveAppRole(p?.role, user)
-      setViewerIsCompany(isCompanyProfile(role))
+      setViewerIsCompany(
+        Boolean(user && (isCompanyProfile(role) || isFreelancerProfile(role)) && !isCeoProfile(role))
+      )
       setViewerIsCeo(isCeoProfile(role))
     })()
     return () => {

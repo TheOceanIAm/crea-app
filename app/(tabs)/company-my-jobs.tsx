@@ -115,7 +115,7 @@ export default function CompanyMyJobsScreen() {
         </TouchableOpacity>
         <View style={styles.center}>
           <Text style={styles.blockTitle}>Companies only</Text>
-          <Text style={styles.blockSub}>Only company accounts can manage project listings.</Text>
+          <Text style={styles.blockSub}>Only company accounts can manage public project listings.</Text>
         </View>
       </SafeAreaView>
     )

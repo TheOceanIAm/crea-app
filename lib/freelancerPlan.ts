@@ -21,3 +21,12 @@ export function resolveFreelancerPlanFromUser(user: User | null | undefined): Fr
 export function isFreelancerWorkspaceOnlyPlan(plan: FreelancerPlan): boolean {
   return plan === 'workspace'
 }
+
+export function isFreelancerStarterPlan(plan: FreelancerPlan): boolean {
+  return plan === 'starter'
+}
+
+/** Talent pool browse + favorites: freelancers need Pro or Premium (not Starter / Workspace). */
+export function isFreelancerTalentPoolPlan(plan: FreelancerPlan): boolean {
+  return plan === 'pro' || plan === 'premium'
+}

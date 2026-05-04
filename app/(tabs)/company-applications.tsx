@@ -138,7 +138,7 @@ export default function CompanyApplicationsScreen() {
         </TouchableOpacity>
         <View style={styles.center}>
           <Text style={styles.blockTitle}>Companies only</Text>
-          <Text style={styles.blockSub}>Only company accounts can review applications.</Text>
+          <Text style={styles.blockSub}>Only company accounts can review job applications.</Text>
         </View>
       </SafeAreaView>
     )

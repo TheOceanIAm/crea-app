@@ -5,10 +5,10 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native'
-import { useRouter } from 'expo-router'
 import { X } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -35,11 +35,12 @@ export function InviteFreelancerDateModal({
   selectedIso,
   onInviteSent,
 }: Props) {
-  const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [projects, setProjects] = useState<ProjectRow[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [newProjectTitle, setNewProjectTitle] = useState('')
+  const [creatingProject, setCreatingProject] = useState(false)
 
   const dateLabel =
     selectedIso != null
@@ -79,6 +80,46 @@ export function InviteFreelancerDateModal({
     if (!visible || !selectedIso) return
     void loadProjects()
   }, [visible, selectedIso, loadProjects])
+
+  useEffect(() => {
+    if (!visible) {
+      setNewProjectTitle('')
+      setCreatingProject(false)
+    }
+  }, [visible])
+
+  const createPrivateProject = async (): Promise<ProjectRow | null> => {
+    if (creatingProject || companyUserId === freelancerId) return null
+    const t =
+      newProjectTitle.trim() ||
+      `Collaboration — ${freelancerName.trim() || 'freelancer'}`
+    setCreatingProject(true)
+    setLoadError(null)
+    const { data: created, error } = await supabase
+      .from('projects')
+      .insert({
+        company_id: companyUserId,
+        freelancer_id: freelancerId,
+        title: t,
+        brief_ai_outputs: {},
+        budget_type: 'negotiable',
+        location: 'Remote',
+      })
+      .select('id, title')
+      .single()
+    setCreatingProject(false)
+    if (error || !created?.id) {
+      setLoadError(error?.message ?? 'Could not create project')
+      return null
+    }
+    setNewProjectTitle('')
+    const row: ProjectRow = {
+      id: String(created.id),
+      title: String(created.title ?? t).trim() || t,
+    }
+    setProjects([row])
+    return row
+  }
 
   const pickProject = async (p: ProjectRow) => {
     if (!selectedIso || sending) return
@@ -123,17 +164,31 @@ export function InviteFreelancerDateModal({
               {projects.length === 0 ? (
                 <View style={styles.emptyBox}>
                   <Text style={styles.emptyText}>
-                    No shared project yet. Create a job or workspace with this freelancer first, then you can invite
-                    them from the calendar.
+                    No shared private project yet. Create one below — it will not appear on the public job board — and
+                    we will send this date invite right away.
                   </Text>
+                  <TextInput
+                    style={styles.draftInput}
+                    value={newProjectTitle}
+                    onChangeText={setNewProjectTitle}
+                    placeholder="Project name (optional)"
+                    placeholderTextColor="rgba(255,255,255,0.28)"
+                  />
                   <TouchableOpacity
-                    style={styles.secondaryBtn}
-                    onPress={() => {
-                      onClose()
-                      router.push('/(tabs)/company-post-job')
-                    }}
+                    style={[styles.secondaryBtn, (creatingProject || sending) && styles.secondaryBtnDim]}
+                    onPress={() =>
+                      void (async () => {
+                        const row = await createPrivateProject()
+                        if (row) await pickProject(row)
+                      })()
+                    }
+                    disabled={creatingProject || sending}
                   >
-                    <Text style={styles.secondaryBtnText}>Post a job</Text>
+                    {creatingProject || sending ? (
+                      <ActivityIndicator color="#0a0a0a" />
+                    ) : (
+                      <Text style={styles.secondaryBtnText}>Create & send invite</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               ) : (
@@ -211,15 +266,29 @@ const styles = StyleSheet.create({
   rowChev: { fontSize: 16, color: '#FFDC00', fontWeight: '700' },
   emptyBox: { paddingVertical: 8 },
   emptyText: { fontSize: 13, color: 'rgba(255,255,255,0.45)', lineHeight: 19, marginBottom: 16 },
+  draftInput: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#fff',
+    marginBottom: 12,
+    backgroundColor: '#0f0f0f',
+  },
   secondaryBtn: {
-    alignSelf: 'flex-start',
-    paddingVertical: 10,
+    alignSelf: 'stretch',
+    paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,220,0,0.4)',
+    backgroundColor: '#FFDC00',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
   },
-  secondaryBtnText: { fontSize: 14, fontWeight: '700', color: '#FFDC00' },
+  secondaryBtnDim: { opacity: 0.55 },
+  secondaryBtnText: { fontSize: 14, fontWeight: '800', color: '#0a0a0a' },
   err: { marginTop: 10, fontSize: 12, color: 'rgba(248,113,113,0.95)' },
   sendingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
   sendingText: { fontSize: 13, color: 'rgba(255,255,255,0.5)' },

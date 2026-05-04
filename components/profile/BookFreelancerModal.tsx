@@ -13,7 +13,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
-import { useRouter } from 'expo-router'
 import { ChevronDown, X } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -58,7 +57,6 @@ export function BookFreelancerModal({
   selectedIsos,
   onInviteSent,
 }: Props) {
-  const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [projects, setProjects] = useState<ProjectRow[]>([])
@@ -66,6 +64,8 @@ export function BookFreelancerModal({
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const [selectedProject, setSelectedProject] = useState<ProjectRow | null>(null)
   const [message, setMessage] = useState('')
+  const [newProjectTitle, setNewProjectTitle] = useState('')
+  const [creatingProject, setCreatingProject] = useState(false)
 
   const sorted = useMemo(() => sortIsoDates(selectedIsos), [selectedIsos])
   const fromIso = sorted[0] ?? ''
@@ -111,10 +111,51 @@ export function BookFreelancerModal({
     if (!visible) {
       setMessage('')
       setProjectPickerOpen(false)
+      setNewProjectTitle('')
+      setCreatingProject(false)
       return
     }
     void loadProjects()
   }, [visible, loadProjects])
+
+  const onCreatePrivateProject = useCallback(async () => {
+    if (creatingProject || companyUserId === freelancerId) return
+    const t =
+      newProjectTitle.trim() ||
+      `Collaboration — ${freelancerName.trim() || 'freelancer'}`
+    setCreatingProject(true)
+    setLoadError(null)
+    const { data: created, error } = await supabase
+      .from('projects')
+      .insert({
+        company_id: companyUserId,
+        freelancer_id: freelancerId,
+        title: t,
+        brief_ai_outputs: {},
+        budget_type: 'negotiable',
+        location: 'Remote',
+      })
+      .select('id, title')
+      .single()
+    setCreatingProject(false)
+    if (error || !created?.id) {
+      setLoadError(error?.message ?? 'Could not create project')
+      return
+    }
+    setNewProjectTitle('')
+    await loadProjects()
+    setSelectedProject({
+      id: String(created.id),
+      title: String(created.title ?? t).trim() || t,
+    })
+  }, [
+    creatingProject,
+    companyUserId,
+    freelancerId,
+    freelancerName,
+    newProjectTitle,
+    loadProjects,
+  ])
 
   const onSend = async () => {
     if (!selectedProject || sending || sorted.length === 0) return
@@ -203,16 +244,25 @@ export function BookFreelancerModal({
           ) : projects.length === 0 ? (
             <View style={styles.emptyProj}>
               <Text style={styles.emptyProjText}>
-                No shared workspace yet. Create a project with this freelancer first.
+                No shared private project yet. Create one here — it will not appear on the public job board.
               </Text>
+              <TextInput
+                style={styles.draftTitleInput}
+                value={newProjectTitle}
+                onChangeText={setNewProjectTitle}
+                placeholder="Project name (optional)"
+                placeholderTextColor="rgba(255,255,255,0.28)"
+              />
               <TouchableOpacity
-                style={styles.linkBtn}
-                onPress={() => {
-                  onClose()
-                  router.push('/(tabs)/company-post-job')
-                }}
+                style={[styles.linkBtn, creatingProject && styles.linkBtnDim]}
+                onPress={() => void onCreatePrivateProject()}
+                disabled={creatingProject}
               >
-                <Text style={styles.linkBtnText}>Post a job</Text>
+                {creatingProject ? (
+                  <ActivityIndicator color="#0a0a0a" />
+                ) : (
+                  <Text style={styles.linkBtnText}>Create private project</Text>
+                )}
               </TouchableOpacity>
             </View>
           ) : (
@@ -445,6 +495,29 @@ const styles = StyleSheet.create({
   loadingRow: { paddingVertical: 16, alignItems: 'center', marginBottom: 12 },
   emptyProj: { marginBottom: 16 },
   emptyProjText: { fontSize: 13, color: 'rgba(255,255,255,0.42)', lineHeight: 19, marginBottom: 12 },
-  linkBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,220,0,0.45)' },
-  linkBtnText: { fontSize: 13, fontWeight: '700', color: '#FFDC00' },
+  linkBtn: {
+    alignSelf: 'stretch',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#FFDC00',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+  },
+  linkBtnDim: { opacity: 0.55 },
+  linkBtnText: { fontSize: 13, fontWeight: '800', color: '#0a0a0a' },
+  draftTitleInput: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#fff',
+    marginBottom: 12,
+    backgroundColor: '#0f0f0f',
+  },
 })
