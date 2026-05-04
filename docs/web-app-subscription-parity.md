@@ -42,19 +42,19 @@ Diese Datei ist die **Single Source of Truth** für Marketing, Website und App-K
 
 ## 4. Sun Planner & Weather (Production)
 
-**Freelancer:**
+**Freelancer — Produktregeln (Marketing / Pricing):**
 
-| Kontext | Workspace-Abo | Starter / Pro / Premium |
-|---------|-----------------|-------------------------|
-| Projekt hat **`job_id`** (Firma/öffentlicher Job-Pfad) | **Immer voll** Sun + Weather | **Immer voll** |
-| Privates Projekt (**kein** `job_id`) | **14-Tage-Trial**, danach gesperrt + Hinweis | **Immer voll** |
+| Plan | Weather (Production) | Sun Planner (Production) |
+|------|------------------------|---------------------------|
+| **Workspace** | 14 Tage Test, danach gesperrt — Workspace nur für **private Organisation**, kein Talent Pool / Jobs / Marktplatz | 14 Tage Test, danach gesperrt — gleiches Fenster wie Weather |
+| **Starter** | **Vollzugriff** | **14-Tage-Test**; dauerhaft voll mit **Pro / Premium** |
+| **Pro / Premium** | Vollzugriff | Vollzugriff |
 
 **Firma (`role === company`):** Sun über **`profiles.subscription_tier`** (normalisiert zu Studio/Agency/…); siehe `app/project/[id].tsx`.
 
-**App:** `lib/sunPlannerWorkspaceTrial.ts`, `freelancerSunPlannerAllowed`, Production Tab gated über `canUseSunPlanner`; Weather **gleiche** Freigabe wie Sun.
+**Hinweis Technik:** Legacy-Code kann Abweichungen nutzen (z. B. `job_id`); Pricing und Kommunikation folgen der Tabelle oben.
 
-**Kommunikation Website:**  
-„Workspace: Sun & Weather auf **privaten** Projekten nur **14 Tage testen**; an **Firmen-Jobs** immer nutzbar.“
+**Kommunikation Website (EN):** Workspace = private-only; Sun & Weather in Production = **14-day trial then locked**. Starter = **full Weather**; Sun Planner = **14-day trial**, full on **Pro/Premium**.
 
 ---
 
@@ -85,7 +85,8 @@ Nutze **kurze Notizen** unter gesperrten Elementen:
 | Private Projekte als Starter | Private Lead-Projekte ab **Pro** oder **Workspace**. Im Web unter Abo wählen. |
 | Crew Pro-Features (Starter) | Nur mit **Pro** (Crew per Namen, externe Kontakte). |
 | Public Freelancer Calendar (Starter) | Nur mit **Pro**; Shoot-Tage erscheinen im öffentlichen Profil. |
-| Sun/Weather nach Trial (Workspace, privat) | 14-Tage-Test auf **privaten** Projekten beendet. **Pro** buchen oder Projekt mit **Firmen-Job** nutzen. |
+| Sun/Weather nach Trial (Workspace) | 14-Tage-Test für Sun **und** Weather in Production beendet — erneut nutzbar mit Upgrade (z. B. Pro/Premium). Kein paralleler „Firmen-Job“-Pfad im Workspace-Marketing. |
+| Sun Planner nach Trial (Starter) | Dauerhaft voll mit **Pro / Premium**; Weather bleibt bei Starter voll. |
 
 EN spiegeln: „Available from Pro“, „Pro or Workspace plan“, „14-day trial on private projects“.
 
