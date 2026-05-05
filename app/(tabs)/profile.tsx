@@ -1508,8 +1508,8 @@ export default function ProfileScreen() {
               <View style={styles.sectionCard}>
                 <Text style={styles.cardTitle}>Plan &amp; billing</Text>
                 <Text style={styles.cardSubtitle}>
-                  Live billing via Stripe later. “Manage subscription” will open payment methods, plan changes &amp;
-                  cancellation.
+                  Subscriptions are managed on creaservices.de. After you subscribe there, you can update payment details
+                  or change plans from Plan &amp; billing.
                 </Text>
 
                 <View style={styles.currentPlanBox}>
@@ -1551,7 +1551,7 @@ export default function ProfileScreen() {
                 </View>
 
                 <Text style={styles.stripeHint}>
-                  No Stripe customer yet — choose a plan below or compare pricing.
+                  No paid subscription yet — compare plans below or open the full comparison on the website.
                 </Text>
                 <TouchableOpacity
                   style={styles.secondaryBtn}
@@ -1570,8 +1570,8 @@ export default function ProfileScreen() {
                       current={companyPlanTier === 'studio'}
                       onPress={() =>
                         Alert.alert(
-                          'Stripe',
-                          'Checkout for Studio will connect to Stripe company price IDs (env).'
+                          'Subscribe on the web',
+                          'After your trial, complete checkout on creaservices.de under Settings → Plan & billing.'
                         )
                       }
                     />
@@ -1583,8 +1583,8 @@ export default function ProfileScreen() {
                       current={companyPlanTier === 'agency'}
                       onPress={() =>
                         Alert.alert(
-                          'Stripe',
-                          'Checkout for Agency will connect to Stripe company price IDs (env).'
+                          'Subscribe on the web',
+                          'After your trial, complete checkout on creaservices.de under Settings → Plan & billing.'
                         )
                       }
                     />
@@ -1633,8 +1633,8 @@ export default function ProfileScreen() {
                       current={subscriptionTier === 'starter'}
                       onPress={() =>
                         Alert.alert(
-                          'Stripe',
-                          'Checkout will connect to Stripe price IDs (env). Until then, the trial plan stays active.'
+                          'Subscribe on the web',
+                          'After your trial ends, you can subscribe on creaservices.de — Settings → Plan & billing.'
                         )
                       }
                     />
@@ -1646,8 +1646,8 @@ export default function ProfileScreen() {
                       current={subscriptionTier === 'pro'}
                       onPress={() =>
                         Alert.alert(
-                          'Stripe',
-                          'Checkout will connect to Stripe price IDs (env). Until then, the trial plan stays active.'
+                          'Subscribe on the web',
+                          'After your trial ends, you can subscribe on creaservices.de — Settings → Plan & billing.'
                         )
                       }
                     />
@@ -1664,9 +1664,7 @@ export default function ProfileScreen() {
                 )}
 
                 <Text style={styles.stripeFoot}>
-                  {company
-                    ? 'Change plans with an active subscription in the Stripe customer portal. Add Studio and Agency company price IDs in env for checkout.'
-                    : 'Change plans with an active subscription in the Stripe customer portal. Add Starter and Pro price IDs in env for checkout.'}
+                  With an active subscription, change plans or payment details under Plan &amp; billing on creaservices.de.
                 </Text>
               </View>
             </>

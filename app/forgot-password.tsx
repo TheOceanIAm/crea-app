@@ -11,11 +11,11 @@ import {
   Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import * as Linking from 'expo-linking'
 import { router } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { getAuthRedirectUrl } from '@/lib/authDeepLink'
 
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('')
@@ -28,7 +28,7 @@ export default function ForgotPasswordScreen() {
       return
     }
     setLoading(true)
-    const redirectTo = Linking.createURL('auth/reset')
+    const redirectTo = getAuthRedirectUrl('reset')
     const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo })
     setLoading(false)
     if (error) {

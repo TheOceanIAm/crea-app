@@ -101,6 +101,7 @@ export function AvailabilityMonthPreview({
   const visitedRef = useRef(new Set<string>())
   const dragActiveRef = useRef(false)
   const suppressTapRef = useRef(false)
+  const isPaintingRef = useRef(false)
 
   useEffect(() => {
     setMetrics(null)
@@ -127,18 +128,28 @@ export function AvailabilityMonthPreview({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponder: () =>
+          Boolean(interactive && onCommitBookingSelection),
+        onStartShouldSetPanResponderCapture: () =>
+          Boolean(interactive && onCommitBookingSelection),
         onMoveShouldSetPanResponder: (_, gs) => {
           if (!interactive || !onCommitBookingSelection) return false
           const ax = Math.abs(gs.dx)
           const ay = Math.abs(gs.dy)
           if (ax < PAINT_MOVE_SLOP && ay < PAINT_MOVE_SLOP) return false
-          if (ay > ax && ay >= PAINT_MOVE_SLOP) return false
           return true
         },
-        onPanResponderTerminationRequest: () => true,
+        onMoveShouldSetPanResponderCapture: (_, gs) => {
+          if (!interactive || !onCommitBookingSelection) return false
+          const ax = Math.abs(gs.dx)
+          const ay = Math.abs(gs.dy)
+          return ax >= PAINT_MOVE_SLOP || ay >= PAINT_MOVE_SLOP
+        },
+        // Keep drag ownership while painting; avoid losing the gesture to parent scrollviews.
+        onPanResponderTerminationRequest: () => !isPaintingRef.current,
         onPanResponderGrant: (evt) => {
           if (!metrics || !interactive || !onCommitBookingSelection) return
+          isPaintingRef.current = true
           visitedRef.current.clear()
           dragActiveRef.current = false
           const { locationX, locationY } = evt.nativeEvent
@@ -154,6 +165,7 @@ export function AvailabilityMonthPreview({
         },
         onPanResponderRelease: () => {
           if (!interactive || !onCommitBookingSelection) return
+          isPaintingRef.current = false
           const set = new Set(visitedRef.current)
           visitedRef.current.clear()
           setDragHighlight(new Set())
@@ -169,6 +181,7 @@ export function AvailabilityMonthPreview({
           dragActiveRef.current = false
         },
         onPanResponderTerminate: () => {
+          isPaintingRef.current = false
           visitedRef.current.clear()
           setDragHighlight(new Set())
           dragActiveRef.current = false

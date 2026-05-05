@@ -10,10 +10,10 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native'
-import * as Linking from 'expo-linking'
 import { router } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
+import { getAuthRedirectUrl } from '@/lib/authDeepLink'
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('')
@@ -21,11 +21,12 @@ export default function RegisterScreen() {
   const [loading, setLoading] = useState(false)
 
   const handleRegister = async () => {
-    if (!email || !password) return
+    const normalizedEmail = email.trim().toLowerCase()
+    if (!normalizedEmail || !password) return
     setLoading(true)
-    const emailRedirectTo = Linking.createURL('auth/callback')
+    const emailRedirectTo = getAuthRedirectUrl('callback')
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: normalizedEmail,
       password,
       options: { emailRedirectTo },
     })

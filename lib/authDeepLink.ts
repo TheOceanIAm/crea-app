@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import * as Linking from 'expo-linking'
 
 export type AuthDeepLinkDestination = 'home' | 'reset-password'
 
@@ -6,6 +7,11 @@ export type AuthDeepLinkResult =
   | { handled: false }
   | { handled: true; ok: true; destination: AuthDeepLinkDestination }
   | { handled: true; ok: false; message: string }
+
+export function getAuthRedirectUrl(kind: 'callback' | 'reset'): string {
+  // Force the app scheme so auth links generated in native builds stay stable.
+  return Linking.createURL(`auth/${kind}`, { scheme: 'crea' })
+}
 
 function inferPasswordRecovery(
   fullUrl: string,

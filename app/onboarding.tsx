@@ -21,13 +21,28 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 import { pickAndUploadAvatarOnly } from '@/lib/uploadProfileAvatar'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
+import { postTrialPlan } from '@/lib/trialPlanApi'
 
 type RoleChoice = 'freelancer' | 'company'
+
+type TrialFreelancerPlanKey = 'workspace' | 'starter' | 'pro'
+type TrialCompanyPlanKey = 'studio' | 'agency'
+
+const FREELANCER_TRIAL_OPTIONS: { key: TrialFreelancerPlanKey; title: string; desc: string }[] = [
+  { key: 'workspace', title: 'Workspace', desc: 'Solo projects — not listed in the pool.' },
+  { key: 'starter', title: 'Starter', desc: 'Core marketplace — limited postings.' },
+  { key: 'pro', title: 'Pro', desc: 'Full marketplace & collaboration.' },
+]
+
+const COMPANY_TRIAL_OPTIONS: { key: TrialCompanyPlanKey; title: string; desc: string }[] = [
+  { key: 'studio', title: 'Studio', desc: 'Smaller hiring footprint.' },
+  { key: 'agency', title: 'Agency', desc: 'More listings & pool depth.' },
+]
 
 export default function OnboardingScreen() {
   const [checking, setChecking] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
-  const [step, setStep] = useState<0 | 1 | 2>(0)
+  const [step, setStep] = useState<0 | 1 | 2 | 3>(0)
   const [roleChoice, setRoleChoice] = useState<RoleChoice | null>(null)
   const [displayName, setDisplayName] = useState('')
   const [headline, setHeadline] = useState('')
@@ -35,6 +50,8 @@ export default function OnboardingScreen() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [termsAccepted, setTermsAccepted] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [trialFreelancerPlan, setTrialFreelancerPlan] = useState<TrialFreelancerPlanKey>('starter')
+  const [trialCompanyPlan, setTrialCompanyPlan] = useState<TrialCompanyPlanKey>('studio')
 
   const verifySession = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -93,15 +110,19 @@ export default function OnboardingScreen() {
       return
     }
     if (step === 1) {
+      setStep(2)
+      return
+    }
+    if (step === 2) {
       const name = displayName.trim()
       if (name.length < 2) {
         Alert.alert('Name', 'Please enter at least 2 characters.')
         return
       }
-      setStep(2)
+      setStep(3)
       return
     }
-    if (step === 2) {
+    if (step === 3) {
       void completeOnboarding()
     }
   }
@@ -130,6 +151,16 @@ export default function OnboardingScreen() {
     const acceptedAt = new Date().toISOString()
 
     setSaving(true)
+
+    const trialRes = await postTrialPlan(
+      roleChoice === 'freelancer'
+        ? { freelancer_plan: trialFreelancerPlan }
+        : { company_plan: trialCompanyPlan }
+    )
+    if (!trialRes.ok && trialRes.error && trialRes.error !== 'missing_web_url') {
+      console.warn('[onboarding] trial plan:', trialRes.error)
+    }
+
     const { error } = await supabase.from('profiles').upsert(
       {
         id: user.id,
@@ -163,6 +194,7 @@ export default function OnboardingScreen() {
   const goBack = () => {
     if (step === 1) setStep(0)
     else if (step === 2) setStep(1)
+    else if (step === 3) setStep(2)
   }
 
   const showAvatarImage = avatarPublicUrl && /^https?:\/\//i.test(avatarPublicUrl.trim())
@@ -176,16 +208,24 @@ export default function OnboardingScreen() {
   }
 
   const title =
-    step === 0 ? 'How will you use Crea?' : step === 1 ? 'Tell us about you' : 'Photo & agreements'
+    step === 0
+      ? 'How will you use Crea?'
+      : step === 1
+        ? 'Trial plan'
+        : step === 2
+          ? 'Tell us about you'
+          : 'Photo & agreements'
 
   const sub =
     step === 0
       ? 'You can change details later in settings.'
       : step === 1
-        ? roleChoice === 'company'
-          ? 'This is how you appear to freelancers.'
-          : 'This is how you appear on your public profile.'
-        : 'Profile photo is optional. You must accept our policies to finish.'
+        ? 'During your trial you can switch tiers on the web under Settings → Plan. Premium / Business / Enterprise unlock after checkout or via sales.'
+        : step === 2
+          ? roleChoice === 'company'
+            ? 'This is how you appear to freelancers.'
+            : 'This is how you appear on your public profile.'
+          : 'Profile photo is optional. You must accept our policies to finish.'
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -232,7 +272,45 @@ export default function OnboardingScreen() {
             </View>
           ) : null}
 
-          {step === 1 ? (
+          {step === 1 && roleChoice ? (
+            <>
+              <TouchableOpacity style={styles.backRow} onPress={goBack} hitSlop={12}>
+                <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                <Text style={styles.backText}>Back</Text>
+              </TouchableOpacity>
+
+              <View style={styles.roleGrid}>
+                {roleChoice === 'freelancer'
+                  ? FREELANCER_TRIAL_OPTIONS.map((opt) => (
+                      <TouchableOpacity
+                        key={opt.key}
+                        style={[
+                          styles.roleCard,
+                          trialFreelancerPlan === opt.key && styles.roleCardSelected,
+                        ]}
+                        onPress={() => setTrialFreelancerPlan(opt.key)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.roleTitle}>{opt.title}</Text>
+                        <Text style={styles.roleDesc}>{opt.desc}</Text>
+                      </TouchableOpacity>
+                    ))
+                  : COMPANY_TRIAL_OPTIONS.map((opt) => (
+                      <TouchableOpacity
+                        key={opt.key}
+                        style={[styles.roleCard, trialCompanyPlan === opt.key && styles.roleCardSelected]}
+                        onPress={() => setTrialCompanyPlan(opt.key)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.roleTitle}>{opt.title}</Text>
+                        <Text style={styles.roleDesc}>{opt.desc}</Text>
+                      </TouchableOpacity>
+                    ))}
+              </View>
+            </>
+          ) : null}
+
+          {step === 2 ? (
             <>
               <TouchableOpacity style={styles.backRow} onPress={goBack} hitSlop={12}>
                 <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
@@ -268,7 +346,7 @@ export default function OnboardingScreen() {
             </>
           ) : null}
 
-          {step === 2 ? (
+          {step === 3 ? (
             <>
               <TouchableOpacity style={styles.backRow} onPress={goBack} hitSlop={12}>
                 <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
@@ -328,13 +406,17 @@ export default function OnboardingScreen() {
             style={[
               styles.primaryBtn,
               ((step === 0 && !roleChoice) ||
-                (step === 2 && (!termsAccepted || saving)) ||
+                (step === 2 && displayName.trim().length < 2) ||
+                (step === 3 && (!termsAccepted || saving)) ||
                 saving) &&
                 styles.primaryBtnDisabled,
             ]}
             onPress={goNext}
             disabled={
-              (step === 0 && !roleChoice) || (step === 2 && (!termsAccepted || saving)) || saving
+              (step === 0 && !roleChoice) ||
+              (step === 2 && displayName.trim().length < 2) ||
+              (step === 3 && (!termsAccepted || saving)) ||
+              saving
             }
             activeOpacity={0.85}
           >
@@ -342,13 +424,19 @@ export default function OnboardingScreen() {
               <ActivityIndicator color="#0a0a0a" />
             ) : (
               <Text style={styles.primaryBtnText}>
-                {step === 2 ? 'Finish' : 'Continue'}
+                {step === 3 ? 'Finish' : 'Continue'}
               </Text>
             )}
           </TouchableOpacity>
 
           <Text style={styles.stepHint}>
-            {step === 0 ? 'Step 1 of 3' : step === 1 ? 'Step 2 of 3' : 'Step 3 of 3'}
+            {step === 0
+              ? 'Step 1 of 4'
+              : step === 1
+                ? 'Step 2 of 4'
+                : step === 2
+                  ? 'Step 3 of 4'
+                  : 'Step 4 of 4'}
           </Text>
 
           <TouchableOpacity
