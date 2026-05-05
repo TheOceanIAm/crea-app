@@ -1,34 +1,280 @@
-import React from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { canShowShadowMap, getMapboxAccessToken } from '@/lib/mapboxConfig'
+import { destinationLatLon, shadowAreaFeatures, shadowLineFeature } from '@/lib/shadowGeometry'
 import type { ProductionShadowMapSectionProps } from '@/components/project/productionShadowMapTypes'
 
+const MAPBOX_JS_URL = 'https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.js'
+const MAPBOX_CSS_URL = 'https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.css'
+const MAP_HEIGHT = 320
+
+let mapboxLoadPromise: Promise<void> | null = null
+
+function ensureMapboxGlLoaded(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve()
+  const w = window as unknown as { mapboxgl?: unknown; __creaMapboxReady?: boolean }
+  if (w.mapboxgl && w.__creaMapboxReady) return Promise.resolve()
+  if (mapboxLoadPromise) return mapboxLoadPromise
+
+  mapboxLoadPromise = new Promise((resolve, reject) => {
+    const existingCss = document.querySelector(`link[data-crea-mapbox="1"]`)
+    if (!existingCss) {
+      const link = document.createElement('link')
+      link.rel = 'stylesheet'
+      link.href = MAPBOX_CSS_URL
+      link.setAttribute('data-crea-mapbox', '1')
+      document.head.appendChild(link)
+    }
+
+    const existingScript = document.querySelector(`script[data-crea-mapbox="1"]`) as HTMLScriptElement | null
+    if (existingScript) {
+      if (w.mapboxgl) {
+        w.__creaMapboxReady = true
+        resolve()
+      } else {
+        existingScript.addEventListener('load', () => {
+          w.__creaMapboxReady = true
+          resolve()
+        })
+        existingScript.addEventListener('error', () => reject(new Error('Mapbox GL script failed to load')))
+      }
+      return
+    }
+
+    const script = document.createElement('script')
+    script.src = MAPBOX_JS_URL
+    script.async = true
+    script.defer = true
+    script.setAttribute('data-crea-mapbox', '1')
+    script.onload = () => {
+      w.__creaMapboxReady = true
+      resolve()
+    }
+    script.onerror = () => reject(new Error('Mapbox GL script failed to load'))
+    document.body.appendChild(script)
+  })
+
+  return mapboxLoadPromise
+}
+
 export function ProductionShadowMapSection({
-  center,
   subject,
+  onSubjectChange,
   onResetSubject,
+  sunAzimuthDeg,
+  sunAltitudeDeg,
+  subjectHeightM,
   timeLabel,
   timeMinutes,
   onTimeMinutesChange,
   onNudgeMinutes,
   onSetNow,
-  sunAzimuthDeg,
-  sunAltitudeDeg,
 }: ProductionShadowMapSectionProps) {
+  const mapElRef = useRef<HTMLDivElement | null>(null)
+  const mapRef = useRef<any>(null)
+  const token = getMapboxAccessToken()
+  const ready = canShowShadowMap()
+
+  const shadowLine = useMemo(
+    () =>
+      shadowLineFeature(subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, {
+        maxShadowMeters: 500,
+      }),
+    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM]
+  )
+
+  const shadowArea = useMemo(
+    () =>
+      shadowAreaFeatures(subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, {
+        maxShadowMeters: 500,
+      }),
+    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM]
+  )
+
+  const subjectPoint = useMemo(
+    () => ({
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          properties: {},
+          geometry: {
+            type: 'Point' as const,
+            coordinates: [subject.lon, subject.lat] as [number, number],
+          },
+        },
+      ],
+    }),
+    [subject.lat, subject.lon]
+  )
+
+  const sunDirection = useMemo(() => {
+    const tip = destinationLatLon(subject, sunAzimuthDeg, 95)
+    return {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          properties: {},
+          geometry: {
+            type: 'LineString' as const,
+            coordinates: [
+              [subject.lon, subject.lat],
+              [tip.lon, tip.lat],
+            ] as [number, number][],
+          },
+        },
+      ],
+    }
+  }, [subject.lat, subject.lon, sunAzimuthDeg])
+
+  useEffect(() => {
+    if (!ready || !token || !mapElRef.current) return
+    let cancelled = false
+
+    void ensureMapboxGlLoaded()
+      .then(() => {
+        if (cancelled || !mapElRef.current) return
+        const mapboxgl = (window as any).mapboxgl
+        if (!mapboxgl || mapRef.current) return
+
+        mapboxgl.accessToken = token
+        const map = new mapboxgl.Map({
+          container: mapElRef.current,
+          style: 'mapbox://styles/mapbox/streets-v12',
+          center: [subject.lon, subject.lat],
+          zoom: 16.5,
+          pitch: 45,
+          bearing: 0,
+        })
+        mapRef.current = map
+        map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right')
+
+        map.on('click', (e: any) => {
+          const lat = Number(e?.lngLat?.lat)
+          const lon = Number(e?.lngLat?.lng)
+          if (Number.isFinite(lat) && Number.isFinite(lon)) onSubjectChange(lat, lon)
+        })
+
+        map.on('load', () => {
+          map.addSource('crea-subject', { type: 'geojson', data: subjectPoint })
+          map.addLayer({
+            id: 'crea-subject-circle',
+            type: 'circle',
+            source: 'crea-subject',
+            paint: {
+              'circle-radius': 8,
+              'circle-color': '#FFDC00',
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#0a0a0a',
+            },
+          })
+
+          map.addSource('crea-sun-direction', { type: 'geojson', data: sunDirection })
+          map.addLayer({
+            id: 'crea-sun-direction-line',
+            type: 'line',
+            source: 'crea-sun-direction',
+            paint: {
+              'line-color': '#FFDC00',
+              'line-width': 3,
+              'line-opacity': 0.9,
+            },
+          })
+
+          map.addSource('crea-shadow-area', {
+            type: 'geojson',
+            data: shadowArea ?? { type: 'FeatureCollection', features: [] },
+          })
+          map.addLayer({
+            id: 'crea-shadow-penumbra',
+            type: 'fill',
+            source: 'crea-shadow-area',
+            filter: ['==', ['get', 'kind'], 'penumbra'],
+            paint: { 'fill-color': 'rgba(20,20,20,0.35)', 'fill-opacity': 0.28 },
+          })
+          map.addLayer({
+            id: 'crea-shadow-umbra',
+            type: 'fill',
+            source: 'crea-shadow-area',
+            filter: ['==', ['get', 'kind'], 'umbra'],
+            paint: { 'fill-color': 'rgba(10,10,10,0.65)', 'fill-opacity': 0.42 },
+          })
+
+          map.addSource('crea-shadow-line', {
+            type: 'geojson',
+            data:
+              shadowLine ?? ({
+                type: 'FeatureCollection',
+                features: [],
+              } as const),
+          })
+          map.addLayer({
+            id: 'crea-shadow-line-layer',
+            type: 'line',
+            source: 'crea-shadow-line',
+            paint: {
+              'line-color': 'rgba(10,10,10,0.9)',
+              'line-width': 4,
+              'line-opacity': 0.75,
+            },
+          })
+        })
+      })
+      .catch(() => {
+        // Leave fallback message rendered below.
+      })
+
+    return () => {
+      cancelled = true
+      if (mapRef.current) {
+        mapRef.current.remove()
+        mapRef.current = null
+      }
+    }
+  }, [ready, token, onSubjectChange, subject.lat, subject.lon, shadowArea, shadowLine, subjectPoint, sunDirection])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    map.easeTo({
+      center: [subject.lon, subject.lat],
+      duration: 220,
+      essential: true,
+    })
+
+    const subjectSrc = map.getSource('crea-subject')
+    if (subjectSrc && typeof subjectSrc.setData === 'function') subjectSrc.setData(subjectPoint)
+
+    const sunSrc = map.getSource('crea-sun-direction')
+    if (sunSrc && typeof sunSrc.setData === 'function') sunSrc.setData(sunDirection)
+
+    const areaSrc = map.getSource('crea-shadow-area')
+    if (areaSrc && typeof areaSrc.setData === 'function') {
+      areaSrc.setData(shadowArea ?? { type: 'FeatureCollection', features: [] })
+    }
+
+    const lineSrc = map.getSource('crea-shadow-line')
+    if (lineSrc && typeof lineSrc.setData === 'function') {
+      lineSrc.setData(shadowLine ?? { type: 'FeatureCollection', features: [] })
+    }
+  }, [subject.lat, subject.lon, subjectPoint, sunDirection, shadowArea, shadowLine])
+
+  if (!ready || !token) {
+    return (
+      <View style={styles.wrapper}>
+        <Text style={styles.hint}>Sun Planner map needs EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN.</Text>
+      </View>
+    )
+  }
+
   return (
     <View style={styles.wrapper}>
-      <Text style={styles.hint}>Sun Planner (web fallback): controls are available, map preview is disabled in this build.</Text>
+      <Text style={styles.hint}>Tap map to place subject. Shadow preview is approximated on flat ground.</Text>
 
-      <View style={styles.infoCard}>
-        <Text style={styles.infoLabel}>Subject</Text>
-        <Text style={styles.infoValue}>
-          {subject.lat.toFixed(5)}, {subject.lon.toFixed(5)}
-        </Text>
-        <Text style={styles.infoMeta}>
-          Center {center.lat.toFixed(5)}, {center.lon.toFixed(5)}
-        </Text>
-        <Text style={styles.infoMeta}>
-          Sun azimuth {sunAzimuthDeg.toFixed(0)}°, altitude {sunAltitudeDeg.toFixed(0)}°
-        </Text>
+      <View style={styles.mapShell}>
+        <div ref={mapElRef} style={{ width: '100%', height: '100%' }} />
       </View>
 
       <View style={styles.timeOverlay}>
@@ -64,7 +310,7 @@ export function ProductionShadowMapSection({
         />
       </View>
 
-      <Text style={styles.metaHint}>Web fallback active. Native app keeps the full 3D map implementation.</Text>
+      <Text style={styles.metaHint}>Web map is active (bundler-safe CDN integration).</Text>
       <TouchableOpacity style={styles.resetBtn} onPress={onResetSubject}>
         <Text style={styles.resetText}>Reset subject to location</Text>
       </TouchableOpacity>
@@ -79,17 +325,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
   },
-  infoCard: {
+  mapShell: {
+    width: '100%',
+    height: MAP_HEIGHT,
     borderRadius: 12,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: '#111',
-    padding: 12,
-    gap: 4,
   },
-  infoLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '700' },
-  infoValue: { color: '#fff', fontSize: 13, fontWeight: '800' },
-  infoMeta: { color: 'rgba(255,255,255,0.52)', fontSize: 11 },
   metaHint: { color: 'rgba(255,255,255,0.52)', fontSize: 11, marginTop: 8 },
   timeOverlay: {
     borderRadius: 12,

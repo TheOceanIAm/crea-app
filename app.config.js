@@ -11,7 +11,7 @@ basePlugins.push([
   {
     RNMapboxMapsImpl: 'mapbox',
     RNMapboxMapsVersion: '11.20.1',
-    RNMapboxMapsDownloadToken: mapboxDownloadToken,
+    RNMAPBOX_MAPS_DOWNLOAD_TOKEN: mapboxDownloadToken,
   },
 ])
 
