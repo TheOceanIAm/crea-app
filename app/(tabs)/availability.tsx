@@ -99,6 +99,7 @@ function MonthPage({
 
   const visitedRef = useRef(new Set<string>())
   const paintTargetRef = useRef<CellState | null>(null)
+  const isPaintingRef = useRef(false)
 
   const panResponder = useMemo(
     () =>
@@ -117,10 +118,12 @@ function MonthPage({
           const ay = Math.abs(gs.dy)
           return ax >= PAINT_MOVE_SLOP || ay >= PAINT_MOVE_SLOP
         },
-        onPanResponderTerminationRequest: () => true,
+        // Keep control while painting; otherwise outer ScrollViews can steal the gesture.
+        onPanResponderTerminationRequest: () => !isPaintingRef.current,
 
         onPanResponderGrant: (evt) => {
           if (!metrics) return
+          isPaintingRef.current = true
           visitedRef.current.clear()
           paintTargetRef.current = null
           const { locationX, locationY } = evt.nativeEvent
@@ -155,10 +158,12 @@ function MonthPage({
           }
         },
         onPanResponderRelease: () => {
+          isPaintingRef.current = false
           visitedRef.current.clear()
           paintTargetRef.current = null
         },
         onPanResponderTerminate: () => {
+          isPaintingRef.current = false
           visitedRef.current.clear()
           paintTargetRef.current = null
         },
