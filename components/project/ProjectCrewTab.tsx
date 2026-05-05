@@ -288,7 +288,10 @@ export function ProjectCrewTab({
   }
 
   const removeCrew = (m: CrewRow) => {
-    if (m.member_role !== 'crew') return
+    if (m.member_role === 'company') {
+      Alert.alert('Remove crew member', 'The client cannot be removed from the project.')
+      return
+    }
     Alert.alert('Remove crew member', 'They will lose access to this project.', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -316,6 +319,11 @@ export function ProjectCrewTab({
     setPersonEmail((m.email ?? '').trim())
     setPersonPhone((m.phone ?? '').trim())
     setPersonModalOpen(true)
+  }
+
+  const canRemoveMember = (m: CrewRow | null) => {
+    if (!m) return false
+    return canManage && m.member_role !== 'company'
   }
 
   const canEditSelected = selectedCrew?.source === 'manual'
@@ -495,7 +503,7 @@ export function ProjectCrewTab({
 
       <Text style={styles.label}>People on this project</Text>
       {rows.map((m) => {
-        const canSwipeDelete = canManage && m.member_role === 'crew'
+        const canSwipeDelete = canRemoveMember(m)
         const rowContent = (
           <View style={styles.row}>
             <TouchableOpacity style={styles.rowText} onPress={() => openPersonCard(m)}>
@@ -641,6 +649,18 @@ export function ProjectCrewTab({
               <TouchableOpacity style={styles.modalCancel} onPress={() => setPersonModalOpen(false)}>
                 <Text style={styles.modalCancelText}>Close</Text>
               </TouchableOpacity>
+              {canRemoveMember(selectedCrew) ? (
+                <TouchableOpacity
+                  style={styles.modalDelete}
+                  onPress={() => {
+                    if (!selectedCrew) return
+                    setPersonModalOpen(false)
+                    removeCrew(selectedCrew)
+                  }}
+                >
+                  <Text style={styles.modalDeleteText}>Remove member</Text>
+                </TouchableOpacity>
+              ) : null}
               {canEditSelected ? (
                 <TouchableOpacity style={[styles.modalSave, busy && styles.dim]} onPress={savePersonInfo} disabled={busy}>
                   <Text style={styles.modalSaveText}>{busy ? 'Saving…' : 'Save changes'}</Text>
@@ -823,6 +843,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFDC00',
   },
   modalSaveText: { color: '#0a0a0a', fontWeight: '800' },
+  modalDelete: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#b91c1c',
+    backgroundColor: 'rgba(185,28,28,0.15)',
+  },
+  modalDeleteText: { color: '#fecaca', fontWeight: '700' },
   contactActions: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   contactBtn: {
     flex: 1,
