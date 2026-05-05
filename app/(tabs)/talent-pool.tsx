@@ -43,6 +43,7 @@ type Folder = {
 }
 
 const foldersStorageKey = (uid: string) => `crea_app_talent_pool_folders_v1:${uid}`
+const FOLDERS_TABLE = 'talent_pool_folders'
 
 function initial(name: string) {
   const t = name.trim()
@@ -76,6 +77,8 @@ export default function TalentPoolScreen() {
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
   const [showNewFolderInput, setShowNewFolderInput] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
+  const [renameFolderName, setRenameFolderName] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [skillsQuery, setSkillsQuery] = useState('')
   const [listFilter, setListFilter] = useState<'all' | 'favorites'>('all')
@@ -151,20 +154,42 @@ export default function TalentPoolScreen() {
       setFavoriteProfileIds(favIds)
       try {
         const raw = await AsyncStorage.getItem(foldersStorageKey(user.id))
+        let localFolders: Folder[] = []
         if (raw) {
           const parsed = JSON.parse(raw) as Folder[]
-          setFolders(
-            (Array.isArray(parsed) ? parsed : [])
-              .filter((f) => typeof f?.id === 'string' && typeof f?.name === 'string')
-              .map((f) => ({
-                id: f.id,
-                name: f.name,
-                profileIds: Array.isArray(f.profileIds) ? f.profileIds.map((x) => String(x)).filter(Boolean) : [],
-              }))
-          )
-        } else {
-          setFolders([])
+          localFolders = (Array.isArray(parsed) ? parsed : [])
+            .filter((f) => typeof f?.id === 'string' && typeof f?.name === 'string')
+            .map((f) => ({
+              id: f.id,
+              name: f.name,
+              profileIds: Array.isArray(f.profileIds) ? f.profileIds.map((x) => String(x)).filter(Boolean) : [],
+            }))
         }
+        // Optional cross-device sync: if table exists, prefer remote copy.
+        try {
+          const { data: remoteRows, error: remoteErr } = await supabase
+            .from(FOLDERS_TABLE)
+            .select('id,name,position,profile_ids')
+            .eq('owner_id', user.id)
+            .order('position', { ascending: true })
+          if (!remoteErr && Array.isArray(remoteRows)) {
+            const remoteFolders: Folder[] = remoteRows
+              .filter((r) => typeof r?.id === 'string' && typeof r?.name === 'string')
+              .map((r) => ({
+                id: String(r.id),
+                name: String(r.name),
+                profileIds: Array.isArray((r as { profile_ids?: unknown }).profile_ids)
+                  ? ((r as { profile_ids?: unknown[] }).profile_ids ?? []).map((x) => String(x)).filter(Boolean)
+                  : [],
+              }))
+            if (remoteFolders.length > 0 || localFolders.length === 0) {
+              localFolders = remoteFolders
+            }
+          }
+        } catch {
+          // Table missing is fine; local-only remains active.
+        }
+        setFolders(localFolders)
       } catch {
         setFolders([])
       }
@@ -264,6 +289,22 @@ export default function TalentPoolScreen() {
     async (nextFolders: Folder[]) => {
       if (!meId) return
       await AsyncStorage.setItem(foldersStorageKey(meId), JSON.stringify(nextFolders))
+      // Optional sync: no-op when table doesn't exist.
+      try {
+        await supabase.from(FOLDERS_TABLE).delete().eq('owner_id', meId)
+        if (nextFolders.length > 0) {
+          const payload = nextFolders.map((f, idx) => ({
+            owner_id: meId,
+            id: f.id,
+            name: f.name,
+            position: idx,
+            profile_ids: f.profileIds,
+          }))
+          await supabase.from(FOLDERS_TABLE).upsert(payload, { onConflict: 'owner_id,id' })
+        }
+      } catch {
+        // Keep local behavior if remote sync isn't available.
+      }
     },
     [meId]
   )
@@ -318,6 +359,40 @@ export default function TalentPoolScreen() {
     setShowNewFolderInput(false)
     await persistFolders(nextFolders)
   }, [folders, newFolderName, meId, persistFolders])
+
+  const renameFolder = useCallback(async () => {
+    const name = renameFolderName.trim()
+    if (!name || !renamingFolderId) return
+    const nextFolders = folders.map((f) => (f.id === renamingFolderId ? { ...f, name } : f))
+    setFolders(nextFolders)
+    setRenamingFolderId(null)
+    setRenameFolderName('')
+    await persistFolders(nextFolders)
+  }, [folders, renameFolderName, renamingFolderId, persistFolders])
+
+  const deleteFolder = useCallback(
+    async (folderId: string) => {
+      const nextFolders = folders.filter((f) => f.id !== folderId)
+      setFolders(nextFolders)
+      if (activeFolderId === folderId) setActiveFolderId(null)
+      await persistFolders(nextFolders)
+    },
+    [folders, activeFolderId, persistFolders]
+  )
+
+  const moveFolder = useCallback(
+    async (folderId: string, dir: -1 | 1) => {
+      const idx = folders.findIndex((f) => f.id === folderId)
+      const to = idx + dir
+      if (idx < 0 || to < 0 || to >= folders.length) return
+      const next = [...folders]
+      const [item] = next.splice(idx, 1)
+      next.splice(to, 0, item)
+      setFolders(next)
+      await persistFolders(next)
+    },
+    [folders, persistFolders]
+  )
 
   const toggleFolderMembership = useCallback(
     async (folderId: string, profileId: string) => {
@@ -434,6 +509,52 @@ export default function TalentPoolScreen() {
                   <TouchableOpacity style={styles.chipOn} onPress={() => void createFolder()}>
                     <Text style={[styles.chipTextOn, { paddingHorizontal: 12, paddingVertical: 10 }]}>Create</Text>
                   </TouchableOpacity>
+                </View>
+              ) : null}
+              {folders.length > 0 ? (
+                <View style={{ marginTop: 8, gap: 6 }}>
+                  {folders.map((f, i) => (
+                    <View key={`manage:${f.id}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      {renamingFolderId === f.id ? (
+                        <>
+                          <TextInput
+                            style={[styles.searchInput, { flex: 1, paddingVertical: 8 }]}
+                            value={renameFolderName}
+                            onChangeText={setRenameFolderName}
+                            placeholder="Rename folder"
+                            placeholderTextColor="rgba(255,255,255,0.28)"
+                          />
+                          <TouchableOpacity style={styles.chipOn} onPress={() => void renameFolder()}>
+                            <Text style={[styles.chipTextOn, { paddingHorizontal: 10, paddingVertical: 8 }]}>Save</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : (
+                        <>
+                          <Text style={[styles.chipText, { flex: 1 }]} numberOfLines={1}>
+                            {f.name}
+                          </Text>
+                          <TouchableOpacity style={styles.chip} onPress={() => moveFolder(f.id, -1)} disabled={i === 0}>
+                            <Text style={styles.chipText}>↑</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.chip} onPress={() => moveFolder(f.id, 1)} disabled={i === folders.length - 1}>
+                            <Text style={styles.chipText}>↓</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.chip}
+                            onPress={() => {
+                              setRenamingFolderId(f.id)
+                              setRenameFolderName(f.name)
+                            }}
+                          >
+                            <Text style={styles.chipText}>Rename</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.chip} onPress={() => void deleteFolder(f.id)}>
+                            <Text style={styles.chipText}>Delete</Text>
+                          </TouchableOpacity>
+                        </>
+                      )}
+                    </View>
+                  ))}
                 </View>
               ) : null}
             </View>

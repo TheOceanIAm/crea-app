@@ -103,14 +103,19 @@ function MonthPage({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
+        // Start paint mode immediately on touch-down so drag selection is reliable.
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: (_, gs) => {
           const ax = Math.abs(gs.dx)
           const ay = Math.abs(gs.dy)
           if (ax < PAINT_MOVE_SLOP && ay < PAINT_MOVE_SLOP) return false
-          // Clearly vertical = let page scroll (do not take over paint gesture)
-          if (ay > ax && ay >= PAINT_MOVE_SLOP) return false
           return true
+        },
+        onMoveShouldSetPanResponderCapture: (_, gs) => {
+          const ax = Math.abs(gs.dx)
+          const ay = Math.abs(gs.dy)
+          return ax >= PAINT_MOVE_SLOP || ay >= PAINT_MOVE_SLOP
         },
         onPanResponderTerminationRequest: () => true,
 
@@ -148,6 +153,14 @@ function MonthPage({
             visitedRef.current.add(iso)
             onPaintDay(iso, paintTargetRef.current)
           }
+        },
+        onPanResponderRelease: () => {
+          visitedRef.current.clear()
+          paintTargetRef.current = null
+        },
+        onPanResponderTerminate: () => {
+          visitedRef.current.clear()
+          paintTargetRef.current = null
         },
       }),
     [metrics, slotMatrix, onPaintDay, defaultMode]
