@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, Platform, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import { Tabs } from 'expo-router'
@@ -23,47 +23,65 @@ export default function TabLayout() {
   const [unreadDmCount, setUnreadDmCount] = useState(0)
   const [unreadAlertsCount, setUnreadAlertsCount] = useState(0)
   const [companyTabs, setCompanyTabs] = useState(false)
+  const unreadDmInFlight = useRef<Promise<void> | null>(null)
+  const unreadAlertsInFlight = useRef<Promise<void> | null>(null)
 
   const loadUnreadDmCount = useCallback(async (uid: string) => {
-    const { data: convs, error: convErr } = await supabase
-      .from('conversations')
-      .select('id, participant_1, participant_2')
-      .or(`participant_1.eq.${uid},participant_2.eq.${uid}`)
-      .limit(200)
-    if (convErr || !convs?.length) {
-      setUnreadDmCount(0)
-      return
+    if (unreadDmInFlight.current) return unreadDmInFlight.current
+    unreadDmInFlight.current = (async () => {
+      const { data: convs, error: convErr } = await supabase
+        .from('conversations')
+        .select('id, participant_1, participant_2')
+        .or(`participant_1.eq.${uid},participant_2.eq.${uid}`)
+        .limit(200)
+      if (convErr || !convs?.length) {
+        setUnreadDmCount(0)
+        return
+      }
+      const allIds = convs.map((c) => String(c.id))
+      let ids = allIds
+      const { data: archivedRows } = await supabase
+        .from('conversation_archives')
+        .select('conversation_id')
+        .eq('user_id', uid)
+        .eq('archived', true)
+      if (archivedRows?.length) {
+        const archived = new Set(archivedRows.map((r) => String(r.conversation_id)))
+        ids = allIds.filter((id) => !archived.has(id))
+      }
+      if (!ids.length) {
+        setUnreadDmCount(0)
+        return
+      }
+      const { count } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .in('conversation_id', ids)
+        .eq('read', false)
+        .neq('sender_id', uid)
+      setUnreadDmCount(count ?? 0)
+    })()
+    try {
+      await unreadDmInFlight.current
+    } finally {
+      unreadDmInFlight.current = null
     }
-    const allIds = convs.map((c) => String(c.id))
-    let ids = allIds
-    const { data: archivedRows } = await supabase
-      .from('conversation_archives')
-      .select('conversation_id')
-      .eq('user_id', uid)
-      .eq('archived', true)
-    if (archivedRows?.length) {
-      const archived = new Set(archivedRows.map((r) => String(r.conversation_id)))
-      ids = allIds.filter((id) => !archived.has(id))
-    }
-    if (!ids.length) {
-      setUnreadDmCount(0)
-      return
-    }
-    const { count } = await supabase
-      .from('messages')
-      .select('*', { count: 'exact', head: true })
-      .in('conversation_id', ids)
-      .eq('read', false)
-      .neq('sender_id', uid)
-    setUnreadDmCount(count ?? 0)
   }, [])
 
   const loadUnreadAlertsCount = useCallback(async (uid: string) => {
+    if (unreadAlertsInFlight.current) return unreadAlertsInFlight.current
+    unreadAlertsInFlight.current = (async () => {
+      try {
+        const n = await countUnreadAlerts(uid)
+        setUnreadAlertsCount(n)
+      } catch {
+        setUnreadAlertsCount(0)
+      }
+    })()
     try {
-      const n = await countUnreadAlerts(uid)
-      setUnreadAlertsCount(n)
-    } catch {
-      setUnreadAlertsCount(0)
+      await unreadAlertsInFlight.current
+    } finally {
+      unreadAlertsInFlight.current = null
     }
   }, [])
 

@@ -23,6 +23,7 @@
     "@react-navigation/bottom-tabs": "^7.15.9",
     "@rnmapbox/maps": "^10.3.0",
     "@supabase/supabase-js": "^2.45.0",
+    "@vis.gl/react-mapbox": "^8.1.1",
     "aes-js": "^3.1.2",
     "base64-arraybuffer": "^1.0.2",
     "expo": "~52.0.0",
@@ -45,6 +46,7 @@
     "lucide-react-native": "^1.8.0",
     "mapbox-gl": "^3.23.0",
     "react": "18.3.1",
+    "react-dom": "18.3.1",
     "react-map-gl": "^8.1.1",
     "react-native": "0.76.9",
     "react-native-gesture-handler": "~2.20.2",
@@ -53,7 +55,8 @@
     "react-native-safe-area-context": "4.12.0",
     "react-native-screens": "~4.4.0",
     "react-native-svg": "15.8.0",
-    "react-native-url-polyfill": "^2.0.0"
+    "react-native-url-polyfill": "^2.0.0",
+    "react-native-web": "~0.19.13"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { ChevronLeft, MapPin, Star } from 'lucide-react-native'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '@/lib/supabase'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { isFreelancerTalentPoolPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
@@ -34,6 +35,14 @@ type FreelancerDirectoryRow = {
   location: string | null
   plan_tier: string | null
 }
+
+type Folder = {
+  id: string
+  name: string
+  profileIds: string[]
+}
+
+const foldersStorageKey = (uid: string) => `crea_app_talent_pool_folders_v1:${uid}`
 
 function initial(name: string) {
   const t = name.trim()
@@ -60,8 +69,13 @@ export default function TalentPoolScreen() {
   const [loading, setLoading] = useState(true)
   const [allowed, setAllowed] = useState<boolean | null>(null)
   const [showFavoriteUi, setShowFavoriteUi] = useState(false)
+  const [favoriteMode, setFavoriteMode] = useState<'company' | 'freelancer' | null>(null)
   const [rows, setRows] = useState<TalentRow[]>([])
   const [favoriteProfileIds, setFavoriteProfileIds] = useState<string[]>([])
+  const [folders, setFolders] = useState<Folder[]>([])
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [skillsQuery, setSkillsQuery] = useState('')
   const [listFilter, setListFilter] = useState<'all' | 'favorites'>('all')
@@ -90,33 +104,73 @@ export default function TalentPoolScreen() {
     if (!canViewTalentPool) {
       setAllowed(false)
       setShowFavoriteUi(false)
+      setFavoriteMode(null)
       setFavoriteProfileIds([])
+      setFolders([])
       setRows([])
       setLoading(false)
       return
     }
     setAllowed(true)
-    const favUi = isFreelancerProfile(role) && isFreelancerTalentPoolPlan(plan)
+    const favUi = isCompanyProfile(role) || (isFreelancerProfile(role) && isFreelancerTalentPoolPlan(plan))
     setShowFavoriteUi(favUi)
+    const mode: 'company' | 'freelancer' | null = isCompanyProfile(role)
+      ? 'company'
+      : isFreelancerProfile(role) && isFreelancerTalentPoolPlan(plan)
+        ? 'freelancer'
+        : null
+    setFavoriteMode(mode)
 
     let favIds: string[] = []
     if (favUi) {
       try {
-        const { data: favRows, error: favErr } = await supabase
-          .from('talent_pool_favorites')
-          .select('favorite_profile_id')
-          .eq('owner_id', user.id)
-        if (!favErr && favRows) {
-          favIds = favRows
-            .map((r) => String((r as { favorite_profile_id?: string }).favorite_profile_id ?? '').trim())
-            .filter(Boolean)
+        if (mode === 'company') {
+          const { data: favRows, error: favErr } = await supabase
+            .from('pool_saves')
+            .select('freelancer_id')
+            .eq('company_id', user.id)
+          if (!favErr && favRows) {
+            favIds = favRows
+              .map((r) => String((r as { freelancer_id?: string }).freelancer_id ?? '').trim())
+              .filter(Boolean)
+          }
+        } else {
+          const { data: favRows, error: favErr } = await supabase
+            .from('talent_pool_favorites')
+            .select('favorite_profile_id')
+            .eq('owner_id', user.id)
+          if (!favErr && favRows) {
+            favIds = favRows
+              .map((r) => String((r as { favorite_profile_id?: string }).favorite_profile_id ?? '').trim())
+              .filter(Boolean)
+          }
         }
       } catch {
         /* table may not exist until SQL is deployed */
       }
       setFavoriteProfileIds(favIds)
+      try {
+        const raw = await AsyncStorage.getItem(foldersStorageKey(user.id))
+        if (raw) {
+          const parsed = JSON.parse(raw) as Folder[]
+          setFolders(
+            (Array.isArray(parsed) ? parsed : [])
+              .filter((f) => typeof f?.id === 'string' && typeof f?.name === 'string')
+              .map((f) => ({
+                id: f.id,
+                name: f.name,
+                profileIds: Array.isArray(f.profileIds) ? f.profileIds.map((x) => String(x)).filter(Boolean) : [],
+              }))
+          )
+        } else {
+          setFolders([])
+        }
+      } catch {
+        setFolders([])
+      }
     } else {
       setFavoriteProfileIds([])
+      setFolders([])
     }
 
     const { data: fpRows, error: fpErr } = await supabase
@@ -197,9 +251,22 @@ export default function TalentPoolScreen() {
     if (listFilter === 'favorites' && showFavoriteUi) {
       const set = new Set(favoriteProfileIds)
       out = out.filter((r) => set.has(r.id))
+      if (activeFolderId) {
+        const folder = folders.find((f) => f.id === activeFolderId)
+        const folderSet = new Set(folder?.profileIds ?? [])
+        out = out.filter((r) => folderSet.has(r.id))
+      }
     }
     return out
-  }, [rows, skillsTokens, listFilter, favoriteProfileIds, showFavoriteUi])
+  }, [rows, skillsTokens, listFilter, favoriteProfileIds, showFavoriteUi, activeFolderId, folders])
+
+  const persistFolders = useCallback(
+    async (nextFolders: Folder[]) => {
+      if (!meId) return
+      await AsyncStorage.setItem(foldersStorageKey(meId), JSON.stringify(nextFolders))
+    },
+    [meId]
+  )
 
   const toggleFavorite = useCallback(
     async (profileId: string) => {
@@ -207,18 +274,30 @@ export default function TalentPoolScreen() {
       const isFav = favoriteProfileIds.includes(profileId)
       try {
         if (isFav) {
-          const { error } = await supabase
-            .from('talent_pool_favorites')
-            .delete()
-            .eq('owner_id', meId)
-            .eq('favorite_profile_id', profileId)
+          const { error } =
+            favoriteMode === 'company'
+              ? await supabase.from('pool_saves').delete().eq('company_id', meId).eq('freelancer_id', profileId)
+              : await supabase
+                  .from('talent_pool_favorites')
+                  .delete()
+                  .eq('owner_id', meId)
+                  .eq('favorite_profile_id', profileId)
           if (error) throw error
           setFavoriteProfileIds((prev) => prev.filter((id) => id !== profileId))
+          const nextFolders = folders.map((f) => ({ ...f, profileIds: f.profileIds.filter((id) => id !== profileId) }))
+          setFolders(nextFolders)
+          void persistFolders(nextFolders)
         } else {
-          const { error } = await supabase.from('talent_pool_favorites').insert({
-            owner_id: meId,
-            favorite_profile_id: profileId,
-          })
+          const { error } =
+            favoriteMode === 'company'
+              ? await supabase.from('pool_saves').upsert(
+                  { company_id: meId, freelancer_id: profileId },
+                  { onConflict: 'company_id,freelancer_id' }
+                )
+              : await supabase.from('talent_pool_favorites').insert({
+                  owner_id: meId,
+                  favorite_profile_id: profileId,
+                })
           if (error) throw error
           setFavoriteProfileIds((prev) => [...prev, profileId])
         }
@@ -227,7 +306,30 @@ export default function TalentPoolScreen() {
         Alert.alert('Favorites', msg)
       }
     },
-    [meId, showFavoriteUi, favoriteProfileIds]
+    [meId, showFavoriteUi, favoriteProfileIds, favoriteMode, folders, persistFolders]
+  )
+
+  const createFolder = useCallback(async () => {
+    const name = newFolderName.trim()
+    if (!name || !meId) return
+    const nextFolders = [...folders, { id: `${Date.now()}`, name, profileIds: [] }]
+    setFolders(nextFolders)
+    setNewFolderName('')
+    setShowNewFolderInput(false)
+    await persistFolders(nextFolders)
+  }, [folders, newFolderName, meId, persistFolders])
+
+  const toggleFolderMembership = useCallback(
+    async (folderId: string, profileId: string) => {
+      const nextFolders = folders.map((f) => {
+        if (f.id !== folderId) return f
+        const has = f.profileIds.includes(profileId)
+        return { ...f, profileIds: has ? f.profileIds.filter((id) => id !== profileId) : [...f.profileIds, profileId] }
+      })
+      setFolders(nextFolders)
+      await persistFolders(nextFolders)
+    },
+    [folders, persistFolders]
   )
 
   if (allowed === null || loading) {
@@ -295,6 +397,47 @@ export default function TalentPoolScreen() {
             autoCorrect={false}
             clearButtonMode="while-editing"
           />
+          {showFavoriteUi ? (
+            <View style={{ marginTop: 10 }}>
+              <Text style={styles.filterLabel}>Folders</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                <TouchableOpacity
+                  style={[styles.chip, activeFolderId === null && styles.chipOn]}
+                  onPress={() => setActiveFolderId(null)}
+                >
+                  <Text style={[styles.chipText, activeFolderId === null && styles.chipTextOn]}>All folders</Text>
+                </TouchableOpacity>
+                {folders.map((f) => (
+                  <TouchableOpacity
+                    key={f.id}
+                    style={[styles.chip, activeFolderId === f.id && styles.chipOn]}
+                    onPress={() => setActiveFolderId((prev) => (prev === f.id ? null : f.id))}
+                  >
+                    <Text style={[styles.chipText, activeFolderId === f.id && styles.chipTextOn]}>
+                      {f.name} ({f.profileIds.length})
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity style={styles.chip} onPress={() => setShowNewFolderInput((v) => !v)}>
+                  <Text style={styles.chipText}>+ New folder</Text>
+                </TouchableOpacity>
+              </ScrollView>
+              {showNewFolderInput ? (
+                <View style={{ marginTop: 8, flexDirection: 'row', gap: 8 }}>
+                  <TextInput
+                    style={[styles.searchInput, { flex: 1 }]}
+                    value={newFolderName}
+                    onChangeText={setNewFolderName}
+                    placeholder="Folder name"
+                    placeholderTextColor="rgba(255,255,255,0.28)"
+                  />
+                  <TouchableOpacity style={styles.chipOn} onPress={() => void createFolder()}>
+                    <Text style={[styles.chipTextOn, { paddingHorizontal: 12, paddingVertical: 10 }]}>Create</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -369,19 +512,39 @@ export default function TalentPoolScreen() {
                 </View>
               </TouchableOpacity>
               {showFavoriteUi ? (
-                <TouchableOpacity
-                  style={styles.starBtn}
-                  onPress={() => void toggleFavorite(item.id)}
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  accessibilityLabel={isFav ? 'Remove from favorites' : 'Add to favorites'}
-                >
-                  <Star
-                    size={22}
-                    color="#FFDC00"
-                    strokeWidth={ICON_STROKE}
-                    fill={isFav ? '#FFDC00' : 'transparent'}
-                  />
-                </TouchableOpacity>
+                <View style={{ alignItems: 'flex-end', paddingVertical: 8 }}>
+                  <TouchableOpacity
+                    style={styles.starBtn}
+                    onPress={() => void toggleFavorite(item.id)}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityLabel={isFav ? 'Remove from favorites' : 'Add to favorites'}
+                  >
+                    <Star
+                      size={22}
+                      color="#FFDC00"
+                      strokeWidth={ICON_STROKE}
+                      fill={isFav ? '#FFDC00' : 'transparent'}
+                    />
+                  </TouchableOpacity>
+                  {isFav && folders.length > 0 ? (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingRight: 8 }}>
+                      {folders.map((f) => {
+                        const inFolder = f.profileIds.includes(item.id)
+                        return (
+                          <TouchableOpacity
+                            key={`${item.id}:${f.id}`}
+                            style={[styles.chip, inFolder && styles.chipOn, { paddingVertical: 5, paddingHorizontal: 10 }]}
+                            onPress={() => void toggleFolderMembership(f.id, item.id)}
+                          >
+                            <Text style={[styles.chipText, inFolder && styles.chipTextOn]} numberOfLines={1}>
+                              {f.name}
+                            </Text>
+                          </TouchableOpacity>
+                        )
+                      })}
+                    </ScrollView>
+                  ) : null}
+                </View>
               ) : null}
             </View>
           )

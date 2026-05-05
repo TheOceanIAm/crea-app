@@ -30,36 +30,45 @@ export default function MessagesScreen() {
   const [showArchived, setShowArchived] = useState(false)
 
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const refreshInFlight = useRef<Promise<void> | null>(null)
   const initialLoadingDone = useRef(false)
 
   const refreshList = useCallback(async () => {
-    try {
-      setLoadError(null)
-      const { data: auth } = await supabase.auth.getUser()
-      const user = auth.user
-      if (!user) {
-        setSignedIn(false)
-        setConvos([])
-        setArchived([])
-        return
-      }
-      setSignedIn(true)
+    if (refreshInFlight.current) return refreshInFlight.current
+    refreshInFlight.current = (async () => {
+      try {
+        setLoadError(null)
+        const { data: auth } = await supabase.auth.getUser()
+        const user = auth.user
+        if (!user) {
+          setSignedIn(false)
+          setConvos([])
+          setArchived([])
+          return
+        }
+        setSignedIn(true)
 
-    const result = await loadDirectMessageInbox(user.id)
-    if (result.ok === false) {
-      setLoadError(result.error)
-        setConvos([])
-        setArchived([])
-        return
+        const result = await loadDirectMessageInbox(user.id)
+        if (result.ok === false) {
+          setLoadError(result.error)
+          setConvos([])
+          setArchived([])
+          return
+        }
+        setLoadError(null)
+        setConvos(result.inbox)
+        setArchived(result.archived)
+      } finally {
+        if (!initialLoadingDone.current) {
+          initialLoadingDone.current = true
+          setLoading(false)
+        }
       }
-      setLoadError(null)
-      setConvos(result.inbox)
-      setArchived(result.archived)
+    })()
+    try {
+      await refreshInFlight.current
     } finally {
-      if (!initialLoadingDone.current) {
-        initialLoadingDone.current = true
-        setLoading(false)
-      }
+      refreshInFlight.current = null
     }
   }, [])
 
