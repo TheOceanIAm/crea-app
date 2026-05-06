@@ -66,6 +66,29 @@ function rowMatchesSkillsQuery(row: TalentRow, tokens: string[]): boolean {
   return tokens.every((tok) => skillHay.includes(tok) || headlineHay.includes(tok))
 }
 
+async function loadFreelancerDirectoryRows(options: { excludeUserId: string; maxRows?: number; pageSize?: number }) {
+  const maxRows = options.maxRows ?? 5000
+  const pageSize = Math.max(1, Math.min(options.pageSize ?? 500, maxRows))
+  const out: FreelancerDirectoryRow[] = []
+  let offset = 0
+
+  while (out.length < maxRows) {
+    const end = Math.min(offset + pageSize - 1, maxRows - 1)
+    const { data, error } = await supabase
+      .from('freelancer_profiles')
+      .select('id, location, plan_tier')
+      .neq('id', options.excludeUserId)
+      .range(offset, end)
+    if (error) return { rows: [] as FreelancerDirectoryRow[], error: error.message }
+    const chunk = (data ?? []) as unknown as FreelancerDirectoryRow[]
+    out.push(...chunk)
+    if (chunk.length < pageSize) break
+    offset += pageSize
+  }
+
+  return { rows: out, error: null as string | null }
+}
+
 export default function TalentPoolScreen() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
@@ -201,17 +224,17 @@ export default function TalentPoolScreen() {
       setFolders([])
     }
 
-    const { data: fpRows, error: fpErr } = await supabase
-      .from('freelancer_profiles')
-      .select('id, location, plan_tier')
-      .neq('plan_tier', 'workspace')
-      .limit(240)
+    const { rows: fpRows, error: fpErr } = await loadFreelancerDirectoryRows({
+      excludeUserId: user.id,
+      maxRows: 5000,
+      pageSize: 500,
+    })
 
     if (fpErr) {
-      setLoadError(fpErr.message)
+      setLoadError(fpErr)
       setRows([])
     } else {
-      const candidates = (fpRows ?? []) as unknown as FreelancerDirectoryRow[]
+      const candidates = (fpRows ?? []).filter((r) => String(r.plan_tier ?? '').trim().toLowerCase() !== 'workspace')
       const ids = [
         ...new Set(
           candidates
@@ -224,15 +247,27 @@ export default function TalentPoolScreen() {
         setLoading(false)
         return
       }
-      const { data: profiles, error: pErr } = await supabase
-        .from('profiles')
-        .select('id, name, headline, location, avatar_url, role, skills')
-        .in('id', ids)
-        .neq('role', 'company')
-        .neq('role', 'ceo')
-        .order('name', { ascending: true })
-      if (pErr) {
-        setLoadError(pErr.message)
+      const profilesOut: Array<Record<string, unknown>> = []
+      const chunkSize = 100
+      let profilesErr: string | null = null
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize)
+        const { data: profileChunk, error: pErr } = await supabase
+          .from('profiles')
+          .select('id, name, headline, location, avatar_url, role, skills')
+          .in('id', chunk)
+          .neq('role', 'company')
+          .neq('role', 'ceo')
+          .order('name', { ascending: true })
+        if (pErr) {
+          profilesErr = pErr.message
+          break
+        }
+        profilesOut.push(...((profileChunk ?? []) as Array<Record<string, unknown>>))
+      }
+
+      if (profilesErr) {
+        setLoadError(profilesErr)
         setRows([])
       } else {
         const fpById = new Map<string, FreelancerDirectoryRow>()
@@ -240,7 +275,7 @@ export default function TalentPoolScreen() {
           if (typeof fp.id === 'string' && fp.id.trim()) fpById.set(fp.id.trim(), fp)
         }
         setRows(
-          (profiles ?? []).map((r) => {
+          profilesOut.map((r) => {
             const id = String(r.id)
             const fp = fpById.get(id)
             const url = (r.avatar_url as string | null)?.trim()
