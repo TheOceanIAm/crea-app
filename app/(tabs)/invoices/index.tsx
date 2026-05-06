@@ -11,7 +11,7 @@ import {
   Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useRouter, useSegments } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
@@ -52,6 +52,13 @@ type BudgetOverview = {
 }
 
 type MonthlyPoint = { label: string; value: number }
+
+type ReadyInvoiceJob = {
+  jobId: string
+  title: string
+  clientName: string
+  isSolo: boolean
+}
 
 function computeBudgetOverview(
   projectRows: ProjectBudgetRow[],
@@ -111,6 +118,7 @@ function computeMonthlyPaid(invoices: InvoiceRow[]): MonthlyPoint[] {
 
 export default function InvoicesListScreen() {
   const router = useRouter()
+  const segments = useSegments()
   const [rows, setRows] = useState<InvoiceRow[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -123,6 +131,7 @@ export default function InvoicesListScreen() {
   const [annualBudgetCurrency, setAnnualBudgetCurrency] = useState('EUR')
   const [annualBudgetYear, setAnnualBudgetYear] = useState(String(new Date().getFullYear()))
   const [savingAnnualBudget, setSavingAnnualBudget] = useState(false)
+  const [readyToInvoice, setReadyToInvoice] = useState<ReadyInvoiceJob[]>([])
 
   const load = useCallback(async () => {
     setError(null)
@@ -226,6 +235,54 @@ export default function InvoicesListScreen() {
       setBudgetOverview(null)
     }
 
+    let readyJobs: ReadyInvoiceJob[] = []
+    if (!isCompanyProfile(resolvedRole)) {
+      const { data: apps } = await supabase
+        .from('job_applications')
+        .select('job_id')
+        .eq('freelancer_id', user.id)
+        .eq('status', 'accepted')
+      const crewIds = [...new Set((apps ?? []).map((a) => a.job_id).filter(Boolean))] as string[]
+      const { data: soloJobs } = await supabase
+        .from('jobs')
+        .select('id')
+        .eq('company_id', user.id)
+        .eq('is_solo_workspace', true)
+      const soloIds = (soloJobs ?? []).map((j) => j.id)
+      const allJobIds = [...new Set([...crewIds, ...soloIds])]
+      if (allJobIds.length > 0) {
+        const { data: jobs } = await supabase
+          .from('jobs')
+          .select('id, title, company_id, project_status, status, is_solo_workspace')
+          .in('id', allJobIds)
+        const completed = (jobs ?? []).filter((j) => {
+          const ps = String(j.project_status ?? '').toLowerCase()
+          const st = String(j.status ?? '').toLowerCase()
+          return ps === 'completed' || st === 'closed'
+        })
+        const { data: invRows } = await supabase
+          .from('invoices')
+          .select('job_id')
+          .eq('freelancer_id', user.id)
+          .not('job_id', 'is', null)
+        const invoiced = new Set((invRows ?? []).map((r) => r.job_id).filter(Boolean) as string[])
+        const missing = completed.filter((j) => j.id && !invoiced.has(j.id))
+        const companyIds = [...new Set(missing.map((j) => j.company_id).filter(Boolean))] as string[]
+        let names: Record<string, string> = {}
+        if (companyIds.length > 0) {
+          const { data: profs } = await supabase.from('profiles').select('id, name').in('id', companyIds)
+          names = Object.fromEntries((profs ?? []).map((p) => [p.id, (p.name || 'Client').trim()]))
+        }
+        readyJobs = missing.map((j) => ({
+          jobId: j.id,
+          title: (j.title || 'Project').trim(),
+          clientName: j.company_id ? names[String(j.company_id)] ?? 'Client' : 'Client',
+          isSolo: Boolean(j.is_solo_workspace) && j.company_id === user.id,
+        }))
+      }
+    }
+    setReadyToInvoice(readyJobs)
+
     setLoading(false)
     setRefreshing(false)
   }, [])
@@ -288,21 +345,34 @@ export default function InvoicesListScreen() {
     )
   }
 
+  const hideFinanceDashboardBack =
+    perspective === 'freelancer' &&
+    segments[0] === '(tabs)' &&
+    segments.length === 2 &&
+    segments[1] === 'invoices'
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.topBar}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => router.replace('/(tabs)/dashboard')}
-          hitSlop={12}
-        >
-          <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-          <Text style={styles.backLabel}>Dashboard</Text>
-        </TouchableOpacity>
-      </View>
+      {hideFinanceDashboardBack ? null : (
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.replace('/(tabs)/dashboard')}
+            hitSlop={12}
+          >
+            <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+            <Text style={styles.backLabel}>Dashboard</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Invoices</Text>
+        <View style={styles.titleBlock}>
+          <Text style={styles.title}>{perspective === 'freelancer' ? 'Finance' : 'Invoices'}</Text>
+          {perspective === 'freelancer' ? (
+            <Text style={styles.titleSub}>Invoices & earnings</Text>
+          ) : null}
+        </View>
         <View style={styles.headerRight}>
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{rows.length} items</Text>
@@ -330,9 +400,35 @@ export default function InvoicesListScreen() {
               <Text style={styles.hint}>
                 {perspective === 'company'
                   ? 'Received from freelancers'
-                  : 'Invoices you send to clients'}
+                  : 'Paid work, pending payouts, and invoices you sent'}
               </Text>
             )}
+            {perspective === 'freelancer' && readyToInvoice.length > 0 ? (
+              <View style={styles.readySection}>
+                <Text style={styles.readySectionTitle}>Ready to send</Text>
+                <Text style={styles.readySectionSub}>
+                  The client marked these projects completed — you can send an invoice now.
+                </Text>
+                {readyToInvoice.map((r) => (
+                  <TouchableOpacity
+                    key={r.jobId}
+                    style={styles.readyCard}
+                    activeOpacity={0.75}
+                    onPress={() =>
+                      router.push(`/(tabs)/invoices/new?jobId=${encodeURIComponent(r.jobId)}`)
+                    }
+                  >
+                    <Text style={styles.readyCardTitle} numberOfLines={2}>
+                      {r.title}
+                    </Text>
+                    <Text style={styles.readyCardMeta}>
+                      {r.isSolo ? 'Private project' : r.clientName}
+                    </Text>
+                    <Text style={styles.readyCardCta}>Create invoice →</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
             {showBudgetOverview && budgetOverview ? (
               <View style={styles.overviewCard}>
                 {perspective === 'company' ? (
@@ -589,7 +685,14 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  title: { fontSize: 28, fontWeight: '900', color: '#ffffff', letterSpacing: 1, flex: 1 },
+  titleBlock: { flex: 1, minWidth: 0 },
+  title: { fontSize: 28, fontWeight: '900', color: '#ffffff', letterSpacing: 1 },
+  titleSub: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.38)',
+  },
   badge: { backgroundColor: 'rgba(255,220,0,0.12)', borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4 },
   newBtn: {
     backgroundColor: '#FFDC00',
@@ -600,6 +703,41 @@ const styles = StyleSheet.create({
   newBtnText: { color: '#0a0a0a', fontSize: 12, fontWeight: '800' },
   badgeText: { color: '#FFDC00', fontSize: 11, fontWeight: '700' },
   hint: { fontSize: 12, color: 'rgba(255,255,255,0.35)', paddingHorizontal: 20, marginBottom: 16 },
+  readySection: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.22)',
+    backgroundColor: 'rgba(255,220,0,0.06)',
+  },
+  readySectionTitle: {
+    color: '#FFDC00',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  readySectionSub: {
+    color: 'rgba(255,255,255,0.42)',
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  readyCard: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#121214',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 10,
+  },
+  readyCardTitle: { fontSize: 15, fontWeight: '700', color: '#fff', marginBottom: 4 },
+  readyCardMeta: { fontSize: 12, color: 'rgba(255,255,255,0.38)', marginBottom: 8 },
+  readyCardCta: { fontSize: 13, fontWeight: '700', color: '#FFDC00' },
   overviewCard: {
     marginHorizontal: 20,
     marginBottom: 16,

@@ -52,6 +52,7 @@
           "photosPermission": "Allow CREA to access your photos to set your profile picture."
         }
       ],
+      "expo-document-picker",
       [
         "expo-notifications",
         {

@@ -31,10 +31,10 @@ import {
   Link2,
   MessageCircle,
   Plus,
+  Receipt,
   Settings,
   Trash2,
   UserRound,
-  Wallet,
   Share2,
 } from 'lucide-react-native'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
@@ -91,7 +91,7 @@ const MENU_ITEMS: MenuItem[] = [
     icon: CalendarDays,
     href: '/(tabs)/availability',
   },
-  { id: 'billing', label: 'Invoice & bank', icon: Wallet },
+  { id: 'billing', label: 'Invoice & bank', icon: Receipt },
   { id: 'plan', label: 'Plan', icon: CreditCard },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'account', label: 'Account', icon: Settings },

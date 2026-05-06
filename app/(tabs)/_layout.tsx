@@ -104,9 +104,8 @@ export default function TabLayout() {
         .eq('id', user.id)
         .maybeSingle()
       const role = resolveAppRole(profile?.role, user)
-      const workspaceOnly =
-        isFreelancerProfile(role) &&
-        isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUserAndProfileTier(user, profile?.subscription_tier))
+      const plan = resolveFreelancerPlanFromUserAndProfileTier(user, profile?.subscription_tier)
+      const workspaceOnly = isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(plan)
       setWorkspaceOnlyTabs(workspaceOnly)
       setCompanyTabs(role === 'company' || role === 'ceo')
       if (!workspaceOnly) {
@@ -343,17 +342,17 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="workspace-projects"
-          options={{
-            href: null,
-            title: 'Workspace projects',
-          }}
-        />
-        <Tabs.Screen
           name="invoices"
           options={{
             href: null,
             title: 'Invoices',
+          }}
+        />
+        <Tabs.Screen
+          name="workspace-projects"
+          options={{
+            href: null,
+            title: 'Workspace projects',
           }}
         />
         <Tabs.Screen

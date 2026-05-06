@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -21,6 +21,13 @@ type CompanyOption = { id: string; name: string }
 
 export default function NewInvoiceScreen() {
   const router = useRouter()
+  const params = useLocalSearchParams<{ jobId?: string }>()
+  const jobIdParam = useMemo(() => {
+    const j = params.jobId
+    if (typeof j === 'string' && j.trim()) return j.trim()
+    if (Array.isArray(j) && j[0]) return String(j[0]).trim()
+    return undefined
+  }, [params.jobId])
   const [loading, setLoading] = useState(true)
   const [allowed, setAllowed] = useState(false)
   const [companies, setCompanies] = useState<CompanyOption[]>([])
@@ -32,8 +39,12 @@ export default function NewInvoiceScreen() {
   const [description, setDescription] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [saving, setSaving] = useState(false)
+  const [linkedJobId, setLinkedJobId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    setLinkedJobId(null)
+    setSelectedCompany(null)
+    setTitle('')
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       setAllowed(false)
@@ -56,31 +67,64 @@ export default function NewInvoiceScreen() {
       .select('job_id')
       .eq('freelancer_id', user.id)
 
-    const jobIds = [...new Set((apps ?? []).map((a) => a.job_id).filter(Boolean))] as string[]
-    if (jobIds.length === 0) {
-      setCompanies([])
-      setLoading(false)
-      return
+    const jobIdsFromApps = [...new Set((apps ?? []).map((a) => a.job_id).filter(Boolean))] as string[]
+
+    let companyOptions: CompanyOption[] = []
+
+    if (jobIdsFromApps.length > 0) {
+      const { data: jobsFromApps } = await supabase.from('jobs').select('company_id').in('id', jobIdsFromApps)
+      const companyIds = [...new Set((jobsFromApps ?? []).map((j) => j.company_id).filter(Boolean))] as string[]
+      if (companyIds.length > 0) {
+        const { data: profiles } = await supabase.from('profiles').select('id, name').in('id', companyIds)
+        companyOptions = (profiles ?? []).map((p) => ({
+          id: p.id,
+          name: (p.name || 'Company').trim(),
+        }))
+      }
     }
 
-    const { data: jobs } = await supabase.from('jobs').select('company_id').in('id', jobIds)
-    const companyIds = [...new Set((jobs ?? []).map((j) => j.company_id).filter(Boolean))] as string[]
-    if (companyIds.length === 0) {
-      setCompanies([])
-      setLoading(false)
-      return
+    if (jobIdParam) {
+      const { data: job } = await supabase
+        .from('jobs')
+        .select('id, title, company_id, project_status, status, is_solo_workspace')
+        .eq('id', jobIdParam)
+        .maybeSingle()
+
+      if (job?.id && job.company_id) {
+        const ps = String(job.project_status ?? '').toLowerCase()
+        const st = String(job.status ?? '').toLowerCase()
+        const completed = ps === 'completed' || st === 'closed'
+        const soloOk = Boolean(job.is_solo_workspace) && job.company_id === user.id
+        const { data: appRow } = await supabase
+          .from('job_applications')
+          .select('id')
+          .eq('job_id', job.id)
+          .eq('freelancer_id', user.id)
+          .eq('status', 'accepted')
+          .maybeSingle()
+        const crewOk = !!appRow
+
+        if (completed && (soloOk || crewOk)) {
+          setLinkedJobId(job.id)
+          setSelectedCompany(job.company_id)
+          setTitle((job.title || '').trim() || 'Invoice')
+          const { data: clientProf } = await supabase
+            .from('profiles')
+            .select('id, name')
+            .eq('id', job.company_id)
+            .maybeSingle()
+          const nm = (clientProf?.name || (soloOk ? 'Your workspace' : 'Client')).trim()
+          if (!companyOptions.some((c) => c.id === job.company_id)) {
+            companyOptions.push({ id: job.company_id, name: nm })
+          }
+          companyOptions.sort((a, b) => a.name.localeCompare(b.name))
+        }
+      }
     }
 
-    const { data: profiles } = await supabase.from('profiles').select('id, name').in('id', companyIds)
-
-    setCompanies(
-      (profiles ?? []).map((p) => ({
-        id: p.id,
-        name: (p.name || 'Company').trim(),
-      }))
-    )
+    setCompanies(companyOptions)
     setLoading(false)
-  }, [])
+  }, [jobIdParam])
 
   useEffect(() => {
     load()
@@ -119,6 +163,7 @@ export default function NewInvoiceScreen() {
       .insert({
         company_id: selectedCompany,
         freelancer_id: user.id,
+        job_id: linkedJobId,
         title: t,
         amount: amt,
         currency: currency.trim().toUpperCase() || 'EUR',
@@ -174,12 +219,14 @@ export default function NewInvoiceScreen() {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>New invoice</Text>
         <Text style={styles.sub}>
-          Companies listed here have roles you have applied to (same client pool as your applications).
+          {linkedJobId
+            ? 'Project linked — client is pre-selected when the job was marked completed.'
+            : 'Companies listed here have roles you have applied to (same client pool as your applications).'}
         </Text>
 
         {companies.length === 0 ? (
           <Text style={styles.warn}>
-            No companies yet. Apply to a job first — then you can send an invoice to that client from here.
+            No clients yet. Apply to a job first, or open Finance when a completed project is ready to invoice.
           </Text>
         ) : (
           <View style={styles.card}>
@@ -258,9 +305,9 @@ export default function NewInvoiceScreen() {
         />
 
         <TouchableOpacity
-          style={[styles.primaryBtn, (saving || companies.length === 0) && styles.dim]}
+          style={[styles.primaryBtn, (saving || !selectedCompany || companies.length === 0) && styles.dim]}
           onPress={onSave}
-          disabled={saving || companies.length === 0}
+          disabled={saving || !selectedCompany || companies.length === 0}
         >
           {saving ? (
             <ActivityIndicator color="#0a0a0a" />

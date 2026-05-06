@@ -12,6 +12,7 @@ import {
   CircleDollarSign,
   ClipboardList,
   ExternalLink,
+  Layers,
   MessageCircle,
   PlusCircle,
   Receipt,
@@ -136,8 +137,8 @@ function quickActionsForRole(
     if (opts?.freelancerPlan && isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
       return [
         {
-          label: 'Private projects',
-          icon: AppWindow,
+          label: 'Projects',
+          icon: Layers,
           href: '/(tabs)/workspace-projects',
         },
         { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
@@ -146,14 +147,14 @@ function quickActionsForRole(
     if (opts?.freelancerPlan && !isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
       if (canFreelancerCreatePrivateProjects(opts.freelancerPlan)) {
         base.splice(1, 0, {
-          label: 'Private projects',
-          icon: AppWindow,
+          label: 'Projects',
+          icon: Layers,
           href: '/(tabs)/workspace-projects',
         })
       } else {
         base.splice(1, 0, {
-          label: 'Private projects',
-          icon: AppWindow,
+          label: 'Projects',
+          icon: Layers,
           href: '/(tabs)/workspace-projects',
           disabled: true,
           hint: 'Pro or Workspace plan',

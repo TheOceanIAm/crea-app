@@ -3,6 +3,7 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
+  Image,
   Modal,
   SafeAreaView,
   StyleSheet,
@@ -17,7 +18,27 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
 import { ensureSoloWorkspaceProjectRow } from '@/lib/ensureSoloWorkspaceProject'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
-import { canFreelancerCreatePrivateProjects, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
+import {
+  canFreelancerCreatePrivateProjects,
+  resolveFreelancerPlanFromUserAndProfileTier,
+} from '@/lib/freelancerPlan'
+import { formatBudgetDisplay } from '@/lib/budgetFormatting'
+
+type ListingKind = 'private' | 'customer'
+
+type ProjectListing = {
+  id: string
+  kind: ListingKind
+  title: string
+  /** Customer company name, or optional solo client label */
+  subtitle: string | null
+  budgetLine: string
+  logoUrl: string
+  statusLabel: string
+  updatedAt: string | null
+  categoryLabel: string
+  isArchived: boolean
+}
 
 type WorkspaceProject = {
   id: string
@@ -29,6 +50,22 @@ type WorkspaceProject = {
   brief_ai_outputs: Record<string, unknown> | null
 }
 
+function faviconFromWebsite(url: string): string | null {
+  try {
+    const u = url.startsWith('http') ? url : `https://${url}`
+    const host = new URL(u).hostname.replace(/^www\./, '')
+    return `https://www.google.com/s2/favicons?domain=${host}&sz=64`
+  } catch {
+    return null
+  }
+}
+
+function listingProfileAvatarUrl(displayName: string, avatarUrl: string | null | undefined): string {
+  const u = avatarUrl?.trim()
+  if (u) return u
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName || 'You')}&background=333&color=fff&size=128`
+}
+
 function fmtDate(v: string | null): string {
   if (!v) return '—'
   const d = new Date(v)
@@ -36,13 +73,42 @@ function fmtDate(v: string | null): string {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+function mapJobStatusLabel(job: {
+  status: string | null | undefined
+  project_status?: string | null
+}): string {
+  const st = String(job.status ?? '').toLowerCase()
+  const ps = String(job.project_status ?? '').toLowerCase()
+  if (st === 'closed' || ps === 'completed') return 'COMPLETED'
+  if (ps === 'recruiting') return 'RECRUITING'
+  return 'ACTIVE'
+}
+
+type JobRow = {
+  id: string
+  title: string
+  category: string | null
+  budget_type: string | null
+  budget_amount: number | null
+  budget_currency?: string | null
+  status: string | null
+  project_status?: string | null
+  company_id: string
+  is_solo_workspace?: boolean | null
+  solo_workspace_client_label?: string | null
+  updated_at?: string | null
+  created_at?: string | null
+}
+
 export default function WorkspaceProjectsScreen() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [allowed, setAllowed] = useState<boolean | null>(null)
-  /** When allowed is false: freelancer role vs starter plan (private projects need Pro / Workspace). */
-  const [denyKind, setDenyKind] = useState<'role' | 'plan' | null>(null)
-  const [rows, setRows] = useState<WorkspaceProject[]>([])
+  const [denyKind, setDenyKind] = useState<'role' | null>(null)
+  const [canCreatePrivate, setCanCreatePrivate] = useState(false)
+  const [listings, setListings] = useState<ProjectListing[]>([])
+  const [archivedListings, setArchivedListings] = useState<ProjectListing[]>([])
+  const [posterAvatarUrl, setPosterAvatarUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [title, setTitle] = useState('')
@@ -64,7 +130,7 @@ export default function WorkspaceProjectsScreen() {
     } = await supabase.auth.getUser()
     if (!user) {
       setAllowed(false)
-      setRows([])
+      setListings([])
       setLoading(false)
       router.replace('/login')
       return
@@ -72,30 +138,30 @@ export default function WorkspaceProjectsScreen() {
 
     const { data: p } = await supabase
       .from('profiles')
-      .select('role, subscription_tier')
+      .select('role, subscription_tier, name, avatar_url')
       .eq('id', user.id)
       .maybeSingle()
     const role = resolveAppRole(p?.role, user)
     if (!isFreelancerProfile(role) || isCompanyProfile(role) || isCeoProfile(role)) {
       setAllowed(false)
       setDenyKind('role')
-      setRows([])
-      setLoading(false)
-      return
-    }
-    const plan = resolveFreelancerPlanFromUserAndProfileTier(user, p?.subscription_tier)
-    if (!canFreelancerCreatePrivateProjects(plan)) {
-      setAllowed(false)
-      setDenyKind('plan')
-      setRows([])
+      setListings([])
       setLoading(false)
       return
     }
     setDenyKind(null)
     setAllowed(true)
 
-    // Web creates private projects as `jobs` (is_solo_workspace); app lists `projects`.
-    // RPC backfills linked rows when migration `sync_solo_workspace_projects_for_owner` is deployed.
+    const plan = resolveFreelancerPlanFromUserAndProfileTier(user, p?.subscription_tier)
+    setCanCreatePrivate(canFreelancerCreatePrivateProjects(plan))
+
+    const displayName = (p?.name && String(p.name).trim()) || 'You'
+    const av =
+      p && typeof (p as { avatar_url?: string | null }).avatar_url === 'string'
+        ? String((p as { avatar_url?: string | null }).avatar_url).trim() || null
+        : null
+    setPosterAvatarUrl(av)
+
     const { error: syncErr } = await supabase.rpc('sync_solo_workspace_projects_for_owner')
     if (syncErr && __DEV__) {
       console.warn('[workspace-projects] sync_solo_workspace_projects_for_owner', syncErr.message)
@@ -115,32 +181,133 @@ export default function WorkspaceProjectsScreen() {
       }
     }
 
-    const { data, error: qErr } = await supabase
-      .from('projects')
-      .select('id, title, status, updated_at, brief_ai_context, brief_ai_outputs')
-      .eq('company_id', user.id)
-      .order('updated_at', { ascending: false })
+    const { data: apps } = await supabase
+      .from('job_applications')
+      .select('job_id')
+      .eq('freelancer_id', user.id)
+      .eq('status', 'accepted')
 
-    if (qErr) {
-      setError(qErr.message)
-      setRows([])
-    } else {
-      setRows(
-        (data ?? []).map((r) => ({
-          id: String(r.id),
-          title: String(r.title ?? '').trim() || 'Untitled project',
-          status: typeof r.status === 'string' ? r.status : null,
-          updated_at: typeof r.updated_at === 'string' ? r.updated_at : null,
-          brief_ai_context: typeof r.brief_ai_context === 'string' ? r.brief_ai_context : null,
-          workspace_summary:
-            r.brief_ai_outputs && typeof r.brief_ai_outputs === 'object' && typeof (r.brief_ai_outputs as Record<string, unknown>).workspace_summary === 'string'
-              ? String((r.brief_ai_outputs as Record<string, unknown>).workspace_summary)
-              : null,
-          brief_ai_outputs:
-            r.brief_ai_outputs && typeof r.brief_ai_outputs === 'object' ? (r.brief_ai_outputs as Record<string, unknown>) : null,
-        }))
-      )
+    const crewJobIds = [...new Set((apps ?? []).map((a) => a.job_id).filter(Boolean))] as string[]
+
+    const soloIds = (soloJobRows ?? []).map((r) => String((r as { id: string }).id))
+    const allJobIds = [...new Set([...crewJobIds, ...soloIds])]
+
+    let jobsById: Record<string, JobRow> = {}
+    if (allJobIds.length > 0) {
+      const { data: jobRows, error: jobsErr } = await supabase
+        .from('jobs')
+        .select(
+          'id, title, category, budget_type, budget_amount, budget_currency, status, project_status, company_id, is_solo_workspace, solo_workspace_client_label, updated_at, created_at'
+        )
+        .in('id', allJobIds)
+      if (jobsErr && __DEV__) console.warn('[workspace-projects] jobs', jobsErr.message)
+      jobsById = Object.fromEntries(((jobRows ?? []) as JobRow[]).map((j) => [j.id, j]))
     }
+
+    const companyIds = [...new Set(Object.values(jobsById).map((j) => j.company_id).filter(Boolean))] as string[]
+    const [{ data: companyProfiles }, { data: companyNames }] = await Promise.all([
+      companyIds.length
+        ? supabase.from('company_profiles').select('id, website, logo_url').in('id', companyIds)
+        : { data: [] as { id: string; website: string | null; logo_url: string | null }[] },
+      companyIds.length
+        ? supabase.from('profiles').select('id, name').in('id', companyIds)
+        : { data: [] as { id: string; name: string | null }[] },
+    ])
+    const cpMap = Object.fromEntries((companyProfiles ?? []).map((c) => [c.id, c]))
+    const nameByCompany = Object.fromEntries((companyNames ?? []).map((r) => [r.id, (r.name || '').trim()]))
+
+    const { data: projectRows } = await supabase
+      .from('projects')
+      .select('id, title, status, updated_at, job_id, budget_amount, budget_type, budget_currency, brief_ai_context, brief_ai_outputs')
+      .eq('company_id', user.id)
+
+    const projectById = Object.fromEntries((projectRows ?? []).map((r) => [String(r.id), r]))
+
+    const built: ProjectListing[] = []
+    for (const jid of allJobIds) {
+      const job = jobsById[jid]
+      if (!job) continue
+
+      const isSolo = Boolean(job.is_solo_workspace) && job.company_id === user.id
+      const budgetLine = formatBudgetDisplay({
+        budget_type: String(job.budget_type ?? 'negotiable'),
+        budget_amount: job.budget_amount,
+        budget_currency: job.budget_currency,
+      })
+
+      const proj = projectById[jid]
+      const updatedRaw = proj?.updated_at ?? job.updated_at ?? job.created_at ?? null
+      const archived = isSolo && String(proj?.status ?? '').toLowerCase() === 'archived'
+
+      if (isSolo) {
+        const clientLbl =
+          typeof job.solo_workspace_client_label === 'string' ? job.solo_workspace_client_label.trim() : ''
+        built.push({
+          id: job.id,
+          kind: 'private',
+          title: (job.title || 'Untitled project').trim(),
+          subtitle: clientLbl || null,
+          budgetLine,
+          logoUrl: listingProfileAvatarUrl(displayName, av),
+          statusLabel: mapJobStatusLabel(job),
+          updatedAt: typeof updatedRaw === 'string' ? updatedRaw : null,
+          categoryLabel: String(job.category ?? '').trim() || 'Private',
+          isArchived: archived,
+        })
+      } else {
+        const cp = cpMap[job.company_id]
+        const companyName = nameByCompany[job.company_id] || 'Client'
+        const logo =
+          cp?.logo_url ||
+          (cp?.website ? faviconFromWebsite(cp.website) : null) ||
+          `https://ui-avatars.com/api/?name=${encodeURIComponent(companyName)}&background=FFDC00&color=0a0a0a&size=64`
+        built.push({
+          id: job.id,
+          kind: 'customer',
+          title: (job.title || 'Project').trim(),
+          subtitle: companyName,
+          budgetLine,
+          logoUrl: logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(companyName)}&background=FFDC00&color=0a0a0a&size=64`,
+          statusLabel: mapJobStatusLabel(job),
+          updatedAt: typeof updatedRaw === 'string' ? updatedRaw : null,
+          categoryLabel: String(job.category ?? '').trim() || 'Job',
+          isArchived: false,
+        })
+      }
+    }
+
+    const listedJobIds = new Set(built.map((b) => b.id))
+    for (const pr of projectRows ?? []) {
+      const pid = String(pr.id)
+      if (listedJobIds.has(pid)) continue
+      const budgetLine = formatBudgetDisplay({
+        budget_type: String(pr.budget_type ?? 'negotiable'),
+        budget_amount: typeof pr.budget_amount === 'number' ? pr.budget_amount : null,
+        budget_currency: typeof pr.budget_currency === 'string' ? pr.budget_currency : null,
+      })
+      const archived = String(pr.status ?? '').toLowerCase() === 'archived'
+      built.push({
+        id: pid,
+        kind: 'private',
+        title: String(pr.title ?? '').trim() || 'Untitled project',
+        subtitle: null,
+        budgetLine,
+        logoUrl: listingProfileAvatarUrl(displayName, av),
+        statusLabel: archived ? 'ARCHIVED' : 'ACTIVE',
+        updatedAt: typeof pr.updated_at === 'string' ? pr.updated_at : null,
+        categoryLabel: 'Private',
+        isArchived: archived,
+      })
+    }
+
+    const ts = (x: ProjectListing) => new Date(x.updatedAt || 0).getTime()
+    built.sort((a, b) => ts(b) - ts(a))
+
+    const active = built.filter((x) => !x.isArchived)
+    const arch = built.filter((x) => x.isArchived)
+
+    setListings(active)
+    setArchivedListings(arch)
     setLoading(false)
   }, [router])
 
@@ -157,7 +324,7 @@ export default function WorkspaceProjectsScreen() {
       data: { user: u },
     } = await supabase.auth.getUser()
     if (!u) {
-      Alert.alert('Private projects', 'Please sign in again.')
+      Alert.alert('Projects', 'Please sign in again.')
       return
     }
     const { data: selfProfile } = await supabase
@@ -166,7 +333,7 @@ export default function WorkspaceProjectsScreen() {
       .eq('id', u.id)
       .maybeSingle()
     if (!canFreelancerCreatePrivateProjects(resolveFreelancerPlanFromUserAndProfileTier(u, selfProfile?.subscription_tier))) {
-      Alert.alert('Private projects', 'Available on Pro or Workspace. Upgrade in your account on the web.')
+      Alert.alert('Projects', 'Creating lead-owned private workspaces requires Pro or Workspace. Upgrade on the web.')
       return
     }
     setCreating(true)
@@ -203,11 +370,49 @@ export default function WorkspaceProjectsScreen() {
     router.push(`/project/${created.id}` as Href)
   }
 
-  const openEdit = (item: WorkspaceProject) => {
-    setEditId(item.id)
-    setEditTitle(item.title)
-    setEditNotes(item.workspace_summary ?? item.brief_ai_context ?? '')
-    setEditOutputs(item.brief_ai_outputs ?? {})
+  const openListing = (item: ProjectListing) => {
+    if (item.kind === 'private') {
+      router.push(`/project/${item.id}` as Href)
+    } else {
+      router.push(`/(tabs)/jobs/${item.id}` as Href)
+    }
+  }
+
+  const fetchProjectForEdit = async (projectId: string): Promise<WorkspaceProject | null> => {
+    const { data, error: qErr } = await supabase
+      .from('projects')
+      .select('id, title, status, updated_at, brief_ai_context, brief_ai_outputs')
+      .eq('id', projectId)
+      .maybeSingle()
+    if (qErr || !data) return null
+    const outputs =
+      data.brief_ai_outputs && typeof data.brief_ai_outputs === 'object'
+        ? (data.brief_ai_outputs as Record<string, unknown>)
+        : {}
+    const ws =
+      typeof outputs.workspace_summary === 'string' ? outputs.workspace_summary : ''
+    return {
+      id: String(data.id),
+      title: String(data.title ?? '').trim(),
+      status: typeof data.status === 'string' ? data.status : null,
+      updated_at: typeof data.updated_at === 'string' ? data.updated_at : null,
+      brief_ai_context: typeof data.brief_ai_context === 'string' ? data.brief_ai_context : null,
+      workspace_summary: ws,
+      brief_ai_outputs: outputs,
+    }
+  }
+
+  const openEdit = async (item: ProjectListing) => {
+    if (item.kind !== 'private') return
+    const row = await fetchProjectForEdit(item.id)
+    if (!row) {
+      Alert.alert('Projects', 'Could not load project for editing.')
+      return
+    }
+    setEditId(row.id)
+    setEditTitle(row.title)
+    setEditNotes(row.workspace_summary ?? row.brief_ai_context ?? '')
+    setEditOutputs(row.brief_ai_outputs ?? {})
     setEditOpen(true)
   }
 
@@ -237,8 +442,8 @@ export default function WorkspaceProjectsScreen() {
     await load()
   }
 
-  const archiveProject = async (item: WorkspaceProject) => {
-    if (actingId) return
+  const archiveProject = async (item: ProjectListing) => {
+    if (actingId || item.kind !== 'private') return
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -248,7 +453,8 @@ export default function WorkspaceProjectsScreen() {
     }
     setActingId(item.id)
     setError(null)
-    const next = item.status === 'archived' ? 'active' : 'archived'
+    const row = await fetchProjectForEdit(item.id)
+    const next = row?.status === 'archived' ? 'active' : 'archived'
     const { error: updErr } = await supabase
       .from('projects')
       .update({ status: next })
@@ -262,8 +468,8 @@ export default function WorkspaceProjectsScreen() {
     await load()
   }
 
-  const deleteProject = async (item: WorkspaceProject) => {
-    if (actingId) return
+  const deleteProject = async (item: ProjectListing) => {
+    if (actingId || item.kind !== 'private') return
     Alert.alert(
       'Delete project',
       'This removes the project permanently. Continue?',
@@ -301,30 +507,63 @@ export default function WorkspaceProjectsScreen() {
     )
   }
 
-  const activeRows = rows.filter((r) => (r.status ?? 'active') !== 'archived')
-  const archivedRows = rows.filter((r) => (r.status ?? '') === 'archived')
-
-  const renderProjectCard = (item: WorkspaceProject) => (
+  const renderCard = (item: ProjectListing) => (
     <View style={styles.card}>
-      <Text style={styles.cardTitle} numberOfLines={1}>
-        {item.title}
-      </Text>
-      <Text style={styles.cardMeta}>
-        {item.status?.toUpperCase() || 'ACTIVE'} · Updated {fmtDate(item.updated_at)}
-      </Text>
+      <TouchableOpacity style={styles.cardMain} onPress={() => openListing(item)} activeOpacity={0.85}>
+        <View style={styles.cardTop}>
+          <Image
+            source={{ uri: item.logoUrl }}
+            style={[styles.logo, item.kind === 'private' ? styles.logoRound : styles.logoSquare]}
+          />
+          <View style={styles.cardHead}>
+            <View style={styles.titleRow}>
+              <Text style={styles.cardTitle} numberOfLines={2}>
+                {item.title}
+              </Text>
+              {item.kind === 'private' ? (
+                <View style={styles.badgePrivate}>
+                  <Text style={styles.badgePrivateText}>Private project</Text>
+                </View>
+              ) : null}
+            </View>
+            {item.subtitle ? (
+              <Text style={styles.cardSubtitle} numberOfLines={1}>
+                {item.subtitle}
+              </Text>
+            ) : null}
+            <Text style={styles.cardMeta}>
+              {item.statusLabel} · {item.categoryLabel} · Updated {fmtDate(item.updatedAt)}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.budgetLine}>{item.budgetLine}</Text>
+      </TouchableOpacity>
+
       <View style={styles.cardActions}>
-        <TouchableOpacity style={styles.cardBtnPrimary} onPress={() => router.push(`/project/${item.id}` as Href)}>
+        <TouchableOpacity style={styles.cardBtnPrimary} onPress={() => openListing(item)}>
           <Text style={styles.cardBtnPrimaryText}>Open</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.cardBtnGhost} onPress={() => openEdit(item)}>
-          <Text style={styles.cardBtnGhostText}>Edit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.cardBtnGhost} onPress={() => void archiveProject(item)} disabled={actingId === item.id}>
-          <Text style={styles.cardBtnGhostText}>{item.status === 'archived' ? 'Unarchive' : 'Archive'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.cardBtnDanger} onPress={() => void deleteProject(item)} disabled={actingId === item.id}>
-          <Text style={styles.cardBtnDangerText}>Delete</Text>
-        </TouchableOpacity>
+        {item.kind === 'private' ? (
+          <>
+            <TouchableOpacity style={styles.cardBtnGhost} onPress={() => void openEdit(item)}>
+              <Text style={styles.cardBtnGhostText}>Edit</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.cardBtnGhost}
+              onPress={() => void archiveProject(item)}
+              disabled={actingId === item.id}
+            >
+              <Text style={styles.cardBtnGhostText}>{item.isArchived ? 'Unarchive' : 'Archive'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.cardBtnDanger}
+              onPress={() => void deleteProject(item)}
+              disabled={actingId === item.id}
+            >
+              <Text style={styles.cardBtnDangerText}>Delete</Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
       </View>
     </View>
   )
@@ -345,21 +584,10 @@ export default function WorkspaceProjectsScreen() {
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
         <View style={styles.center}>
-          {denyKind === 'plan' ? (
-            <>
-              <Text style={styles.blockTitle}>Upgrade for private projects</Text>
-              <Text style={styles.blockSub}>
-                Creating lead-owned private workspaces requires Pro or Workspace. Starter is for browsing jobs and working in company job workspaces. Manage your plan on the web.
-              </Text>
-            </>
-          ) : (
-            <>
-              <Text style={styles.blockTitle}>Freelancers only</Text>
-              <Text style={styles.blockSub}>
-                Private projects are for freelancer accounts. They never appear on the public job board.
-              </Text>
-            </>
-          )}
+          <Text style={styles.blockTitle}>Freelancers only</Text>
+          <Text style={styles.blockSub}>
+            This overview is for freelancer accounts — private workspaces and jobs you&apos;re booked on.
+          </Text>
         </View>
       </SafeAreaView>
     )
@@ -372,40 +600,57 @@ export default function WorkspaceProjectsScreen() {
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backText}>Dashboard</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.newBtn} onPress={() => setCreateOpen(true)}>
-          <Plus size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
-          <Text style={styles.newBtnText}>New project</Text>
-        </TouchableOpacity>
+        {canCreatePrivate ? (
+          <TouchableOpacity style={styles.newBtn} onPress={() => setCreateOpen(true)}>
+            <Plus size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+            <Text style={styles.newBtnText}>New project</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.newBtnPlaceholder} />
+        )}
       </View>
 
-      <Text style={styles.title}>Private projects</Text>
+      <Text style={styles.title}>Projects</Text>
       <Text style={styles.sub}>
-        Your workspaces with collaborators — not listed on the public Jobs board (unlike company job posts).
+        Private workspaces (your avatar) and customer jobs you&apos;re booked on — same overview as on the web. Budget
+        comes from each project or job.
       </Text>
+      {!canCreatePrivate ? (
+        <Text style={styles.planHint}>
+          Upgrade to Pro or Workspace on the web to create new private projects (Starter can still manage jobs you&apos;re
+          hired for).
+        </Text>
+      ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <FlatList
-        data={activeRows}
+        data={listings}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>No projects yet</Text>
-            <Text style={styles.emptySub}>Create your first private workspace project.</Text>
-            <TouchableOpacity style={styles.emptyBtn} onPress={() => setCreateOpen(true)}>
-              <Text style={styles.emptyBtnText}>+ New project</Text>
-            </TouchableOpacity>
+            <Text style={styles.emptySub}>
+              Accept a job from the Jobs tab, or create a private workspace when your plan allows.
+            </Text>
+            {canCreatePrivate ? (
+              <TouchableOpacity style={styles.emptyBtn} onPress={() => setCreateOpen(true)}>
+                <Text style={styles.emptyBtnText}>+ New private project</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         }
-        renderItem={({ item }) => renderProjectCard(item)}
+        renderItem={({ item }) => renderCard(item)}
         ListFooterComponent={
-          archivedRows.length ? (
+          archivedListings.length ? (
             <View style={styles.archiveWrap}>
               <TouchableOpacity style={styles.archiveHeader} onPress={() => setArchiveOpen((v) => !v)}>
-                <Text style={styles.archiveTitle}>Archived ({archivedRows.length})</Text>
+                <Text style={styles.archiveTitle}>Archived ({archivedListings.length})</Text>
                 <Text style={styles.archiveToggle}>{archiveOpen ? 'Hide' : 'Show'}</Text>
               </TouchableOpacity>
-              {archiveOpen ? <View style={styles.archiveList}>{archivedRows.map((item) => <View key={item.id}>{renderProjectCard(item)}</View>)}</View> : null}
+              {archiveOpen ? (
+                <View style={styles.archiveList}>{archivedListings.map((item) => <View key={item.id}>{renderCard(item)}</View>)}</View>
+              ) : null}
             </View>
           ) : null
         }
@@ -486,7 +731,11 @@ export default function WorkspaceProjectsScreen() {
             />
 
             <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnGhost]} onPress={() => setEditOpen(false)} disabled={!!actingId}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnGhost]}
+                onPress={() => setEditOpen(false)}
+                disabled={!!actingId}
+              >
                 <Text style={styles.modalBtnGhostText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -525,21 +774,66 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: '#FFDC00',
   },
+  newBtnPlaceholder: { minWidth: 1, minHeight: 36 },
   newBtnText: { color: '#0a0a0a', fontWeight: '800', fontSize: 12 },
   title: { fontSize: 26, color: '#fff', fontWeight: '900', paddingHorizontal: 20, marginTop: 10 },
-  sub: { fontSize: 13, color: 'rgba(255,255,255,0.4)', paddingHorizontal: 20, marginTop: 6, marginBottom: 12 },
+  sub: { fontSize: 13, color: 'rgba(255,255,255,0.4)', paddingHorizontal: 20, marginTop: 6, marginBottom: 8 },
+  planHint: {
+    fontSize: 12,
+    color: 'rgba(255,220,0,0.55)',
+    paddingHorizontal: 20,
+    marginBottom: 10,
+    lineHeight: 17,
+  },
   error: { fontSize: 12, color: '#ff9b9b', paddingHorizontal: 20, marginBottom: 8 },
-  list: { paddingHorizontal: 20, paddingBottom: 40, gap: 10, flexGrow: 1 },
+  list: { paddingHorizontal: 20, paddingBottom: 40, gap: 12, flexGrow: 1 },
   card: {
     backgroundColor: '#111',
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    padding: 14,
+    overflow: 'hidden',
   },
-  cardTitle: { fontSize: 15, color: '#fff', fontWeight: '700', marginBottom: 6 },
-  cardMeta: { fontSize: 12, color: 'rgba(255,255,255,0.35)' },
-  cardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  cardMain: { padding: 14 },
+  cardTop: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+  logo: { width: 48, height: 48, backgroundColor: '#fff' },
+  logoRound: { borderRadius: 24 },
+  logoSquare: { borderRadius: 12 },
+  cardHead: { flex: 1, minWidth: 0 },
+  titleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 4 },
+  cardTitle: { fontSize: 16, color: '#fff', fontWeight: '800', flex: 1, minWidth: 0 },
+  badgePrivate: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,220,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.28)',
+  },
+  badgePrivateText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    color: '#FFDC00',
+    textTransform: 'uppercase',
+  },
+  cardSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.55)', fontWeight: '600', marginBottom: 4 },
+  cardMeta: { fontSize: 11, color: 'rgba(255,255,255,0.32)' },
+  budgetLine: {
+    marginTop: 12,
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#FFDC00',
+    letterSpacing: 0.3,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    paddingTop: 4,
+  },
   cardBtnPrimary: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: '#FFDC00' },
   cardBtnPrimaryText: { fontSize: 12, color: '#0a0a0a', fontWeight: '800' },
   cardBtnGhost: {
@@ -586,7 +880,7 @@ const styles = StyleSheet.create({
   },
   archiveTitle: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '800' },
   archiveToggle: { color: '#FFDC00', fontSize: 12, fontWeight: '700' },
-  archiveList: { marginTop: 8, gap: 10 },
+  archiveList: { marginTop: 8, gap: 12 },
   blockTitle: { fontSize: 19, color: '#fff', fontWeight: '800', marginBottom: 8 },
   blockSub: { fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 20 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 20 },

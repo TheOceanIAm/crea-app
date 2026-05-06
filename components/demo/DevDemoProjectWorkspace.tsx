@@ -393,7 +393,9 @@ export function DevDemoProjectWorkspace() {
               )}
               {tab === 'files' && (
                 <View style={styles.placeholderBox}>
-                  <Text style={styles.placeholderText}>Files tab — connect to Supabase in a real project.</Text>
+                  <Text style={styles.placeholderText}>
+                    Files tab — contracts & PDFs in a real project (demo preview).
+                  </Text>
                 </View>
               )}
               {tab === 'production' && (

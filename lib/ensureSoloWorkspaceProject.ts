@@ -24,7 +24,7 @@ export async function ensureSoloWorkspaceProjectRow(
   const { data: job, error: jobErr } = await supabase
     .from('jobs')
     .select(
-      'id, title, company_id, is_solo_workspace, status, budget_type, budget_amount, location, updated_at'
+      'id, title, company_id, is_solo_workspace, status, budget_type, budget_amount, budget_currency, location, updated_at'
     )
     .eq('id', projectOrJobId)
     .maybeSingle()
@@ -39,6 +39,7 @@ export async function ensureSoloWorkspaceProjectRow(
     status?: string | null
     budget_type?: string | null
     budget_amount?: number | null
+    budget_currency?: string | null
     location?: string | null
     updated_at?: string | null
   }
@@ -56,6 +57,7 @@ export async function ensureSoloWorkspaceProjectRow(
     status: typeof row.status === 'string' && row.status.trim() ? row.status : 'active',
     budget_type: row.budget_type ?? 'negotiable',
     budget_amount: row.budget_amount ?? null,
+    budget_currency: (row.budget_currency && String(row.budget_currency).trim()) || 'EUR',
     location: row.location?.trim() ? row.location : 'Remote',
   })
 
