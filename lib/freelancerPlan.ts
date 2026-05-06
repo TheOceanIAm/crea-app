@@ -18,6 +18,19 @@ export function resolveFreelancerPlanFromUser(user: User | null | undefined): Fr
   return 'starter'
 }
 
+export function resolveFreelancerPlanFromUserAndProfileTier(
+  user: User | null | undefined,
+  profilesSubscriptionTier: unknown
+): FreelancerPlan {
+  const fromUser = resolveFreelancerPlanFromUser(user)
+  if (fromUser !== 'starter') return fromUser
+  const p = norm(profilesSubscriptionTier)
+  if (p === 'workspace') return 'workspace'
+  if (p === 'pro') return 'pro'
+  if (p === 'premium') return 'premium'
+  return 'starter'
+}
+
 export function isFreelancerWorkspaceOnlyPlan(plan: FreelancerPlan): boolean {
   return plan === 'workspace'
 }

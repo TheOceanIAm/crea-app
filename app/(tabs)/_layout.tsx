@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AppState, Platform, View } from 'react-native'
+import { AppState, Platform, StyleSheet, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import { Tabs } from 'expo-router'
 import { Bell, Briefcase, House, MessageCircle, UserRound } from 'lucide-react-native'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
-import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import { countUnreadAlerts } from '@/lib/notificationsFeed'
 import { subscribeAlertsInvalidate } from '@/lib/invalidateAlerts'
 import { subscribeDmBadgeInvalidate } from '@/lib/invalidateDmBadge'
@@ -98,10 +98,15 @@ export default function TabLayout() {
         return
       }
       setUserId(user.id)
-      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role, subscription_tier')
+        .eq('id', user.id)
+        .maybeSingle()
       const role = resolveAppRole(profile?.role, user)
       const workspaceOnly =
-        isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))
+        isFreelancerProfile(role) &&
+        isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUserAndProfileTier(user, profile?.subscription_tier))
       setWorkspaceOnlyTabs(workspaceOnly)
       setCompanyTabs(role === 'company' || role === 'ceo')
       if (!workspaceOnly) {
@@ -231,7 +236,7 @@ export default function TabLayout() {
   }, [loadUnreadAlertsCount, userId, workspaceOnlyTabs])
 
   return (
-    <>
+    <View style={styles.tabsShell}>
       {Platform.OS !== 'web' ? <InAppNotificationBridge /> : null}
       <GoodNewsDailyModal
         visible={goodNewsPopup !== null}
@@ -429,6 +434,11 @@ export default function TabLayout() {
           }}
         />
       </Tabs>
-    </>
+    </View>
   )
 }
+
+const styles = StyleSheet.create({
+  /** CREA black behind all tab scenes (avoids default white while a screen loads) */
+  tabsShell: { flex: 1, backgroundColor: '#0a0a0a' },
+})

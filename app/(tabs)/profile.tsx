@@ -38,6 +38,7 @@ import {
   Share2,
 } from 'lucide-react-native'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
+import { LocationAutocompleteInput } from '@/components/LocationAutocompleteInput'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE, ICON_STROKE_LARGE } from '@/lib/iconTheme'
 import { pickAndUploadProfileAvatar } from '@/lib/uploadProfileAvatar'
@@ -55,6 +56,7 @@ import {
 import { registerForExpoPushTokenAsync } from '@/lib/pushNotifications'
 import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
 import { resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { postTrialPlan } from '@/lib/trialPlanApi'
 
 const SUPPORT_MAIL = 'mailto:support@crea.app?subject=CREA%20App%20Support'
 const TRIAL_END_LABEL = 'June 1, 2026'
@@ -215,15 +217,13 @@ export default function ProfileScreen() {
   const [taxNumber, setTaxNumber] = useState('')
   const [vatRegistered, setVatRegistered] = useState(false)
   const [savingInvoice, setSavingInvoice] = useState(false)
-  const [annualBudgetAmount, setAnnualBudgetAmount] = useState('')
-  const [annualBudgetCurrency, setAnnualBudgetCurrency] = useState('EUR')
-  const [annualBudgetYear, setAnnualBudgetYear] = useState(String(new Date().getFullYear()))
 
   const [notif, setNotif] = useState<NotificationSettings>({ ...DEFAULT_NOTIFICATION_SETTINGS })
   const [savingNotif, setSavingNotif] = useState(false)
   const [registeringPush, setRegisteringPush] = useState(false)
 
   const [subscriptionTier, setSubscriptionTier] = useState('starter')
+  const [switchingTrialPlan, setSwitchingTrialPlan] = useState(false)
 
   const [dayRate, setDayRate] = useState('')
   const [halfDayRate, setHalfDayRate] = useState('')
@@ -284,7 +284,7 @@ export default function ProfileScreen() {
     const { data, error } = await supabase
       .from('profiles')
       .select(
-        'name, role, headline, location, bio, skills, equipment, avatar_url, day_rate_amount, half_day_rate_amount, rates_currency, rates_notes, portfolio_website, portfolio_instagram, portfolio_linkedin, portfolio_vimeo, portfolio_behance, portfolio_projects, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, tax_number, vat_registered, annual_budget_amount, annual_budget_currency, annual_budget_year, notification_settings, subscription_tier'
+        'name, role, headline, location, bio, skills, equipment, avatar_url, day_rate_amount, half_day_rate_amount, rates_currency, rates_notes, portfolio_website, portfolio_instagram, portfolio_linkedin, portfolio_vimeo, portfolio_behance, portfolio_projects, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, tax_number, vat_registered, notification_settings, subscription_tier'
       )
       .eq('id', user.id)
       .single()
@@ -312,9 +312,6 @@ export default function ProfileScreen() {
       setInvoiceAddress('')
       setTaxNumber('')
       setVatRegistered(false)
-      setAnnualBudgetAmount('')
-      setAnnualBudgetCurrency('EUR')
-      setAnnualBudgetYear(String(new Date().getFullYear()))
       setNotif({ ...DEFAULT_NOTIFICATION_SETTINGS })
       setSubscriptionTier('starter')
       setDayRate('')
@@ -343,11 +340,6 @@ export default function ProfileScreen() {
       setInvoiceAddress(data?.invoice_address ?? '')
       setTaxNumber(data?.tax_number ?? '')
       setVatRegistered(Boolean(data?.vat_registered))
-      setAnnualBudgetAmount(data?.annual_budget_amount != null ? String(data.annual_budget_amount) : '')
-      setAnnualBudgetCurrency((data?.annual_budget_currency as string) || 'EUR')
-      setAnnualBudgetYear(
-        data?.annual_budget_year != null ? String(data.annual_budget_year) : String(new Date().getFullYear())
-      )
       setNotif(parseNotificationSettings(data?.notification_settings))
       const dbTier = String((data?.subscription_tier as string) || '')
         .trim()
@@ -389,6 +381,118 @@ export default function ProfileScreen() {
     useCallback(() => {
       load()
     }, [load])
+  )
+
+  useEffect(() => {
+    if (!switchingTrialPlan) return
+    const guard = setTimeout(() => {
+      setSwitchingTrialPlan(false)
+    }, 25000)
+    return () => clearTimeout(guard)
+  }, [switchingTrialPlan])
+
+  const switchTrialTier = useCallback(
+    async (target: 'starter' | 'pro' | 'studio' | 'agency') => {
+      if (switchingTrialPlan) return
+      setSwitchingTrialPlan(true)
+      const fallbackDirectTierUpdate = async (): Promise<boolean> => {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        if (!user) return false
+
+        if (target === 'starter' || target === 'pro') {
+          const { error: metaErr } = await supabase.auth.updateUser({
+            data: { freelancer_plan: target },
+          })
+          if (metaErr) return false
+        } else {
+          const { error: metaErr } = await supabase.auth.updateUser({
+            data: { company_plan: target },
+          })
+          if (metaErr) return false
+        }
+
+        const profileTier = target === 'studio' ? 'studio' : target === 'agency' ? 'agency' : target
+        const { error: profileErr } = await supabase
+          .from('profiles')
+          .update({ subscription_tier: profileTier })
+          .eq('id', user.id)
+        if (profileErr) return false
+
+        if (target === 'studio' || target === 'agency') {
+          const { error: companyErr } = await supabase
+            .from('company_profiles')
+            .update({ subscription_plan: target })
+            .eq('id', user.id)
+          if (companyErr) return false
+        }
+
+        return true
+      }
+      const withTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T | null> => {
+        return await Promise.race([
+          promise,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+        ])
+      }
+      try {
+        const res =
+          target === 'starter' || target === 'pro'
+            ? await postTrialPlan({ freelancer_plan: target })
+            : await postTrialPlan({ company_plan: target })
+
+        if (!res.ok) {
+          if (res.error === 'timeout' || res.error === 'network_error') {
+            const localOk = await fallbackDirectTierUpdate()
+            if (localOk) {
+              await withTimeout(supabase.auth.refreshSession(), 6000)
+              if (target === 'starter' || target === 'pro') {
+                setSubscriptionTier(target)
+              } else if (target === 'studio') {
+                setSubscriptionTier('studio')
+              } else {
+                setSubscriptionTier('agency')
+              }
+              void load()
+              Alert.alert(
+                'Plan aktualisiert',
+                'Der Plan wurde direkt in der App aktualisiert (Web-Sync war gerade nicht erreichbar).'
+              )
+              return
+            }
+          }
+          const errorCopy =
+            res.error === 'missing_web_url'
+              ? 'Web-URL fehlt. Bitte setze EXPO_PUBLIC_CREA_WEB_URL.'
+              : res.error === 'timeout'
+                ? 'Zeitüberschreitung beim Planwechsel. Prüfe Internetverbindung und ob creaservices.de erreichbar ist.'
+                : res.error === 'network_error'
+                  ? 'Netzwerkfehler beim Planwechsel. Bitte erneut versuchen.'
+                  : res.error || 'Bitte später erneut versuchen.'
+          Alert.alert(
+            'Plan konnte nicht gewechselt werden',
+            errorCopy
+          )
+          return
+        }
+
+        // Never block the CTA forever on slow auth/profile refreshes.
+        await withTimeout(supabase.auth.refreshSession(), 6000)
+        if (target === 'starter' || target === 'pro') {
+          setSubscriptionTier(target)
+        } else if (target === 'studio') {
+          setSubscriptionTier('studio')
+        } else {
+          setSubscriptionTier('agency')
+        }
+        void load()
+        Alert.alert('Plan aktualisiert', 'Dein Trial-Plan wurde aktualisiert.')
+      } finally {
+        setSwitchingTrialPlan(false)
+      }
+    },
+    [load, switchingTrialPlan]
   )
 
   const displayLetter = useMemo(
@@ -578,40 +682,6 @@ export default function ProfileScreen() {
       return
     }
     Alert.alert('Saved', 'Invoice details were saved.')
-  }
-
-  const saveAnnualBudget = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return
-    const rawAmount = annualBudgetAmount.trim()
-    const parsedAmount = rawAmount === '' ? null : Number(rawAmount.replace(',', '.'))
-    if (parsedAmount != null && (!Number.isFinite(parsedAmount) || parsedAmount < 0)) {
-      Alert.alert('Budget', 'Please enter a valid non-negative yearly budget.')
-      return
-    }
-    const parsedYear = Number(annualBudgetYear.trim())
-    if (!Number.isInteger(parsedYear) || parsedYear < 2000 || parsedYear > 3000) {
-      Alert.alert('Budget', 'Please enter a valid budget year (e.g. 2026).')
-      return
-    }
-    const currency = annualBudgetCurrency.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'EUR'
-    setSavingInvoice(true)
-    const { error } = await supabase
-      .from('profiles')
-      .update({
-        annual_budget_amount: parsedAmount,
-        annual_budget_currency: currency,
-        annual_budget_year: parsedYear,
-      })
-      .eq('id', user.id)
-    setSavingInvoice(false)
-    if (error) {
-      Alert.alert('Save failed', error.message)
-      return
-    }
-    Alert.alert('Saved', 'Annual budget was updated.')
   }
 
   const writeNotificationSettings = async (
@@ -933,12 +1003,11 @@ export default function ProfileScreen() {
                 </Text>
 
                 <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Location</Text>
-                <TextInput
-                  style={styles.input}
+                <LocationAutocompleteInput
                   value={location}
                   onChangeText={setLocation}
                   placeholder="e.g. Berlin, Germany"
-                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  inputStyle={styles.input}
                 />
 
                 <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Bio</Text>
@@ -1364,40 +1433,6 @@ export default function ProfileScreen() {
                 </View>
               </View>
 
-              <View style={styles.sectionCard}>
-                <Text style={styles.cardTitle}>Annual budget</Text>
-                <Text style={styles.cardSubtitle}>
-                  Used in Invoice budget overview (year budget, active project costs, paid/caused, overdue).
-                </Text>
-                <Text style={styles.fieldLabel}>Year</Text>
-                <TextInput
-                  style={styles.input}
-                  value={annualBudgetYear}
-                  onChangeText={setAnnualBudgetYear}
-                  placeholder="2026"
-                  placeholderTextColor="rgba(255,255,255,0.28)"
-                  keyboardType="number-pad"
-                />
-                <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Currency</Text>
-                <TextInput
-                  style={styles.input}
-                  value={annualBudgetCurrency}
-                  onChangeText={setAnnualBudgetCurrency}
-                  placeholder="EUR"
-                  placeholderTextColor="rgba(255,255,255,0.28)"
-                  autoCapitalize="characters"
-                />
-                <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Budget amount</Text>
-                <TextInput
-                  style={styles.input}
-                  value={annualBudgetAmount}
-                  onChangeText={setAnnualBudgetAmount}
-                  placeholder="e.g. 250000"
-                  placeholderTextColor="rgba(255,255,255,0.28)"
-                  keyboardType="decimal-pad"
-                />
-              </View>
-
               <TouchableOpacity
                 style={[styles.primaryBtn, savingInvoice && styles.btnDisabled]}
                 onPress={saveInvoiceBank}
@@ -1407,18 +1442,6 @@ export default function ProfileScreen() {
                   <ActivityIndicator color="#0a0a0a" />
                 ) : (
                   <Text style={styles.primaryBtnText}>Save changes</Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.secondaryBtn, savingInvoice && styles.btnDisabled]}
-                onPress={saveAnnualBudget}
-                disabled={savingInvoice}
-              >
-                {savingInvoice ? (
-                  <ActivityIndicator color="#FFDC00" />
-                ) : (
-                  <Text style={styles.secondaryBtnText}>Save annual budget</Text>
                 )}
               </TouchableOpacity>
 
@@ -1566,27 +1589,19 @@ export default function ProfileScreen() {
                       title="Studio"
                       price="€89 / month"
                       desc="Up to 5 active project listings, crew pool up to 20, contract generator, standard support."
-                      cta="Checkout after trial"
+                      cta={companyPlanTier === 'studio' ? 'Active' : switchingTrialPlan ? 'Switching…' : 'Use in trial'}
                       current={companyPlanTier === 'studio'}
-                      onPress={() =>
-                        Alert.alert(
-                          'Subscribe on the web',
-                          'After your trial, complete checkout on creaservices.de under Settings → Plan & billing.'
-                        )
-                      }
+                      disabled={companyPlanTier === 'studio' || switchingTrialPlan}
+                      onPress={() => void switchTrialTier('studio')}
                     />
                     <PlanRow
                       title="Agency"
                       price="€129 / month"
                       desc="Up to 15 listings, crew pool up to 50, team access (up to 3 users), integrations + priority support."
-                      cta="Checkout after trial"
+                      cta={companyPlanTier === 'agency' ? 'Active' : switchingTrialPlan ? 'Switching…' : 'Use in trial'}
                       current={companyPlanTier === 'agency'}
-                      onPress={() =>
-                        Alert.alert(
-                          'Subscribe on the web',
-                          'After your trial, complete checkout on creaservices.de under Settings → Plan & billing.'
-                        )
-                      }
+                      disabled={companyPlanTier === 'agency' || switchingTrialPlan}
+                      onPress={() => void switchTrialTier('agency')}
                     />
                     <PlanRow
                       title="Business"
@@ -1629,27 +1644,19 @@ export default function ProfileScreen() {
                       title="Starter"
                       price="€9 / month"
                       desc="Basic profile, basic project feed, 2 active bookings/month, standard support."
-                      cta="Checkout after trial"
+                      cta={subscriptionTier === 'starter' ? 'Active' : switchingTrialPlan ? 'Switching…' : 'Use in trial'}
                       current={subscriptionTier === 'starter'}
-                      onPress={() =>
-                        Alert.alert(
-                          'Subscribe on the web',
-                          'After your trial ends, you can subscribe on creaservices.de — Settings → Plan & billing.'
-                        )
-                      }
+                      disabled={subscriptionTier === 'starter' || switchingTrialPlan}
+                      onPress={() => void switchTrialTier('starter')}
                     />
                     <PlanRow
                       title="Pro"
                       price="€19 / month"
                       desc="Everything in Starter + post project listings, 5 active bookings/month, Project feed+."
-                      cta="Checkout after trial"
+                      cta={subscriptionTier === 'pro' ? 'Active' : switchingTrialPlan ? 'Switching…' : 'Use in trial'}
                       current={subscriptionTier === 'pro'}
-                      onPress={() =>
-                        Alert.alert(
-                          'Subscribe on the web',
-                          'After your trial ends, you can subscribe on creaservices.de — Settings → Plan & billing.'
-                        )
-                      }
+                      disabled={subscriptionTier === 'pro' || switchingTrialPlan}
+                      onPress={() => void switchTrialTier('pro')}
                     />
                     <PlanRow
                       title="Premium"

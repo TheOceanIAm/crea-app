@@ -365,7 +365,7 @@ export default function CeoRevenueScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a', paddingHorizontal: 20 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', padding: 24 },
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 10, alignSelf: 'flex-start' },
   backText: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },
   kicker: {

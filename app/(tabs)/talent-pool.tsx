@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ScrollView,
   Alert,
   TextInput,
+  RefreshControl,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter, type Href } from 'expo-router'
@@ -17,7 +18,7 @@ import { ChevronLeft, MapPin, Star } from 'lucide-react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '@/lib/supabase'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
-import { isFreelancerTalentPoolPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { isFreelancerTalentPoolPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import { ICON_STROKE } from '@/lib/iconTheme'
 
 type TalentRow = {
@@ -83,6 +84,8 @@ export default function TalentPoolScreen() {
   const [skillsQuery, setSkillsQuery] = useState('')
   const [listFilter, setListFilter] = useState<'all' | 'favorites'>('all')
   const [meId, setMeId] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const realtimeReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback(async () => {
     setLoadError(null)
@@ -97,9 +100,9 @@ export default function TalentPoolScreen() {
       return
     }
     setMeId(user.id)
-    const { data: p } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+    const { data: p } = await supabase.from('profiles').select('role, subscription_tier').eq('id', user.id).single()
     const role = resolveAppRole(p?.role, user)
-    const plan = resolveFreelancerPlanFromUser(user)
+    const plan = resolveFreelancerPlanFromUserAndProfileTier(user, p?.subscription_tier)
     const canViewTalentPool =
       isCompanyProfile(role) ||
       isCeoProfile(role) ||
@@ -266,6 +269,49 @@ export default function TalentPoolScreen() {
   useFocusEffect(
     useCallback(() => {
       void load()
+    }, [load])
+  )
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await load()
+    } finally {
+      setRefreshing(false)
+    }
+  }, [load])
+
+  useFocusEffect(
+    useCallback(() => {
+      const scheduleReload = () => {
+        if (realtimeReloadTimerRef.current) clearTimeout(realtimeReloadTimerRef.current)
+        realtimeReloadTimerRef.current = setTimeout(() => {
+          void load()
+          realtimeReloadTimerRef.current = null
+        }, 450)
+      }
+
+      const channel = supabase
+        .channel('talent-pool-live')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'freelancer_profiles' },
+          scheduleReload
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'profiles', filter: 'role=eq.freelancer' },
+          scheduleReload
+        )
+        .subscribe()
+
+      return () => {
+        if (realtimeReloadTimerRef.current) {
+          clearTimeout(realtimeReloadTimerRef.current)
+          realtimeReloadTimerRef.current = null
+        }
+        void supabase.removeChannel(channel)
+      }
     }, [load])
   )
 
@@ -577,6 +623,7 @@ export default function TalentPoolScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor="#FFDC00" />}
         ListEmptyComponent={
           !loadError ? (
             <Text style={styles.empty}>
@@ -677,7 +724,7 @@ export default function TalentPoolScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', padding: 24 },
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 20, paddingTop: 8 },
   backText: { fontSize: 16, fontWeight: '600', color: '#FFDC00' },
   title: {

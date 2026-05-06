@@ -1063,7 +1063,7 @@ const styles = StyleSheet.create({
   bodyWrap: { flex: 1, paddingHorizontal: 16 },
   flexFill: { flex: 1 },
   flexTabInner: { flex: 1, minHeight: 0 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', padding: 24 },
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 16 },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 12 },
   backLabel: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },

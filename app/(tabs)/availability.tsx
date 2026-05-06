@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   View,
   Text,
@@ -13,8 +13,6 @@ import {
   Platform,
   useWindowDimensions,
   PanResponder,
-  type NativeSyntheticEvent,
-  type NativeScrollEvent,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -264,7 +262,6 @@ export default function AvailabilityScreen() {
   const { width: windowWidth } = useWindowDimensions()
   const cardGutter = 12
   const pageWidth = Math.max(280, windowWidth - cardGutter * 2)
-  const scrollRef = useRef<ScrollView>(null)
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -313,20 +310,6 @@ export default function AvailabilityScreen() {
   useEffect(() => {
     load()
   }, [load])
-
-  useLayoutEffect(() => {
-    scrollRef.current?.scrollTo({ x: pageWidth, animated: false })
-  }, [cursor, pageWidth])
-
-  const onMomentumScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const x = e.nativeEvent.contentOffset.x
-    const page = Math.round(x / pageWidth)
-    if (page === 0) {
-      setCursor((c) => addMonths(c, -1))
-    } else if (page === 2) {
-      setCursor((c) => addMonths(c, 1))
-    }
-  }
 
   const shiftMonth = useCallback((delta: number) => {
     setCursor((c) => addMonths(c, delta))
@@ -394,8 +377,6 @@ export default function AvailabilityScreen() {
   }
 
   const bottomPad = TAB_BAR_HEIGHT + insets.bottom + 24
-  const prev = addMonths(cursor, -1)
-  const next = addMonths(cursor, 1)
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -425,8 +406,8 @@ export default function AvailabilityScreen() {
           <Text style={styles.title}>Set it once.</Text>
           <Text style={styles.titleAccent}>Everyone sees it.</Text>
           <Text style={styles.subtitle}>
-            Change month: arrows next to the month name, or swipe horizontally on the title / weekday row. Days: tap
-            to cycle free → busy → blocked; drag horizontally to paint the same state.
+            Change month only with the arrows beside the month name (swiping the grid won’t change months). Days: tap
+            to cycle free → busy → blocked; drag across days to paint the same state.
             {defaultMode === 'available'
               ? ' Open (green) is the default; mark grey where you are not free.'
               : ' Empty days are blocked until you mark them free (older calendar format).'}
@@ -445,54 +426,21 @@ export default function AvailabilityScreen() {
 
           <View style={styles.swipeHint}>
             <ChevronLeft size={14} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
-            <Text style={styles.swipeHintText}>Change month</Text>
+            <Text style={styles.swipeHintText}>Month: use arrows in the calendar</Text>
             <ChevronRight size={14} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
           </View>
 
           <View style={[styles.calendarCard, { marginHorizontal: cardGutter }]}>
-            <ScrollView
-              ref={scrollRef}
-              horizontal
-              pagingEnabled
-              nestedScrollEnabled
-              directionalLockEnabled={Platform.OS === 'ios'}
-              keyboardShouldPersistTaps="always"
-              showsHorizontalScrollIndicator={false}
-              decelerationRate="fast"
-              onMomentumScrollEnd={onMomentumScrollEnd}
-              contentContainerStyle={{ width: pageWidth * 3 }}
-            >
-              <MonthPage
-                pageWidth={pageWidth}
-                year={prev.getFullYear()}
-                monthIndex={prev.getMonth()}
-                days={days}
-                defaultMode={defaultMode}
-                todayISO={todayISO}
-                onPaintDay={paintDay}
-                onShiftMonth={shiftMonth}
-              />
-              <MonthPage
-                pageWidth={pageWidth}
-                year={cursor.getFullYear()}
-                monthIndex={cursor.getMonth()}
-                days={days}
-                defaultMode={defaultMode}
-                todayISO={todayISO}
-                onPaintDay={paintDay}
-                onShiftMonth={shiftMonth}
-              />
-              <MonthPage
-                pageWidth={pageWidth}
-                year={next.getFullYear()}
-                monthIndex={next.getMonth()}
-                days={days}
-                defaultMode={defaultMode}
-                todayISO={todayISO}
-                onPaintDay={paintDay}
-                onShiftMonth={shiftMonth}
-              />
-            </ScrollView>
+            <MonthPage
+              pageWidth={pageWidth}
+              year={cursor.getFullYear()}
+              monthIndex={cursor.getMonth()}
+              days={days}
+              defaultMode={defaultMode}
+              todayISO={todayISO}
+              onPaintDay={paintDay}
+              onShiftMonth={shiftMonth}
+            />
 
             <View style={styles.legend}>
               <View style={styles.legendItem}>

@@ -175,36 +175,50 @@ export default function InvoicesListScreen() {
       }
       const { data: projectRows, error: projectErr } = await projectQuery
       if (!projectErr) {
-        const { data: profileBudgetRow } = await supabase
-          .from('profiles')
-          .select('annual_budget_amount, annual_budget_currency, annual_budget_year')
-          .eq('id', user.id)
-          .maybeSingle()
-        const budgetAmount =
-          typeof profileBudgetRow?.annual_budget_amount === 'number'
-            ? profileBudgetRow.annual_budget_amount
-            : null
-        const budgetYear =
-          typeof profileBudgetRow?.annual_budget_year === 'number'
-            ? profileBudgetRow.annual_budget_year
-            : null
-        setAnnualBudgetAmount(budgetAmount != null ? String(budgetAmount) : '')
-        setAnnualBudgetCurrency(
-          typeof profileBudgetRow?.annual_budget_currency === 'string'
-            ? profileBudgetRow.annual_budget_currency.toUpperCase()
-            : 'EUR'
-        )
-        setAnnualBudgetYear(budgetYear != null ? String(budgetYear) : String(new Date().getFullYear()))
-        setBudgetOverview(
-          computeBudgetOverview((projectRows as ProjectBudgetRow[]) ?? [], (data as InvoiceRow[]) ?? [], {
-            amount: budgetAmount,
-            year: budgetYear,
-            currency:
-              typeof profileBudgetRow?.annual_budget_currency === 'string'
-                ? profileBudgetRow.annual_budget_currency
-                : null,
-          })
-        )
+        if (role === 'company') {
+          const { data: profileBudgetRow } = await supabase
+            .from('profiles')
+            .select('annual_budget_amount, annual_budget_currency, annual_budget_year')
+            .eq('id', user.id)
+            .maybeSingle()
+          const budgetAmount =
+            typeof profileBudgetRow?.annual_budget_amount === 'number'
+              ? profileBudgetRow.annual_budget_amount
+              : null
+          const budgetYear =
+            typeof profileBudgetRow?.annual_budget_year === 'number'
+              ? profileBudgetRow.annual_budget_year
+              : null
+          setAnnualBudgetAmount(budgetAmount != null ? String(budgetAmount) : '')
+          setAnnualBudgetCurrency(
+            typeof profileBudgetRow?.annual_budget_currency === 'string'
+              ? profileBudgetRow.annual_budget_currency.toUpperCase()
+              : 'EUR'
+          )
+          setAnnualBudgetYear(budgetYear != null ? String(budgetYear) : String(new Date().getFullYear()))
+          setBudgetOverview(
+            computeBudgetOverview((projectRows as ProjectBudgetRow[]) ?? [], (data as InvoiceRow[]) ?? [], {
+              amount: budgetAmount,
+              year: budgetYear,
+              currency:
+                typeof profileBudgetRow?.annual_budget_currency === 'string'
+                  ? profileBudgetRow.annual_budget_currency
+                  : null,
+            })
+          )
+        } else {
+          /** Freelancers: no annual company budget — earnings overview only (invoice + project totals). */
+          setAnnualBudgetAmount('')
+          setAnnualBudgetCurrency('EUR')
+          setAnnualBudgetYear(String(new Date().getFullYear()))
+          setBudgetOverview(
+            computeBudgetOverview((projectRows as ProjectBudgetRow[]) ?? [], (data as InvoiceRow[]) ?? [], {
+              amount: null,
+              year: null,
+              currency: null,
+            })
+          )
+        }
       } else {
         setBudgetOverview(null)
       }
@@ -394,14 +408,14 @@ export default function InvoicesListScreen() {
                   <>
                     <Text style={styles.overviewTitleFreelancer}>Earnings overview</Text>
                     <Text style={styles.overviewSubFreelancer}>
-                      Year to date{budgetOverview.annualBudgetYear ? ` · ${budgetOverview.annualBudgetYear}` : ''}
+                      Year to date · {new Date().getFullYear()}
                     </Text>
                     <View style={styles.kpiStackFreelancer}>
                       <View style={styles.kpiStatRow}>
                         <View style={styles.kpiStatLeft}>
                           <Text style={styles.kpiStatLabel}>Total earned</Text>
                           <Text style={styles.kpiStatMeta}>
-                            {budgetOverview.annualBudgetYear ? `${budgetOverview.annualBudgetYear} YTD` : 'YTD'}
+                            {new Date().getFullYear()} YTD
                           </Text>
                         </View>
                         <Text style={[styles.kpiStatValue, styles.kpiStatValueEarned]}>

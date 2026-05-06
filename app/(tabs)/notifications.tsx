@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
@@ -39,6 +39,7 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
+  const firstAlertsFocus = useRef(true)
 
   const load = useCallback(async () => {
     const {
@@ -60,27 +61,30 @@ export default function NotificationsScreen() {
   }, [])
 
   useEffect(() => {
-    const run = async () => {
-      setLoading(true)
-      try {
-        await load()
-      } finally {
-        setLoading(false)
-      }
-    }
-    void run()
-  }, [load])
-
-  useEffect(() => {
     const sub = supabase.auth.onAuthStateChange(() => void load())
     return () => sub.data.subscription.unsubscribe()
   }, [load])
 
   useFocusEffect(
     useCallback(() => {
-      void load().then(() => {
-        invalidateAlertsBadge()
-      })
+      let cancelled = false
+      const run = async () => {
+        const showFullScreen = firstAlertsFocus.current
+        if (showFullScreen) setLoading(true)
+        try {
+          await load()
+          if (!cancelled) invalidateAlertsBadge()
+        } finally {
+          if (showFullScreen && !cancelled) {
+            setLoading(false)
+            firstAlertsFocus.current = false
+          }
+        }
+      }
+      void run()
+      return () => {
+        cancelled = true
+      }
     }, [load])
   )
 
@@ -221,6 +225,6 @@ const styles = StyleSheet.create({
   time: { color: 'rgba(255,255,255,0.35)', fontSize: 11 },
   cardTitle: { color: '#fff', fontSize: 14, fontWeight: '700', marginBottom: 4 },
   body: { color: 'rgba(255,255,255,0.62)', fontSize: 12, lineHeight: 17 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', padding: 24 },
   empty: { color: 'rgba(255,255,255,0.5)', fontSize: 14, textAlign: 'center' },
 })

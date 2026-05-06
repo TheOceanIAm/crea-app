@@ -127,6 +127,7 @@ export function AvailabilityMonthPreview({
 
   const panResponder = useMemo(
     () =>
+      // Claim touches immediately so profile ScrollView doesn’t steal horizontal drag-selection.
       PanResponder.create({
         onStartShouldSetPanResponder: () =>
           Boolean(interactive && onCommitBookingSelection),
@@ -263,7 +264,7 @@ export function AvailabilityMonthPreview({
           {interactive
             ? calendar.version === 3
               ? availableCount > 0
-                ? `Tap an open day, or drag across open days to select several — then book. Grey = blocked, red = busy.`
+                ? `Tap an open day, or drag across open days to select several — then book. Change month only with ← → (no swipe on the grid). Grey = blocked, red = busy.`
                 : 'No open days this month (all blocked or busy).'
               : !hasAny
                 ? 'No availability published yet. Once they add free days, tap green days to invite.'

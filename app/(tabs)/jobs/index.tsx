@@ -15,7 +15,7 @@ import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
-import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 
 type Job = {
   id: string
@@ -59,10 +59,15 @@ export default function JobsListScreen() {
     } = await supabase.auth.getUser()
     let role: string | null = null
     if (user) {
-      const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('role, subscription_tier')
+        .eq('id', user.id)
+        .maybeSingle()
       role = resolveAppRole(prof?.role, user)
       const isWorkspaceFreelancer =
-        role === 'freelancer' && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))
+        role === 'freelancer' &&
+        isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier))
       setWorkspaceOnly(isWorkspaceFreelancer)
       if (isWorkspaceFreelancer) {
         setJobs([])

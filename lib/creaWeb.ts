@@ -2,7 +2,11 @@ import { Linking } from 'react-native'
 
 /** Base URL for the Crea web app (Brief AI, Frame.io deep links, etc.) */
 export function getCreaWebBaseUrl(): string {
-  return (process.env.EXPO_PUBLIC_CREA_WEB_URL || '').replace(/\/$/, '')
+  const raw = (process.env.EXPO_PUBLIC_CREA_WEB_URL || '').trim().replace(/\/$/, '')
+  if (!raw) return ''
+  // Avoid extra 307 redirect (creaservices.de -> www.creaservices.de) for mobile API calls.
+  if (raw === 'https://creaservices.de') return 'https://www.creaservices.de'
+  return raw
 }
 
 export function openProjectOnWeb(projectId: string, path = ''): void {

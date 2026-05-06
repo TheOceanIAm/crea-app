@@ -19,7 +19,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { getCreaWebBaseUrl, openProjectOnWeb } from '@/lib/creaWeb'
 import { jobShareUrl } from '@/lib/shareLinks'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
-import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 
 type JobRow = {
@@ -68,10 +68,17 @@ export default function JobDetailScreen() {
 
     let resolvedRole: string | null = null
     if (user) {
-      const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('role, subscription_tier')
+        .eq('id', user.id)
+        .single()
       resolvedRole = resolveAppRole(prof?.role, user)
       setRole(prof?.role ?? null)
-      if (resolvedRole === 'freelancer' && isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUser(user))) {
+      if (
+        resolvedRole === 'freelancer' &&
+        isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier))
+      ) {
         setAccessDenied(true)
         setJob(null)
         setCompanyName('Company')
@@ -412,7 +419,7 @@ export default function JobDetailScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', padding: 24 },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',

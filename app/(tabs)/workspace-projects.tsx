@@ -16,7 +16,7 @@ import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
-import { canFreelancerCreatePrivateProjects, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { canFreelancerCreatePrivateProjects, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 
 type WorkspaceProject = {
   id: string
@@ -69,7 +69,11 @@ export default function WorkspaceProjectsScreen() {
       return
     }
 
-    const { data: p } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+    const { data: p } = await supabase
+      .from('profiles')
+      .select('role, subscription_tier')
+      .eq('id', user.id)
+      .maybeSingle()
     const role = resolveAppRole(p?.role, user)
     if (!isFreelancerProfile(role) || isCompanyProfile(role) || isCeoProfile(role)) {
       setAllowed(false)
@@ -78,7 +82,7 @@ export default function WorkspaceProjectsScreen() {
       setLoading(false)
       return
     }
-    const plan = resolveFreelancerPlanFromUser(user)
+    const plan = resolveFreelancerPlanFromUserAndProfileTier(user, p?.subscription_tier)
     if (!canFreelancerCreatePrivateProjects(plan)) {
       setAllowed(false)
       setDenyKind('plan')
@@ -130,7 +134,16 @@ export default function WorkspaceProjectsScreen() {
     const {
       data: { user: u },
     } = await supabase.auth.getUser()
-    if (!u || !canFreelancerCreatePrivateProjects(resolveFreelancerPlanFromUser(u))) {
+    if (!u) {
+      Alert.alert('Private projects', 'Please sign in again.')
+      return
+    }
+    const { data: selfProfile } = await supabase
+      .from('profiles')
+      .select('subscription_tier')
+      .eq('id', u.id)
+      .maybeSingle()
+    if (!canFreelancerCreatePrivateProjects(resolveFreelancerPlanFromUserAndProfileTier(u, selfProfile?.subscription_tier))) {
       Alert.alert('Private projects', 'Available on Pro or Workspace. Upgrade in your account on the web.')
       return
     }

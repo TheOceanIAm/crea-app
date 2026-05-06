@@ -275,7 +275,7 @@ export default function NewInvoiceScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', padding: 24 },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 12, alignSelf: 'flex-start' },
   backLabel: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },
   scroll: { flex: 1 },

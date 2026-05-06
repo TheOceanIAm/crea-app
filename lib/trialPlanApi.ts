@@ -15,19 +15,39 @@ export async function postTrialPlan(body: { freelancer_plan?: string; company_pl
   const token = session?.access_token
   if (!token) return { ok: false, error: 'no_session' }
 
-  const res = await fetch(`${base}/api/me/trial-plan`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  })
+  const candidates = [base]
+  if (base === 'https://www.creaservices.de') candidates.push('https://creaservices.de')
+  if (base === 'https://creaservices.de') candidates.push('https://www.creaservices.de')
 
-  if (!res.ok) {
-    const j = (await res.json().catch(() => ({}))) as { error?: string }
-    return { ok: false, error: typeof j.error === 'string' ? j.error : `HTTP ${res.status}` }
+  let lastError: string | undefined
+  for (const candidateBase of candidates) {
+    try {
+      const res = (await Promise.race([
+        fetch(`${candidateBase}/api/me/trial-plan`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(body),
+        }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 20000)),
+      ])) as Response | null
+
+      if (!res) {
+        lastError = 'timeout'
+        continue
+      }
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        return { ok: false, error: typeof j.error === 'string' ? j.error : `HTTP ${res.status}` }
+      }
+      return { ok: true }
+    } catch (e) {
+      lastError = 'network_error'
+      continue
+    }
   }
 
-  return { ok: true }
+  return { ok: false, error: lastError || 'network_error' }
 }
