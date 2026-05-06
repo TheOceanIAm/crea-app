@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   View,
   Text,
@@ -12,7 +12,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   useWindowDimensions,
-  PanResponder,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -25,7 +24,6 @@ import {
   type CellState,
   DAY_LABELS_EN,
   effectiveDayStateMap,
-  nextCellState,
   parseAvailabilityCalendar,
   toISODateLocal,
   toJsonPayload,
@@ -34,12 +32,6 @@ import { addMonths, buildMonthSlotMatrix, formatMonthTitle } from '@/lib/calenda
 
 const TAB_BAR_HEIGHT = 80
 
-const CELL_GAP = 4
-/** Below slop: no paint mode — vertical scroll / small moves stay on outer ScrollView or Pressable. */
-const PAINT_MOVE_SLOP = 10
-
-type GridMetrics = { cellW: number; rowH: number; numRows: number }
-
 type MonthPageProps = {
   pageWidth: number
   year: number
@@ -47,33 +39,9 @@ type MonthPageProps = {
   days: Record<string, CellState>
   defaultMode: CalendarDefaultMode
   todayISO: string
-  onPaintDay: (iso: string, target: CellState) => void
+  selectedIsos: ReadonlySet<string>
+  onTapDay: (iso: string) => void
   onShiftMonth: (delta: number) => void
-}
-
-function hitTestIso(
-  x: number,
-  y: number,
-  metrics: GridMetrics,
-  slotMatrix: (string | null)[][]
-): string | null {
-  const { cellW, rowH, numRows } = metrics
-  let yRem = y
-  for (let ri = 0; ri < numRows; ri++) {
-    if (yRem >= 0 && yRem < rowH) {
-      let xRem = x
-      for (let ci = 0; ci < 7; ci++) {
-        if (xRem >= 0 && xRem < cellW) {
-          const iso = slotMatrix[ri]?.[ci] ?? null
-          return iso
-        }
-        xRem -= cellW + CELL_GAP
-      }
-      return null
-    }
-    yRem -= rowH + CELL_GAP
-  }
-  return null
 }
 
 function MonthPage({
@@ -83,91 +51,11 @@ function MonthPage({
   days,
   defaultMode,
   todayISO,
-  onPaintDay,
+  selectedIsos,
+  onTapDay,
   onShiftMonth,
 }: MonthPageProps) {
   const slotMatrix = useMemo(() => buildMonthSlotMatrix(year, monthIndex), [year, monthIndex])
-  const [metrics, setMetrics] = useState<GridMetrics | null>(null)
-  const daysRef = useRef(days)
-  daysRef.current = days
-
-  useEffect(() => {
-    setMetrics(null)
-  }, [year, monthIndex])
-
-  const visitedRef = useRef(new Set<string>())
-  const paintTargetRef = useRef<CellState | null>(null)
-  const isPaintingRef = useRef(false)
-
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        // Start paint mode immediately on touch-down so drag selection is reliable.
-        onStartShouldSetPanResponder: () => true,
-        onStartShouldSetPanResponderCapture: () => true,
-        onMoveShouldSetPanResponder: (_, gs) => {
-          const ax = Math.abs(gs.dx)
-          const ay = Math.abs(gs.dy)
-          if (ax < PAINT_MOVE_SLOP && ay < PAINT_MOVE_SLOP) return false
-          return true
-        },
-        onMoveShouldSetPanResponderCapture: (_, gs) => {
-          const ax = Math.abs(gs.dx)
-          const ay = Math.abs(gs.dy)
-          return ax >= PAINT_MOVE_SLOP || ay >= PAINT_MOVE_SLOP
-        },
-        // Keep control while painting; otherwise outer ScrollViews can steal the gesture.
-        onPanResponderTerminationRequest: () => !isPaintingRef.current,
-
-        onPanResponderGrant: (evt) => {
-          if (!metrics) return
-          isPaintingRef.current = true
-          visitedRef.current.clear()
-          paintTargetRef.current = null
-          const { locationX, locationY } = evt.nativeEvent
-          const iso = hitTestIso(locationX, locationY, metrics, slotMatrix)
-          if (iso) {
-            const cur = effectiveDayStateMap(daysRef.current, iso, defaultMode)
-            paintTargetRef.current = nextCellState(cur)
-            visitedRef.current.add(iso)
-            onPaintDay(iso, paintTargetRef.current)
-          }
-        },
-
-        onPanResponderMove: (evt) => {
-          if (!metrics) return
-          const { locationX, locationY } = evt.nativeEvent
-          const iso = hitTestIso(locationX, locationY, metrics, slotMatrix)
-          if (!iso) return
-
-          if (!paintTargetRef.current) {
-            const cur = effectiveDayStateMap(daysRef.current, iso, defaultMode)
-            paintTargetRef.current = nextCellState(cur)
-            if (!visitedRef.current.has(iso)) {
-              visitedRef.current.add(iso)
-              onPaintDay(iso, paintTargetRef.current)
-            }
-            return
-          }
-
-          if (!visitedRef.current.has(iso)) {
-            visitedRef.current.add(iso)
-            onPaintDay(iso, paintTargetRef.current)
-          }
-        },
-        onPanResponderRelease: () => {
-          isPaintingRef.current = false
-          visitedRef.current.clear()
-          paintTargetRef.current = null
-        },
-        onPanResponderTerminate: () => {
-          isPaintingRef.current = false
-          visitedRef.current.clear()
-          paintTargetRef.current = null
-        },
-      }),
-    [metrics, slotMatrix, onPaintDay, defaultMode]
-  )
 
   const rows: ReactNode[] = []
   for (let ri = 0; ri < slotMatrix.length; ri++) {
@@ -180,21 +68,21 @@ function MonthPage({
           }
           const st = effectiveDayStateMap(days, iso, defaultMode)
           const isToday = iso === todayISO
+              const isSelected = selectedIsos.has(iso)
           const dayNum = parseInt(iso.slice(8, 10), 10)
           return (
             <Pressable
               key={iso}
               accessibilityRole="button"
               accessibilityLabel={`Day ${dayNum}`}
-              onPress={() =>
-                onPaintDay(iso, nextCellState(effectiveDayStateMap(days, iso, defaultMode)))
-              }
+                  onPress={() => onTapDay(iso)}
               style={({ pressed }) => [
                 styles.dayCell,
                 st === 'off' && styles.cellOff,
                 st === 'available' && styles.cellAvailable,
                 st === 'booked' && styles.cellBooked,
                 isToday && styles.cellTodayRing,
+                    isSelected && styles.cellSelectionRing,
                 pressed && styles.dayCellPressed,
               ]}
             >
@@ -239,16 +127,6 @@ function MonthPage({
       <View
         style={styles.gridTouchLayer}
         collapsable={false}
-        onLayout={(e) => {
-          const { width, height } = e.nativeEvent.layout
-          if (width <= 0 || height <= 0) return
-          const numRows = slotMatrix.length
-          if (numRows < 1) return
-          const rowH = (height - Math.max(0, numRows - 1) * CELL_GAP) / numRows
-          const cellW = (width - 6 * CELL_GAP) / 7
-          setMetrics({ cellW, rowH, numRows })
-        }}
-        {...panResponder.panHandlers}
       >
         {rows}
       </View>
@@ -276,6 +154,10 @@ export default function AvailabilityScreen() {
   })
 
   const todayISO = toISODateLocal(new Date())
+  const [selectionMode, setSelectionMode] = useState<'tap' | 'range'>('tap')
+  const [rangeStartIso, setRangeStartIso] = useState<string | null>(null)
+  const [selectedIsos, setSelectedIsos] = useState<Set<string>>(new Set())
+  const [applyState, setApplyState] = useState<CellState>('available')
 
   const load = useCallback(async () => {
     setLoadError(null)
@@ -313,16 +195,52 @@ export default function AvailabilityScreen() {
 
   const shiftMonth = useCallback((delta: number) => {
     setCursor((c) => addMonths(c, delta))
+    setSelectedIsos(new Set())
+    setRangeStartIso(null)
   }, [])
 
-  const paintDay = useCallback((iso: string, target: CellState) => {
+  const onTapDay = useCallback((iso: string) => {
+    if (selectionMode === 'tap') {
+      setSelectedIsos((prev) => {
+        const next = new Set(prev)
+        if (next.has(iso)) next.delete(iso)
+        else next.add(iso)
+        return next
+      })
+      return
+    }
+    if (!rangeStartIso) {
+      setRangeStartIso(iso)
+      setSelectedIsos(new Set([iso]))
+      return
+    }
+    const a = new Date(`${rangeStartIso}T12:00:00`)
+    const b = new Date(`${iso}T12:00:00`)
+    const from = a <= b ? a : b
+    const to = a <= b ? b : a
+    const next = new Set<string>()
+    const cur = new Date(from)
+    while (cur <= to) {
+      next.add(toISODateLocal(cur))
+      cur.setDate(cur.getDate() + 1)
+    }
+    setSelectedIsos(next)
+    setRangeStartIso(null)
+  }, [selectionMode, rangeStartIso])
+
+  const applySelection = useCallback(() => {
+    if (selectedIsos.size === 0) return
     setDays((prev) => {
       const next = { ...prev }
-      if (target === defaultMode) delete next[iso]
-      else next[iso] = target
+      selectedIsos.forEach((iso) => {
+        if (applyState === defaultMode) delete next[iso]
+        else next[iso] = applyState
+      })
       return next
     })
-  }, [defaultMode])
+    setSelectedIsos(new Set())
+    setRangeStartIso(null)
+  }, [selectedIsos, applyState, defaultMode])
 
   const save = async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -406,8 +324,7 @@ export default function AvailabilityScreen() {
           <Text style={styles.title}>Set it once.</Text>
           <Text style={styles.titleAccent}>Everyone sees it.</Text>
           <Text style={styles.subtitle}>
-            Change month only with the arrows beside the month name (swiping the grid won’t change months). Days: tap
-            to cycle free → busy → blocked; drag across days to paint the same state.
+            Use arrows to change month. Select with Tap or Range, then apply.
             {defaultMode === 'available'
               ? ' Open (green) is the default; mark grey where you are not free.'
               : ' Empty days are blocked until you mark them free (older calendar format).'}
@@ -424,10 +341,38 @@ export default function AvailabilityScreen() {
             </View>
           ) : null}
 
-          <View style={styles.swipeHint}>
-            <ChevronLeft size={14} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
-            <Text style={styles.swipeHintText}>Month: use arrows in the calendar</Text>
-            <ChevronRight size={14} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
+          <View style={styles.modeRow}>
+            <TouchableOpacity
+              onPress={() => {
+                setSelectionMode('tap')
+                setRangeStartIso(null)
+              }}
+              style={[styles.modeChip, selectionMode === 'tap' && styles.modeChipOn]}
+            >
+              <Text style={[styles.modeChipText, selectionMode === 'tap' && styles.modeChipTextOn]}>Tap</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                setSelectionMode('range')
+                setRangeStartIso(null)
+              }}
+              style={[styles.modeChip, selectionMode === 'range' && styles.modeChipOn]}
+            >
+              <Text style={[styles.modeChipText, selectionMode === 'range' && styles.modeChipTextOn]}>Range</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setApplyState('available')} style={[styles.modeChip, applyState === 'available' && styles.modeChipOn]}>
+              <Text style={[styles.modeChipText, applyState === 'available' && styles.modeChipTextOn]}>Set Free</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setApplyState('off')} style={[styles.modeChip, applyState === 'off' && styles.modeChipOn]}>
+              <Text style={[styles.modeChipText, applyState === 'off' && styles.modeChipTextOn]}>Set Off</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.applyBtn, selectedIsos.size === 0 && styles.applyBtnDim]}
+              disabled={selectedIsos.size === 0}
+              onPress={applySelection}
+            >
+              <Text style={styles.applyBtnText}>Apply</Text>
+            </TouchableOpacity>
           </View>
 
           <View style={[styles.calendarCard, { marginHorizontal: cardGutter }]}>
@@ -438,9 +383,17 @@ export default function AvailabilityScreen() {
               days={days}
               defaultMode={defaultMode}
               todayISO={todayISO}
-              onPaintDay={paintDay}
+              selectedIsos={selectedIsos}
+              onTapDay={onTapDay}
               onShiftMonth={shiftMonth}
             />
+            <Text style={styles.selectionInfo}>
+              {selectedIsos.size > 0
+                ? `${selectedIsos.size} day${selectedIsos.size === 1 ? '' : 's'} selected`
+                : rangeStartIso
+                  ? `Range start: ${rangeStartIso}`
+                  : 'No days selected'}
+            </Text>
 
             <View style={styles.legend}>
               <View style={styles.legendItem}>
@@ -520,15 +473,37 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingHorizontal: 20,
   },
-  swipeHint: {
+  modeRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 8,
     marginBottom: 12,
     paddingHorizontal: 20,
   },
-  swipeHintText: { fontSize: 12, color: 'rgba(255,255,255,0.28)' },
+  modeChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#111',
+  },
+  modeChipOn: {
+    borderColor: '#FFDC00',
+    backgroundColor: 'rgba(255,220,0,0.12)',
+  },
+  modeChipText: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.55)' },
+  modeChipTextOn: { color: '#FFDC00' },
+  applyBtn: {
+    marginLeft: 'auto',
+    backgroundColor: '#FFDC00',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  applyBtnDim: { opacity: 0.45 },
+  applyBtnText: { fontSize: 11, fontWeight: '800', color: '#0a0a0a' },
   calendarCard: {
     backgroundColor: '#111111',
     borderRadius: 20,
@@ -585,6 +560,13 @@ const styles = StyleSheet.create({
   cellAvailable: { backgroundColor: '#1a3d2e', borderColor: 'rgba(80,180,120,0.25)' },
   cellBooked: { backgroundColor: '#321818', borderColor: 'rgba(200,80,80,0.25)' },
   cellTodayRing: { borderWidth: 2, borderColor: '#FFDC00' },
+  cellSelectionRing: { borderWidth: 2, borderColor: '#ffffff' },
+  selectionInfo: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.45)',
+    marginTop: 10,
+    marginHorizontal: 16,
+  },
   legend: {
     flexDirection: 'row',
     flexWrap: 'wrap',

@@ -134,6 +134,7 @@ export function FreelancerPublicProfileContent({
     }[]
   >([])
   const [companyJobsLoading, setCompanyJobsLoading] = useState(false)
+  const [visibleProjectCount, setVisibleProjectCount] = useState(6)
 
   const projects = useMemo(
     () => parsePortfolioProjects(profileNorm.portfolio_projects),
@@ -235,6 +236,16 @@ export function FreelancerPublicProfileContent({
       return c === portfolioFilter || r === portfolioFilter
     })
   }, [projects, portfolioFilter])
+
+  useEffect(() => {
+    setVisibleProjectCount(6)
+  }, [portfolioFilter, projects.length])
+
+  const visibleProjects = useMemo(
+    () => filteredProjects.slice(0, visibleProjectCount),
+    [filteredProjects, visibleProjectCount]
+  )
+  const hasMoreProjects = visibleProjects.length < filteredProjects.length
 
   const calendar = useMemo(
     () => parseAvailabilityCalendar(profileNorm.availability_calendar),
@@ -614,7 +625,7 @@ export function FreelancerPublicProfileContent({
                   </ScrollView>
                 ) : null}
                 <View style={styles.workGrid}>
-                  {filteredProjects.map((proj: PortfolioProject, i: number) => {
+                  {visibleProjects.map((proj: PortfolioProject, i: number) => {
                     const sub = projectSubtitle(proj)
                     const openProject = () => {
                       const u = strTrim(proj.link)
@@ -647,6 +658,17 @@ export function FreelancerPublicProfileContent({
                     )
                   })}
                 </View>
+                {hasMoreProjects ? (
+                  <TouchableOpacity
+                    onPress={() => setVisibleProjectCount((n) => n + 6)}
+                    style={styles.moreProjectsBtn}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.moreProjectsBtnText}>
+                      Load more ({filteredProjects.length - visibleProjects.length} left)
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
               </>
             ) : (
               <Text style={styles.emptyHint}>No portfolio items yet.</Text>
@@ -685,7 +707,7 @@ export function FreelancerPublicProfileContent({
               </ScrollView>
             ) : null}
             <View style={styles.workGrid}>
-              {filteredProjects.map((proj: PortfolioProject, i: number) => {
+              {visibleProjects.map((proj: PortfolioProject, i: number) => {
                 const sub = projectSubtitle(proj)
                 const openProject = () => {
                   const u = strTrim(proj.link)
@@ -718,6 +740,17 @@ export function FreelancerPublicProfileContent({
                 )
               })}
             </View>
+            {hasMoreProjects ? (
+              <TouchableOpacity
+                onPress={() => setVisibleProjectCount((n) => n + 6)}
+                style={styles.moreProjectsBtn}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.moreProjectsBtnText}>
+                  Load more ({filteredProjects.length - visibleProjects.length} left)
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : null}
 
@@ -1024,6 +1057,17 @@ const styles = StyleSheet.create({
   workThumbLetter: { fontSize: 28, fontWeight: '800', color: 'rgba(255,255,255,0.2)' },
   workTileTitle: { fontSize: 14, fontWeight: '700', color: '#fff' },
   workTileSub: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
+  moreProjectsBtn: {
+    marginTop: 8,
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: '#111',
+  },
+  moreProjectsBtnText: { fontSize: 12, fontWeight: '700', color: '#FFDC00' },
   browseLink: { marginTop: 20, marginBottom: 8, paddingVertical: 8, alignItems: 'center' },
   browseLinkText: { fontSize: 14, fontWeight: '700', color: '#FFDC00' },
   companyDetailRow: {

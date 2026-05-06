@@ -235,6 +235,10 @@ function mergeProfileRows(
   const out: Record<string, unknown> = { ...(profiles || {}) }
   if (freelancer) {
     for (const [k, v] of Object.entries(freelancer)) {
+      // Keep `profiles.availability_calendar` authoritative:
+      // availability is edited in app settings and can otherwise be overwritten
+      // by stale mirror values from `freelancer_profiles`.
+      if (k === 'availability_calendar' && isMeaningfulValue(out[k])) continue
       if (isMeaningfulValue(v)) out[k] = v
     }
   }
@@ -273,7 +277,10 @@ function isMeaningfulValue(v: unknown): boolean {
     if ('days' in o && o.days && typeof o.days === 'object' && !Array.isArray(o.days)) {
       const dayKeys = Object.keys(o.days as object)
       const notes = typeof o.notes === 'string' ? o.notes.trim() : ''
-      return dayKeys.length > 0 || notes.length > 0
+      // v3 with defaultDay=available and empty overrides is still meaningful data.
+      const isV3AvailableDefault =
+        Number(o.version) === 3 && String(o.defaultDay ?? '').trim().toLowerCase() === 'available'
+      return dayKeys.length > 0 || notes.length > 0 || isV3AvailableDefault
     }
     return Object.keys(o).length > 0
   }

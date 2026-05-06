@@ -4,9 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  PanResponder,
   Pressable,
-  type LayoutChangeEvent,
 } from 'react-native'
 import { ChevronLeft, ChevronRight } from 'lucide-react-native'
 import type { AvailabilityCalendarPayload } from '@/lib/availabilityCalendar'
@@ -18,33 +16,6 @@ import { isIsoBookable } from '@/lib/availabilityBookingSelection'
 
 const WEEK = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const
 const CELL_GAP = 4
-const PAINT_MOVE_SLOP = 10
-
-type GridMetrics = { cellW: number; rowH: number; numRows: number }
-
-function hitTestIso(
-  x: number,
-  y: number,
-  metrics: GridMetrics,
-  slotMatrix: (string | null)[][]
-): string | null {
-  const { cellW, rowH, numRows } = metrics
-  let yRem = y
-  for (let ri = 0; ri < numRows; ri++) {
-    if (yRem >= 0 && yRem < rowH) {
-      let xRem = x
-      for (let ci = 0; ci < 7; ci++) {
-        if (xRem >= 0 && xRem < cellW) {
-          return slotMatrix[ri]?.[ci] ?? null
-        }
-        xRem -= cellW + CELL_GAP
-      }
-      return null
-    }
-    yRem -= rowH + CELL_GAP
-  }
-  return null
-}
 
 type Props = {
   calendar: AvailabilityCalendarPayload
@@ -85,8 +56,9 @@ export function AvailabilityMonthPreview({
   onCommitBookingSelection,
 }: Props) {
   const [viewDate, setViewDate] = useState(() => startOfMonth(anchor))
-  const [dragHighlight, setDragHighlight] = useState<Set<string>>(() => new Set())
-  const [metrics, setMetrics] = useState<GridMetrics | null>(null)
+  const [selectedIsos, setSelectedIsos] = useState<Set<string>>(() => new Set())
+  const [selectionMode, setSelectionMode] = useState<'tap' | 'range'>('tap')
+  const [rangeStartIso, setRangeStartIso] = useState<string | null>(null)
 
   const slotMatrix = useMemo(
     () => buildMonthSlotMatrix(viewDate.getFullYear(), viewDate.getMonth()),
@@ -98,14 +70,9 @@ export function AvailabilityMonthPreview({
   const jobBookedRef = useRef(jobBookedIso)
   jobBookedRef.current = jobBookedIso
 
-  const visitedRef = useRef(new Set<string>())
-  const dragActiveRef = useRef(false)
-  const suppressTapRef = useRef(false)
-  const isPaintingRef = useRef(false)
-
   useEffect(() => {
-    setMetrics(null)
-    setDragHighlight(new Set())
+    setSelectedIsos(new Set())
+    setRangeStartIso(null)
   }, [viewDate])
 
   const todayIso = useMemo(() => toISODateLocal(new Date()), [])
@@ -119,87 +86,37 @@ export function AvailabilityMonthPreview({
     []
   )
 
-  const addVisited = useCallback((iso: string | null) => {
-    if (!iso || !canBook(iso)) return
-    visitedRef.current.add(iso)
-    setDragHighlight(new Set(visitedRef.current))
+  const onToggleTapDay = useCallback((iso: string) => {
+    if (!canBook(iso)) return
+    setSelectedIsos((prev) => {
+      const next = new Set(prev)
+      if (next.has(iso)) next.delete(iso)
+      else next.add(iso)
+      return next
+    })
   }, [canBook])
 
-  const panResponder = useMemo(
-    () =>
-      // Claim touches immediately so profile ScrollView doesn’t steal horizontal drag-selection.
-      PanResponder.create({
-        onStartShouldSetPanResponder: () =>
-          Boolean(interactive && onCommitBookingSelection),
-        onStartShouldSetPanResponderCapture: () =>
-          Boolean(interactive && onCommitBookingSelection),
-        onMoveShouldSetPanResponder: (_, gs) => {
-          if (!interactive || !onCommitBookingSelection) return false
-          const ax = Math.abs(gs.dx)
-          const ay = Math.abs(gs.dy)
-          if (ax < PAINT_MOVE_SLOP && ay < PAINT_MOVE_SLOP) return false
-          return true
-        },
-        onMoveShouldSetPanResponderCapture: (_, gs) => {
-          if (!interactive || !onCommitBookingSelection) return false
-          const ax = Math.abs(gs.dx)
-          const ay = Math.abs(gs.dy)
-          return ax >= PAINT_MOVE_SLOP || ay >= PAINT_MOVE_SLOP
-        },
-        // Keep drag ownership while painting; avoid losing the gesture to parent scrollviews.
-        onPanResponderTerminationRequest: () => !isPaintingRef.current,
-        onPanResponderGrant: (evt) => {
-          if (!metrics || !interactive || !onCommitBookingSelection) return
-          isPaintingRef.current = true
-          visitedRef.current.clear()
-          dragActiveRef.current = false
-          const { locationX, locationY } = evt.nativeEvent
-          const iso = hitTestIso(locationX, locationY, metrics, slotMatrix)
-          addVisited(iso)
-        },
-        onPanResponderMove: (evt) => {
-          if (!metrics || !interactive || !onCommitBookingSelection) return
-          dragActiveRef.current = true
-          const { locationX, locationY } = evt.nativeEvent
-          const iso = hitTestIso(locationX, locationY, metrics, slotMatrix)
-          addVisited(iso)
-        },
-        onPanResponderRelease: () => {
-          if (!interactive || !onCommitBookingSelection) return
-          isPaintingRef.current = false
-          const set = new Set(visitedRef.current)
-          visitedRef.current.clear()
-          setDragHighlight(new Set())
-          if (set.size > 0) {
-            if (dragActiveRef.current) {
-              suppressTapRef.current = true
-              setTimeout(() => {
-                suppressTapRef.current = false
-              }, 450)
-            }
-            onCommitBookingSelection(set)
-          }
-          dragActiveRef.current = false
-        },
-        onPanResponderTerminate: () => {
-          isPaintingRef.current = false
-          visitedRef.current.clear()
-          setDragHighlight(new Set())
-          dragActiveRef.current = false
-        },
-      }),
-    [addVisited, interactive, metrics, onCommitBookingSelection, slotMatrix]
-  )
-
-  const onGridLayout = (e: LayoutChangeEvent) => {
-    const { width, height } = e.nativeEvent.layout
-    if (width <= 0 || height <= 0) return
-    const numRows = slotMatrix.length
-    if (numRows < 1) return
-    const rowH = (height - Math.max(0, numRows - 1) * CELL_GAP) / numRows
-    const cellW = (width - 6 * CELL_GAP) / 7
-    setMetrics({ cellW, rowH, numRows })
-  }
+  const onRangeDay = useCallback((iso: string) => {
+    if (!canBook(iso)) return
+    if (!rangeStartIso) {
+      setRangeStartIso(iso)
+      setSelectedIsos(new Set([iso]))
+      return
+    }
+    const a = new Date(`${rangeStartIso}T12:00:00`)
+    const b = new Date(`${iso}T12:00:00`)
+    const from = a <= b ? a : b
+    const to = a <= b ? b : a
+    const next = new Set<string>()
+    const cur = new Date(from)
+    while (cur <= to) {
+      const dIso = toISODateLocal(cur)
+      if (canBook(dIso)) next.add(dIso)
+      cur.setDate(cur.getDate() + 1)
+    }
+    setSelectedIsos(next)
+    setRangeStartIso(null)
+  }, [canBook, rangeStartIso])
 
   const { rows, monthLabel, availableCount, bookedCount } = useMemo(() => {
     const start = viewDate
@@ -250,9 +167,9 @@ export function AvailabilityMonthPreview({
   const mergedHighlight = useMemo(() => {
     const out = new Set<string>()
     committedBookingIsos?.forEach((x) => out.add(x))
-    dragHighlight.forEach((x) => out.add(x))
+    selectedIsos.forEach((x) => out.add(x))
     return out
-  }, [committedBookingIsos, dragHighlight])
+  }, [committedBookingIsos, selectedIsos])
 
   if (!showBlock) return null
 
@@ -264,7 +181,7 @@ export function AvailabilityMonthPreview({
           {interactive
             ? calendar.version === 3
               ? availableCount > 0
-                ? `Tap an open day, or drag across open days to select several — then book. Change month only with ← → (no swipe on the grid). Grey = blocked, red = busy.`
+                ? `Tap for multiple days.`
                 : 'No open days this month (all blocked or busy).'
               : !hasAny
                 ? 'No availability published yet. Once they add free days, tap green days to invite.'
@@ -291,6 +208,41 @@ export function AvailabilityMonthPreview({
           <ChevronRight size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
         </TouchableOpacity>
       </View>
+      {interactive ? (
+        <View style={styles.selectModeRow}>
+          <TouchableOpacity
+            style={[styles.selectModeChip, selectionMode === 'tap' && styles.selectModeChipOn]}
+            onPress={() => {
+              setSelectionMode('tap')
+              setRangeStartIso(null)
+            }}
+          >
+            <Text style={[styles.selectModeText, selectionMode === 'tap' && styles.selectModeTextOn]}>
+              Tap
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selectModeChip, selectionMode === 'range' && styles.selectModeChipOn]}
+            onPress={() => {
+              setSelectionMode('range')
+              setRangeStartIso(null)
+            }}
+          >
+            <Text style={[styles.selectModeText, selectionMode === 'range' && styles.selectModeTextOn]}>
+              Range
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.selectModeClear}
+            onPress={() => {
+              setSelectedIsos(new Set())
+              setRangeStartIso(null)
+            }}
+          >
+            <Text style={styles.selectModeClearText}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <View style={styles.weekRow}>
         {WEEK.map((w, i) => (
           <View key={`${w}-${i}`} style={styles.weekCell}>
@@ -299,7 +251,7 @@ export function AvailabilityMonthPreview({
         ))}
       </View>
 
-      <View style={styles.gridTouchLayer} onLayout={onGridLayout} {...(interactive ? panResponder.panHandlers : {})}>
+      <View style={styles.gridTouchLayer}>
         {rows.map((row, ri) => (
           <View key={ri} style={styles.weekRow}>
             {row.map((cell, ci) => {
@@ -339,8 +291,8 @@ export function AvailabilityMonthPreview({
                     <Pressable
                       style={styles.dayWrap}
                       onPress={() => {
-                        if (suppressTapRef.current) return
-                        onCommitBookingSelection?.(new Set([iso]))
+                        if (selectionMode === 'range') onRangeDay(iso)
+                        else onToggleTapDay(iso)
                       }}
                       accessibilityLabel={`Select ${iso} for booking`}
                     >
@@ -366,6 +318,24 @@ export function AvailabilityMonthPreview({
         <LegendDot color="rgba(255,255,255,0.2)" label="Off" />
         <LegendDot color="#FFDC00" label="Today" small />
       </View>
+      {interactive ? (
+        <View style={styles.commitRow}>
+          <Text style={styles.commitInfo}>
+            {selectedIsos.size > 0
+              ? `${selectedIsos.size} day${selectedIsos.size === 1 ? '' : 's'} selected`
+              : rangeStartIso
+                ? `Range start: ${rangeStartIso}`
+                : 'No days selected'}
+          </Text>
+          <TouchableOpacity
+            style={[styles.commitBtn, selectedIsos.size === 0 && styles.commitBtnDim]}
+            disabled={selectedIsos.size === 0}
+            onPress={() => onCommitBookingSelection?.(new Set(selectedIsos))}
+          >
+            <Text style={styles.commitBtnText}>Book selected</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       {calendar.notes?.trim() ? <Text style={styles.notes}>{calendar.notes.trim()}</Text> : null}
     </View>
   )
@@ -462,5 +432,42 @@ const styles = StyleSheet.create({
   legendDot: { width: 10, height: 10, borderRadius: 5 },
   legendDotSmall: { width: 8, height: 8, borderRadius: 4 },
   legendLbl: { fontSize: 10, color: 'rgba(255,255,255,0.38)', fontWeight: '600' },
+  selectModeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  selectModeChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#111',
+  },
+  selectModeChipOn: {
+    borderColor: '#FFDC00',
+    backgroundColor: 'rgba(255,220,0,0.12)',
+  },
+  selectModeText: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.55)' },
+  selectModeTextOn: { color: '#FFDC00' },
+  selectModeClear: { marginLeft: 'auto', paddingVertical: 6, paddingHorizontal: 10 },
+  selectModeClearText: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.45)' },
+  commitRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  commitInfo: { flex: 1, fontSize: 11, color: 'rgba(255,255,255,0.4)' },
+  commitBtn: {
+    backgroundColor: '#FFDC00',
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  commitBtnDim: { opacity: 0.45 },
+  commitBtnText: { fontSize: 11, fontWeight: '800', color: '#0a0a0a' },
   notes: { marginTop: 10, fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 17 },
 })
