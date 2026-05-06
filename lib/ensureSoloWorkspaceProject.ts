@@ -13,6 +13,14 @@ export async function ensureSoloWorkspaceProjectRow(
   const { data: existing } = await supabase.from('projects').select('id').eq('id', projectOrJobId).maybeSingle()
   if (existing?.id) return { ok: true }
 
+  const { error: rpcErr } = await supabase.rpc('ensure_solo_workspace_project_for_job', {
+    p_job_id: projectOrJobId,
+  })
+  if (!rpcErr) {
+    const { data: afterRpc } = await supabase.from('projects').select('id').eq('id', projectOrJobId).maybeSingle()
+    if (afterRpc?.id) return { ok: true }
+  }
+
   const { data: job, error: jobErr } = await supabase
     .from('jobs')
     .select(
