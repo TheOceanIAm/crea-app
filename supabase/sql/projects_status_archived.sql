@@ -19,4 +19,14 @@ $$;
 
 alter table public.projects
 add constraint projects_status_check
-check (status in ('active', 'in_progress', 'completed', 'archived'));
+check (
+  status in (
+    'recruiting',
+    'active',
+    'in_progress',
+    'completed',
+    'archived',
+    'paused',
+    'cancelled'
+  )
+);

@@ -149,6 +149,10 @@ const BASE_TABS: { id: TabId; label: string }[] = [
   { id: 'brief', label: 'Brief AI' },
 ]
 
+/** Same phase labels as web job workspace (`jobs.project_status`). */
+const JOB_PROJECT_PHASES = ['recruiting', 'active', 'completed'] as const
+type JobProjectPhase = (typeof JOB_PROJECT_PHASES)[number]
+
 const TOOLS: { id: string; title: string; sub: string; icon: LucideIcon }[] = [
   { id: 'shotlist', title: 'Shotlist', sub: 'Shot-by-shot breakdown.', icon: Clapperboard },
   {
@@ -195,6 +199,7 @@ export default function ProjectWorkspaceScreen() {
   const [overviewEditOpen, setOverviewEditOpen] = useState(false)
   const [savingBrief, setSavingBrief] = useState(false)
   const [savingOverview, setSavingOverview] = useState(false)
+  const [savingJobPhaseStatus, setSavingJobPhaseStatus] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [scheduleStart, setScheduleStart] = useState('')
   const [scheduleEnd, setScheduleEnd] = useState('')
@@ -287,6 +292,20 @@ export default function ProjectWorkspaceScreen() {
 
     const p = row as ProjectRow
 
+    let mergedStatus = (p.status || 'active').trim() || 'active'
+    if (p.job_id) {
+      const { data: jobPhase } = await supabase
+        .from('jobs')
+        .select('project_status')
+        .eq('id', p.job_id)
+        .maybeSingle()
+      const ps =
+        jobPhase && typeof (jobPhase as { project_status?: string | null }).project_status === 'string'
+          ? String((jobPhase as { project_status: string }).project_status).trim()
+          : ''
+      if (ps) mergedStatus = ps
+    }
+
     let nextSun = false
     let nextWeather = false
     let nextSunHint: string | null = null
@@ -317,7 +336,7 @@ export default function ProjectWorkspaceScreen() {
     setProductionWeatherEnabled(nextWeather)
     setSunPlannerLockedHint(nextSunHint)
     setProductionWeatherLockedHint(nextWeatherHint)
-    setProject(p)
+    setProject({ ...p, status: mergedStatus })
     setBriefText(p.brief_ai_context ?? '')
     setOverviewSummary(
       p.brief_ai_outputs && typeof p.brief_ai_outputs.workspace_summary === 'string'
@@ -326,7 +345,7 @@ export default function ProjectWorkspaceScreen() {
     )
     setOverviewBudgetAmount(typeof p.budget_amount === 'number' ? String(p.budget_amount) : '')
     setOverviewBudgetType(p.budget_type ?? '')
-    setOverviewStatus(p.status || 'active')
+    setOverviewStatus(mergedStatus)
     setScheduleStart(typeof p.scheduling_start_date === 'string' ? p.scheduling_start_date.slice(0, 10) : '')
     setScheduleEnd(typeof p.scheduling_end_date === 'string' ? p.scheduling_end_date.slice(0, 10) : '')
     setForbidden(false)
@@ -366,6 +385,12 @@ export default function ProjectWorkspaceScreen() {
   const canManageCrew = useMemo(() => {
     if (!project || !userId) return false
     return project.company_id === userId || project.freelancer_id === userId
+  }, [project, userId])
+
+  /** Web parity: only the job poster (company_id on the job) may change recruiting / active / completed. */
+  const canEditJobProjectStatus = useMemo(() => {
+    if (!project || !userId || !project.job_id) return false
+    return project.company_id === userId
   }, [project, userId])
 
   const budgetLine = useMemo(() => {
@@ -529,6 +554,28 @@ export default function ProjectWorkspaceScreen() {
     setProject((prev) => (prev ? { ...prev, brief_ai_context: briefText.trim() || null } : prev))
   }
 
+  const persistJobProjectPhase = async (next: JobProjectPhase) => {
+    if (!project?.job_id || !canEditJobProjectStatus) return
+    setSavingJobPhaseStatus(true)
+    const { error: jErr } = await supabase
+      .from('jobs')
+      .update({ project_status: next })
+      .eq('id', project.job_id)
+    if (jErr) {
+      Alert.alert('Could not update status', jErr.message)
+      setSavingJobPhaseStatus(false)
+      return
+    }
+    const { error: pErr } = await supabase.from('projects').update({ status: next }).eq('id', project.id)
+    setSavingJobPhaseStatus(false)
+    if (pErr) {
+      Alert.alert('Partial save', pErr.message)
+      return
+    }
+    setProject((prev) => (prev ? { ...prev, status: next } : null))
+    setOverviewStatus(next)
+  }
+
   const saveOverview = async () => {
     if (!project) return
     const rawBudget = overviewBudgetAmount.trim()
@@ -537,10 +584,25 @@ export default function ProjectWorkspaceScreen() {
       Alert.alert('Budget', 'Please enter a valid non-negative number.')
       return
     }
-    const nextStatus = overviewStatus.trim() || 'active'
+    let nextStatus = overviewStatus.trim() || 'active'
+    if (project.job_id) {
+      const lower = nextStatus.toLowerCase()
+      nextStatus = JOB_PROJECT_PHASES.includes(lower as JobProjectPhase) ? lower : 'active'
+    }
     const nextSummary = overviewSummary.trim()
     const prevOutputs = (project.brief_ai_outputs ?? {}) as Record<string, string>
     setSavingOverview(true)
+    if (project.job_id && canEditJobProjectStatus) {
+      const { error: jobErr } = await supabase
+        .from('jobs')
+        .update({ project_status: nextStatus })
+        .eq('id', project.job_id)
+      if (jobErr) {
+        setSavingOverview(false)
+        Alert.alert('Save failed', jobErr.message)
+        return
+      }
+    }
     const { error } = await supabase
       .from('projects')
       .update({
@@ -807,6 +869,39 @@ export default function ProjectWorkspaceScreen() {
             >
               {tab === 'overview' ? statsRow : null}
 
+              {tab === 'overview' && project.job_id ? (
+                <View style={styles.jobPhaseCard}>
+                  <Text style={styles.scheduleTitle}>Project status</Text>
+                  <Text style={styles.scheduleSub}>
+                    Matches the web job workspace (Recruiting → Active → Completed).
+                  </Text>
+                  <View style={styles.statusRow}>
+                    {JOB_PROJECT_PHASES.map((s) => {
+                      const active = (project.status || '').toLowerCase() === s
+                      const locked = !canEditJobProjectStatus || savingJobPhaseStatus
+                      const label =
+                        s === 'recruiting' ? 'Recruiting' : s === 'active' ? 'Active' : 'Completed'
+                      return (
+                        <TouchableOpacity
+                          key={s}
+                          style={[styles.statusChip, active && styles.statusChipActive, locked && styles.statusChipLocked]}
+                          onPress={() => {
+                            if (!canEditJobProjectStatus || savingJobPhaseStatus) return
+                            void persistJobProjectPhase(s)
+                          }}
+                          disabled={locked}
+                        >
+                          <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>{label}</Text>
+                        </TouchableOpacity>
+                      )
+                    })}
+                  </View>
+                  {!canEditJobProjectStatus ? (
+                    <Text style={styles.scheduleLockedHint}>Only the job owner can change this.</Text>
+                  ) : null}
+                </View>
+              ) : null}
+
             {tab === 'overview' && (
               <>
                 <ProjectOverviewAbout
@@ -845,15 +940,17 @@ export default function ProjectWorkspaceScreen() {
                           autoCorrect={false}
                         />
                         <View style={styles.statusRow}>
-                          {['active', 'paused', 'completed', 'cancelled'].map((s) => {
-                            const active = overviewStatus === s
+                          {JOB_PROJECT_PHASES.map((s) => {
+                            const active = overviewStatus.toLowerCase() === s
+                            const label =
+                              s === 'recruiting' ? 'Recruiting' : s === 'active' ? 'Active' : 'Completed'
                             return (
                               <TouchableOpacity
                                 key={s}
                                 style={[styles.statusChip, active && styles.statusChipActive]}
                                 onPress={() => setOverviewStatus(s)}
                               >
-                                <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>{s}</Text>
+                                <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>{label}</Text>
                               </TouchableOpacity>
                             )
                           })}
@@ -1093,6 +1190,14 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#0a0a0a' },
   body: { flex: 1 },
   bodyContent: { paddingBottom: 40 },
+  jobPhaseCard: {
+    marginBottom: 20,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#141414',
+  },
   scheduleCard: {
     marginBottom: 20,
     padding: 14,
@@ -1158,6 +1263,7 @@ const styles = StyleSheet.create({
   statusChipActive: { backgroundColor: '#FFDC00', borderColor: '#FFDC00' },
   statusChipText: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '700' },
   statusChipTextActive: { color: '#0a0a0a' },
+  statusChipLocked: { opacity: 0.55 },
   overviewContentInput: { minHeight: 120 },
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
   statCard: {
