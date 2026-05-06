@@ -93,6 +93,13 @@ export default function WorkspaceProjectsScreen() {
     setDenyKind(null)
     setAllowed(true)
 
+    // Web creates private projects as `jobs` (is_solo_workspace); app lists `projects`.
+    // RPC backfills linked rows when migration `sync_solo_workspace_projects_for_owner` is deployed.
+    const { error: syncErr } = await supabase.rpc('sync_solo_workspace_projects_for_owner')
+    if (syncErr && __DEV__) {
+      console.warn('[workspace-projects] sync_solo_workspace_projects_for_owner', syncErr.message)
+    }
+
     const { data, error: qErr } = await supabase
       .from('projects')
       .select('id, title, status, updated_at, brief_ai_context, brief_ai_outputs')

@@ -122,6 +122,13 @@ drop policy if exists "projects_update" on public.projects;
 create policy "projects_update" on public.projects
   for update using (auth.uid() = company_id or auth.uid() = freelancer_id);
 
+-- Solo/workspace: app inserts with company_id = auth.uid() (same user as freelancer_id).
+-- Must exist whenever this file is applied; crea_app_features.sql alone may not have been run on this DB.
+drop policy if exists "projects_insert_company" on public.projects;
+create policy "projects_insert_company" on public.projects
+  for insert to authenticated
+  with check (auth.uid() = company_id);
+
 -- ---------------------------------------------------------------------------
 -- RPCs: brief + frame URL for all project members (crew can contribute brief context)
 -- ---------------------------------------------------------------------------
