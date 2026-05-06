@@ -15,6 +15,7 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
+import { ensureSoloWorkspaceProjectRow } from '@/lib/ensureSoloWorkspaceProject'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { canFreelancerCreatePrivateProjects, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 
@@ -98,6 +99,20 @@ export default function WorkspaceProjectsScreen() {
     const { error: syncErr } = await supabase.rpc('sync_solo_workspace_projects_for_owner')
     if (syncErr && __DEV__) {
       console.warn('[workspace-projects] sync_solo_workspace_projects_for_owner', syncErr.message)
+    }
+
+    const { data: soloJobRows } = await supabase
+      .from('jobs')
+      .select('id')
+      .eq('company_id', user.id)
+      .eq('is_solo_workspace', true)
+
+    for (const jr of soloJobRows ?? []) {
+      const jid = String((jr as { id: string }).id)
+      const ens = await ensureSoloWorkspaceProjectRow(supabase, { projectOrJobId: jid, userId: user.id })
+      if (__DEV__ && !ens.ok && ens.reason && ens.reason !== 'not_solo_owner') {
+        console.warn('[workspace-projects] ensureSoloWorkspaceProjectRow', jid, ens.reason)
+      }
     }
 
     const { data, error: qErr } = await supabase

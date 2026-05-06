@@ -23,6 +23,7 @@ import {
 } from 'lucide-react-native'
 import type { LucideIcon } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { ensureSoloWorkspaceProjectRow } from '@/lib/ensureSoloWorkspaceProject'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProjectMilestonesTab } from '@/components/project/ProjectMilestonesTab'
 import { ProjectMessagesTab } from '@/components/project/ProjectMessagesTab'
@@ -264,8 +265,16 @@ export default function ProjectWorkspaceScreen() {
       isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
     )
 
-    const { data: row, error } = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
-    if (error || !row) {
+    let { data: row, error: projErr } = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
+    if (projErr || !row) {
+      const ensured = await ensureSoloWorkspaceProjectRow(supabase, { projectOrJobId: id, userId: user.id })
+      if (ensured.ok) {
+        const again = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
+        row = again.data
+        projErr = again.error
+      }
+    }
+    if (projErr || !row) {
       setForbidden(true)
       setProject(null)
       setSunPlannerEnabled(false)
