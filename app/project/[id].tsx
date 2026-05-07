@@ -50,6 +50,7 @@ import {
   freelancerProductionSunAllowed,
   freelancerProductionWeatherAllowed,
 } from '@/lib/sunPlannerWorkspaceTrial'
+import { runTimed } from '@/lib/perfMarks'
 
 type TabId =
   | 'overview'
@@ -207,7 +208,44 @@ export default function ProjectWorkspaceScreen() {
   const [productionApplyDate, setProductionApplyDate] = useState('')
   const [applyingProd, setApplyingProd] = useState(false)
   const bodyScrollRef = useRef<ScrollView | null>(null)
+
+  const refreshProjectCounts = useCallback(async () => {
+    if (!project?.id) return
+    const [{ data: next }, applicantsRes] = await Promise.all([
+      supabase
+        .from('projects')
+        .select('milestones_completed, milestones_total')
+        .eq('id', project.id)
+        .maybeSingle(),
+      project.job_id
+        ? supabase
+            .from('job_applications')
+            .select('*', { count: 'exact', head: true })
+            .eq('job_id', project.job_id)
+        : Promise.resolve({ count: 0 }),
+    ])
+    if (next) {
+      setProject((prev) =>
+        prev
+          ? {
+              ...prev,
+              milestones_completed:
+                typeof (next as { milestones_completed?: unknown }).milestones_completed === 'number'
+                  ? ((next as { milestones_completed: number }).milestones_completed ?? prev.milestones_completed)
+                  : prev.milestones_completed,
+              milestones_total:
+                typeof (next as { milestones_total?: unknown }).milestones_total === 'number'
+                  ? ((next as { milestones_total: number }).milestones_total ?? prev.milestones_total)
+                  : prev.milestones_total,
+            }
+          : prev
+      )
+    }
+    setApplicants(applicantsRes.count ?? 0)
+  }, [project?.id, project?.job_id])
+
   const load = useCallback(async () => {
+    const timed = await runTimed('project-workspace.load', async () => {
     if (!id || typeof id !== 'string') {
       setSunPlannerEnabled(false)
       setProductionWeatherEnabled(false)
@@ -231,11 +269,15 @@ export default function ProjectWorkspaceScreen() {
       return
     }
     setUserId(user.id)
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role, subscription_tier')
-      .eq('id', user.id)
-      .maybeSingle()
+    const [profileRes, projectRes] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('role, subscription_tier')
+        .eq('id', user.id)
+        .maybeSingle(),
+      supabase.from('projects').select('*').eq('id', id).maybeSingle(),
+    ])
+    const profile = profileRes.data
     const role = resolveAppRole(profile?.role, user)
     const freelancerPlan = resolveFreelancerPlanFromUser(user)
     const isStarterFreelancer = isFreelancerProfile(role) && isFreelancerStarterPlan(freelancerPlan)
@@ -270,7 +312,8 @@ export default function ProjectWorkspaceScreen() {
       isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
     )
 
-    let { data: row, error: projErr } = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
+    let row = projectRes.data
+    let projErr = projectRes.error
     if (projErr || !row) {
       const ensured = await ensureSoloWorkspaceProjectRow(supabase, { projectOrJobId: id, userId: user.id })
       if (ensured.ok) {
@@ -292,19 +335,23 @@ export default function ProjectWorkspaceScreen() {
 
     const p = row as ProjectRow
 
+    const [{ data: jobPhase }, applicantsRes] = await Promise.all([
+      p.job_id
+        ? supabase.from('jobs').select('project_status').eq('id', p.job_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      p.job_id
+        ? supabase
+            .from('job_applications')
+            .select('*', { count: 'exact', head: true })
+            .eq('job_id', p.job_id)
+        : Promise.resolve({ count: 0 }),
+    ])
     let mergedStatus = (p.status || 'active').trim() || 'active'
-    if (p.job_id) {
-      const { data: jobPhase } = await supabase
-        .from('jobs')
-        .select('project_status')
-        .eq('id', p.job_id)
-        .maybeSingle()
-      const ps =
-        jobPhase && typeof (jobPhase as { project_status?: string | null }).project_status === 'string'
-          ? String((jobPhase as { project_status: string }).project_status).trim()
-          : ''
-      if (ps) mergedStatus = ps
-    }
+    const ps =
+      jobPhase && typeof (jobPhase as { project_status?: string | null }).project_status === 'string'
+        ? String((jobPhase as { project_status: string }).project_status).trim()
+        : ''
+    if (ps) mergedStatus = ps
 
     let nextSun = false
     let nextWeather = false
@@ -350,17 +397,14 @@ export default function ProjectWorkspaceScreen() {
     setScheduleEnd(typeof p.scheduling_end_date === 'string' ? p.scheduling_end_date.slice(0, 10) : '')
     setForbidden(false)
 
-    if (p.job_id) {
-      const { count } = await supabase
-        .from('job_applications')
-        .select('*', { count: 'exact', head: true })
-        .eq('job_id', p.job_id)
-      setApplicants(count ?? 0)
-    } else {
-      setApplicants(0)
-    }
+    setApplicants(applicantsRes.count ?? 0)
 
     setLoading(false)
+    return { hasJob: Boolean(p.job_id) }
+    })
+    if (__DEV__ && timed.value) {
+      console.log(`[perf] project-workspace.meta: hasJob=${timed.value.hasJob}`)
+    }
   }, [id])
 
   useEffect(() => {
@@ -387,7 +431,11 @@ export default function ProjectWorkspaceScreen() {
     return project.company_id === userId || project.freelancer_id === userId
   }, [project, userId])
 
-  /** Web parity: only the job poster (company_id on the job) may change recruiting / active / completed. */
+  /**
+   * Phase (recruiting / active / completed): same source as web `jobs.project_status`.
+   * - Public jobs: only the client company (`jobs.company_id`) may change — not crew freelancers.
+   * - Private solo workspace: poster is `company_id` on the job (often the freelancer), so they can edit.
+   */
   const canEditJobProjectStatus = useMemo(() => {
     if (!project || !userId || !project.job_id) return false
     return project.company_id === userId
@@ -827,7 +875,7 @@ export default function ProjectWorkspaceScreen() {
                 {tab === 'milestones' && (
                   <ProjectMilestonesTab
                     projectId={project.id}
-                    onCountsChanged={load}
+                    onCountsChanged={refreshProjectCounts}
                     canManage={canManageCrew}
                   />
                 )}

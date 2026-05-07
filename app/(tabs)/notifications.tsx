@@ -19,6 +19,8 @@ import {
   type NotificationRow,
 } from '@/lib/notificationsFeed'
 import { invalidateAlertsBadge } from '@/lib/invalidateAlerts'
+import { getCache, setCache } from '@/lib/appCache'
+import { runTimed } from '@/lib/perfMarks'
 
 function timeAgo(str: string) {
   const t = new Date(str).getTime()
@@ -40,8 +42,13 @@ export default function NotificationsScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const firstAlertsFocus = useRef(true)
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadInFlight = useRef<Promise<void> | null>(null)
 
   const load = useCallback(async () => {
+    if (loadInFlight.current) return loadInFlight.current
+    loadInFlight.current = (async () => {
+    const timed = await runTimed('notifications.load', async () => {
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -52,13 +59,40 @@ export default function NotificationsScreen() {
       return
     }
     setUserId(user.id)
+    const cacheKey = `notifications:${user.id}`
+    const cached = getCache<{ rows: NotificationRow[]; reads: string[] }>(cacheKey)
+    if (firstAlertsFocus.current && cached) {
+      setRows(cached.rows)
+      setReadKeys(new Set(cached.reads))
+      setLoading(false)
+    }
     const [feed, reads] = await Promise.all([
       loadNotificationFeed(user.id),
       fetchAlertReadKeys(user.id),
     ])
     setRows(feed)
     setReadKeys(reads)
+    setCache(cacheKey, { rows: feed, reads: Array.from(reads) }, 20_000)
+    return { feed: feed.length, reads: reads.size }
+    })
+    if (__DEV__ && timed.value) {
+      console.log(`[perf] notifications.rows: feed=${timed.value.feed} reads=${timed.value.reads}`)
+    }
+    })()
+    try {
+      await loadInFlight.current
+    } finally {
+      loadInFlight.current = null
+    }
   }, [])
+
+  const scheduleReload = useCallback(() => {
+    if (reloadTimer.current) clearTimeout(reloadTimer.current)
+    reloadTimer.current = setTimeout(() => {
+      void load()
+      reloadTimer.current = null
+    }, 280)
+  }, [load])
 
   useEffect(() => {
     const sub = supabase.auth.onAuthStateChange(() => void load())
@@ -91,17 +125,18 @@ export default function NotificationsScreen() {
   useEffect(() => {
     const channel = supabase
       .channel('alerts-feed-refresh')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => void load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_messages' }, () => void load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, () => void load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, () => void load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, () => void load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_alert_reads' }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_messages' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_alert_reads' }, scheduleReload)
       .subscribe()
     return () => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current)
       void supabase.removeChannel(channel)
     }
-  }, [load])
+  }, [scheduleReload])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -118,7 +153,20 @@ export default function NotificationsScreen() {
     async (item: NotificationRow) => {
       if (userId) {
         await markAlertRead(userId, item.id)
-        setReadKeys((prev) => new Set(prev).add(item.id))
+        let nextReadKeys: Set<string> = new Set()
+        setReadKeys((prev) => {
+          nextReadKeys = new Set(prev)
+          nextReadKeys.add(item.id)
+          return nextReadKeys
+        })
+        setCache(
+          `notifications:${userId}`,
+          {
+            rows,
+            reads: Array.from(nextReadKeys),
+          },
+          20_000
+        )
         invalidateAlertsBadge()
       }
       if (item.kind === 'invoice_incoming' || item.kind === 'invoice_freelancer') {
@@ -155,6 +203,7 @@ export default function NotificationsScreen() {
         initialNumToRender={14}
         maxToRenderPerBatch={8}
         windowSize={7}
+        removeClippedSubviews
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFDC00" />}
         renderItem={({ item }) => {

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   Alert,
   ActivityIndicator,
@@ -23,6 +23,7 @@ import {
   resolveFreelancerPlanFromUserAndProfileTier,
 } from '@/lib/freelancerPlan'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
+import { runTimed } from '@/lib/perfMarks'
 
 type ListingKind = 'private' | 'customer'
 
@@ -102,6 +103,9 @@ type JobRow = {
 
 export default function WorkspaceProjectsScreen() {
   const router = useRouter()
+  const hasLoadedRef = useRef(false)
+  const lastLoadedAtRef = useRef(0)
+  const RELOAD_COOLDOWN_MS = 15000
   const [loading, setLoading] = useState(true)
   const [allowed, setAllowed] = useState<boolean | null>(null)
   const [denyKind, setDenyKind] = useState<'role' | null>(null)
@@ -122,8 +126,13 @@ export default function WorkspaceProjectsScreen() {
   const [editOutputs, setEditOutputs] = useState<Record<string, unknown>>({})
   const [archiveOpen, setArchiveOpen] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (opts?: { force?: boolean }) => {
+    const now = Date.now()
+    if (!opts?.force && hasLoadedRef.current && now - lastLoadedAtRef.current < RELOAD_COOLDOWN_MS) {
+      return
+    }
+    const timed = await runTimed('workspace-projects.load', async () => {
+    if (!hasLoadedRef.current) setLoading(true)
     setError(null)
     const {
       data: { user },
@@ -162,30 +171,24 @@ export default function WorkspaceProjectsScreen() {
         : null
     setPosterAvatarUrl(av)
 
-    const { error: syncErr } = await supabase.rpc('sync_solo_workspace_projects_for_owner')
+    const [{ error: syncErr }, { data: soloJobRows }, { data: apps }] = await Promise.all([
+      supabase.rpc('sync_solo_workspace_projects_for_owner'),
+      supabase.from('jobs').select('id').eq('company_id', user.id).eq('is_solo_workspace', true),
+      supabase.from('job_applications').select('job_id').eq('freelancer_id', user.id).eq('status', 'accepted'),
+    ])
     if (syncErr && __DEV__) {
       console.warn('[workspace-projects] sync_solo_workspace_projects_for_owner', syncErr.message)
     }
 
-    const { data: soloJobRows } = await supabase
-      .from('jobs')
-      .select('id')
-      .eq('company_id', user.id)
-      .eq('is_solo_workspace', true)
-
-    for (const jr of soloJobRows ?? []) {
+    await Promise.all(
+      (soloJobRows ?? []).map(async (jr) => {
       const jid = String((jr as { id: string }).id)
       const ens = await ensureSoloWorkspaceProjectRow(supabase, { projectOrJobId: jid, userId: user.id })
       if (__DEV__ && !ens.ok && ens.reason && ens.reason !== 'not_solo_owner') {
         console.warn('[workspace-projects] ensureSoloWorkspaceProjectRow', jid, ens.reason)
       }
-    }
-
-    const { data: apps } = await supabase
-      .from('job_applications')
-      .select('job_id')
-      .eq('freelancer_id', user.id)
-      .eq('status', 'accepted')
+      })
+    )
 
     const crewJobIds = [...new Set((apps ?? []).map((a) => a.job_id).filter(Boolean))] as string[]
 
@@ -309,6 +312,15 @@ export default function WorkspaceProjectsScreen() {
     setListings(active)
     setArchivedListings(arch)
     setLoading(false)
+    hasLoadedRef.current = true
+    lastLoadedAtRef.current = Date.now()
+    return { active: active.length, archived: arch.length }
+    })
+    if (__DEV__) {
+      console.log(
+        `[perf] workspace-projects.rows: active=${timed.value.active} archived=${timed.value.archived}`
+      )
+    }
   }, [router])
 
   useFocusEffect(
@@ -439,7 +451,7 @@ export default function WorkspaceProjectsScreen() {
     setEditTitle('')
     setEditNotes('')
     setEditOutputs({})
-    await load()
+    await load({ force: true })
   }
 
   const archiveProject = async (item: ProjectListing) => {
@@ -465,7 +477,7 @@ export default function WorkspaceProjectsScreen() {
       setError(updErr.message)
       return
     }
-    await load()
+    await load({ force: true })
   }
 
   const deleteProject = async (item: ProjectListing) => {
@@ -499,7 +511,7 @@ export default function WorkspaceProjectsScreen() {
                 setError(delErr.message)
                 return
               }
-              await load()
+              await load({ force: true })
             })()
           },
         },
@@ -626,6 +638,10 @@ export default function WorkspaceProjectsScreen() {
       <FlatList
         data={listings}
         keyExtractor={(item) => item.id}
+        initialNumToRender={8}
+        maxToRenderPerBatch={6}
+        windowSize={8}
+        removeClippedSubviews
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <View style={styles.emptyCard}>

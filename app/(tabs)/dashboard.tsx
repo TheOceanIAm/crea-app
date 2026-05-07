@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Image, Linking } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, type Href } from 'expo-router'
@@ -33,6 +33,8 @@ import {
   resolveFreelancerPlanFromUser,
   type FreelancerPlan,
 } from '@/lib/freelancerPlan'
+import { getCache, setCache } from '@/lib/appCache'
+import { runTimed } from '@/lib/perfMarks'
 
 type IncomeTotals = { paid: number; incoming: number; overdue: number; currency: string }
 
@@ -180,6 +182,17 @@ function quickActionsForRole(
 
 type CeoQuick = { label: string; icon: LucideIcon; onPress: () => void }
 
+type DashboardCache = {
+  name: string
+  role: string | null
+  avatarUrl: string | null
+  stats: StatCard[]
+  income: IncomeTotals | null
+  ceoSnap: CeoSnapshot | null
+  ceoRpcError: string | null
+  freelancerPlan: FreelancerPlan
+}
+
 export default function DashboardScreen() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
@@ -191,17 +204,35 @@ export default function DashboardScreen() {
   const [ceoSnap, setCeoSnap] = useState<CeoSnapshot | null>(null)
   const [ceoRpcError, setCeoRpcError] = useState<string | null>(null)
   const [freelancerPlan, setFreelancerPlan] = useState<FreelancerPlan>('starter')
-  const quickActions = quickActionsForRole(role, {
-    freelancerPlan,
-  })
+  const quickActions = useMemo(
+    () =>
+      quickActionsForRole(role, {
+        freelancerPlan,
+      }),
+    [role, freelancerPlan]
+  )
 
   useEffect(() => {
     const load = async () => {
+      const timed = await runTimed('dashboard.load', async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) {
           router.replace('/login')
           return
+        }
+        const cacheKey = `dashboard:${user.id}`
+        const cached = getCache<DashboardCache>(cacheKey)
+        if (cached) {
+          setName(cached.name)
+          setRole(cached.role)
+          setAvatarUrl(cached.avatarUrl)
+          setStats(cached.stats)
+          setIncome(cached.income)
+          setCeoSnap(cached.ceoSnap)
+          setCeoRpcError(cached.ceoRpcError)
+          setFreelancerPlan(cached.freelancerPlan)
+          setLoading(false)
         }
 
         const { data: profile } = await supabase
@@ -227,14 +258,32 @@ export default function DashboardScreen() {
         if (isCeoProfile(resolvedRole)) {
           setCeoRpcError(null)
           const { data: ceoData, error: ceoErr } = await supabase.rpc('ceo_dashboard_snapshot')
+          let nextSnap: CeoSnapshot | null = null
+          let nextErr: string | null = null
           if (ceoErr) {
+            nextErr = ceoErr.message
             setCeoRpcError(ceoErr.message)
             setCeoSnap(null)
           } else {
-            setCeoSnap(parseCeoSnapshot(ceoData))
+            nextSnap = parseCeoSnapshot(ceoData)
+            setCeoSnap(nextSnap)
           }
           setStats([])
           setIncome(null)
+          setCache<DashboardCache>(
+            cacheKey,
+            {
+              name: profile?.name ?? '',
+              role: resolvedRole || null,
+              avatarUrl: av && /^https?:\/\//i.test(av) ? av : null,
+              stats: [],
+              income: null,
+              ceoSnap: nextSnap,
+              ceoRpcError: nextErr,
+              freelancerPlan: 'starter',
+            },
+            30_000
+          )
           return
         }
 
@@ -262,16 +311,45 @@ export default function DashboardScreen() {
             pendingApps = appCount ?? 0
           }
 
-          setStats([
+          const nextStats = [
             { label: 'Active projects', value: String(jobCount ?? 0), sub: 'Open' },
             { label: 'Pending apps', value: String(pendingApps), sub: 'To review' },
             { label: 'Open invoices', value: String(invCount ?? 0), sub: 'Pending' },
-          ])
+          ]
+          setStats(nextStats)
           setIncome(null)
+          setCache<DashboardCache>(
+            cacheKey,
+            {
+              name: profile?.name ?? '',
+              role: resolvedRole || null,
+              avatarUrl: av && /^https?:\/\//i.test(av) ? av : null,
+              stats: nextStats,
+              income: null,
+              ceoSnap: null,
+              ceoRpcError: null,
+              freelancerPlan: 'starter',
+            },
+            30_000
+          )
         } else {
           if (isFreelancerWorkspaceOnlyPlan(resolvedFreelancerPlan)) {
             setStats([])
             setIncome(null)
+            setCache<DashboardCache>(
+              cacheKey,
+              {
+                name: profile?.name ?? '',
+                role: resolvedRole || null,
+                avatarUrl: av && /^https?:\/\//i.test(av) ? av : null,
+                stats: [],
+                income: null,
+                ceoSnap: null,
+                ceoRpcError: null,
+                freelancerPlan: resolvedFreelancerPlan,
+              },
+              30_000
+            )
             return
           }
           const [{ count: appCount }, { count: viewCount }, { data: invs }] = await Promise.all([
@@ -287,15 +365,35 @@ export default function DashboardScreen() {
               .eq('freelancer_id', user.id),
           ])
 
-          setStats([
+          const nextStats = [
             { label: 'Applications', value: String(appCount ?? 0), sub: 'Pending' },
             { label: 'Profile views', value: String(viewCount ?? 0), sub: 'Total' },
-          ])
-
-          setIncome(computeIncomeTotals(invs ?? []))
+          ]
+          const nextIncome = computeIncomeTotals(invs ?? [])
+          setStats(nextStats)
+          setIncome(nextIncome)
+          setCache<DashboardCache>(
+            cacheKey,
+            {
+              name: profile?.name ?? '',
+              role: resolvedRole || null,
+              avatarUrl: av && /^https?:\/\//i.test(av) ? av : null,
+              stats: nextStats,
+              income: nextIncome,
+              ceoSnap: null,
+              ceoRpcError: null,
+              freelancerPlan: resolvedFreelancerPlan,
+            },
+            30_000
+          )
         }
       } finally {
         setLoading(false)
+      }
+      return { ok: true }
+      })
+      if (__DEV__ && timed.value) {
+        console.log('[perf] dashboard.loaded')
       }
     }
     void load()

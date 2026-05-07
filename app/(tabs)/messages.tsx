@@ -18,6 +18,8 @@ import { useFocusEffect } from '@react-navigation/native'
 import { supabase } from '@/lib/supabase'
 import { loadDirectMessageInbox, type ConvoRow } from '@/lib/messagesInboxLoad'
 import { invalidateDmBadge } from '@/lib/invalidateDmBadge'
+import { deleteCache, getCache, setCache } from '@/lib/appCache'
+import { runTimed } from '@/lib/perfMarks'
 
 export default function MessagesScreen() {
   const router = useRouter()
@@ -37,6 +39,7 @@ export default function MessagesScreen() {
     if (refreshInFlight.current) return refreshInFlight.current
     refreshInFlight.current = (async () => {
       try {
+        const timed = await runTimed('messages.refreshList', async () => {
         setLoadError(null)
         const { data: auth } = await supabase.auth.getUser()
         const user = auth.user
@@ -47,6 +50,13 @@ export default function MessagesScreen() {
           return
         }
         setSignedIn(true)
+        const cacheKey = `messages:${user.id}`
+        const cached = getCache<{ inbox: ConvoRow[]; archived: ConvoRow[] }>(cacheKey)
+        if (!initialLoadingDone.current && cached) {
+          setConvos(cached.inbox)
+          setArchived(cached.archived)
+          setLoading(false)
+        }
 
         const result = await loadDirectMessageInbox(user.id)
         if (result.ok === false) {
@@ -58,6 +68,14 @@ export default function MessagesScreen() {
         setLoadError(null)
         setConvos(result.inbox)
         setArchived(result.archived)
+        setCache(cacheKey, { inbox: result.inbox, archived: result.archived }, 20_000)
+        return { inbox: result.inbox.length, archived: result.archived.length }
+        })
+        if (__DEV__ && timed.value) {
+          console.log(
+            `[perf] messages.rows: inbox=${timed.value.inbox} archived=${timed.value.archived}`
+          )
+        }
       } finally {
         if (!initialLoadingDone.current) {
           initialLoadingDone.current = true
@@ -135,6 +153,7 @@ export default function MessagesScreen() {
       Alert.alert('Could not update', error.message)
       return
     }
+    deleteCache(`messages:${user.id}`)
     await refreshList()
   }, [refreshList])
 
@@ -145,13 +164,15 @@ export default function MessagesScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          const { data: auth } = await supabase.auth.getUser()
+          const user = auth.user
+          if (user) deleteCache(`messages:${user.id}`)
           const { error } = await supabase.from('messages').delete().eq('conversation_id', conversationId)
           if (error) {
             Alert.alert('Could not delete', error.message)
             return
           }
           await archiveConversation(conversationId, true)
-          await refreshList()
         },
       },
     ])
@@ -198,6 +219,10 @@ export default function MessagesScreen() {
       <FlatList
         data={convos}
         keyExtractor={(c) => c.id}
+        initialNumToRender={12}
+        maxToRenderPerBatch={8}
+        windowSize={8}
+        removeClippedSubviews
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFDC00" />}
@@ -277,6 +302,10 @@ export default function MessagesScreen() {
           <FlatList
             data={archived}
             keyExtractor={(c) => `arch-${c.id}`}
+            initialNumToRender={8}
+            maxToRenderPerBatch={6}
+            windowSize={6}
+            removeClippedSubviews
             contentContainerStyle={styles.list}
             renderItem={({ item }) => (
               <Swipeable

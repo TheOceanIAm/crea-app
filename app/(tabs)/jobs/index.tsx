@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -47,13 +47,18 @@ function jobStatusLabel(s: string) {
 
 export default function JobsListScreen() {
   const router = useRouter()
+  const hasLoadedRef = useRef(false)
+  const lastLoadedAtRef = useRef(0)
+  const RELOAD_COOLDOWN_MS = 15000
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
   const [isCompanyUser, setIsCompanyUser] = useState(false)
   const [workspaceOnly, setWorkspaceOnly] = useState(false)
 
   const loadJobs = useCallback(async () => {
-    setLoading(true)
+    const now = Date.now()
+    if (hasLoadedRef.current && now - lastLoadedAtRef.current < RELOAD_COOLDOWN_MS) return
+    if (!hasLoadedRef.current) setLoading(true)
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -100,6 +105,8 @@ export default function JobsListScreen() {
     if (error || !jobRows?.length) {
       setJobs([])
       setLoading(false)
+      hasLoadedRef.current = true
+      lastLoadedAtRef.current = Date.now()
       return
     }
 
@@ -142,6 +149,8 @@ export default function JobsListScreen() {
 
     setJobs(list)
     setLoading(false)
+    hasLoadedRef.current = true
+    lastLoadedAtRef.current = Date.now()
   }, [])
 
   useFocusEffect(
@@ -183,6 +192,10 @@ export default function JobsListScreen() {
       <FlatList
         data={jobs}
         keyExtractor={(j) => j.id}
+        initialNumToRender={8}
+        maxToRenderPerBatch={6}
+        windowSize={8}
+        removeClippedSubviews
         contentContainerStyle={[styles.list, jobs.length === 0 && styles.listEmpty]}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => (
