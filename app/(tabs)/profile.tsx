@@ -154,7 +154,7 @@ function PlanRow({
             <Text style={styles.planRowTitle}>{title}</Text>
             {current ? (
               <View style={styles.currentTag}>
-                <Text style={styles.currentTagText}>AKTUELL</Text>
+                <Text style={styles.currentTagText}>CURRENT</Text>
               </View>
             ) : null}
           </View>
@@ -457,21 +457,21 @@ export default function ProfileScreen() {
               void load()
               Alert.alert(
                 'Plan aktualisiert',
-                'Der Plan wurde direkt in der App aktualisiert (Web-Sync war gerade nicht erreichbar).'
+                'The plan was updated directly in the app (web sync was temporarily unavailable).'
               )
               return
             }
           }
           const errorCopy =
             res.error === 'missing_web_url'
-              ? 'Web-URL fehlt. Bitte setze EXPO_PUBLIC_CREA_WEB_URL.'
+              ? 'Web URL missing. Please set EXPO_PUBLIC_CREA_WEB_URL.'
               : res.error === 'timeout'
-                ? 'Zeitüberschreitung beim Planwechsel. Prüfe Internetverbindung und ob creaservices.de erreichbar ist.'
+                ? 'Plan switch timed out. Check your connection and confirm creaservices.de is reachable.'
                 : res.error === 'network_error'
-                  ? 'Netzwerkfehler beim Planwechsel. Bitte erneut versuchen.'
-                  : res.error || 'Bitte später erneut versuchen.'
+                  ? 'Network error while switching plan. Please try again.'
+                  : res.error || 'Please try again later.'
           Alert.alert(
-            'Plan konnte nicht gewechselt werden',
+            'Could not switch plan',
             errorCopy
           )
           return

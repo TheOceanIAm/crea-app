@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -7,10 +7,13 @@ import {
   StyleSheet,
   ActivityIndicator,
   Image,
+  TextInput,
+  Modal,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { PlusCircle } from 'lucide-react-native'
+import * as Linking from 'expo-linking'
 import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -32,6 +35,24 @@ type Job = {
   is_solo_workspace: boolean
 }
 
+type ExternalJob = {
+  id: string
+  title: string
+  company: string
+  location: string | null
+  region: string | null
+  role: string | null
+  rate: string | null
+  needed_when: string | null
+  source_platform: string | null
+  source_url: string | null
+  intel_brief: string | null
+  contact_name: string | null
+  contact_email: string | null
+  contact_linkedin: string | null
+  contact_instagram: string | null
+}
+
 function companyInitial(name: string) {
   const t = name.trim()
   return t ? t.charAt(0).toUpperCase() : '?'
@@ -45,6 +66,14 @@ function jobStatusLabel(s: string) {
   return s ? s : '—'
 }
 
+function normalizeRateLabel(rate: string | null): string | null {
+  if (!rate) return null
+  return rate
+    .replace(/\/\s*tag\b/gi, '/day')
+    .replace(/\bpro\s+tag\b/gi, 'per day')
+    .replace(/\btagessatz\b/gi, 'day rate')
+}
+
 export default function JobsListScreen() {
   const router = useRouter()
   const hasLoadedRef = useRef(false)
@@ -54,6 +83,10 @@ export default function JobsListScreen() {
   const [loading, setLoading] = useState(true)
   const [isCompanyUser, setIsCompanyUser] = useState(false)
   const [workspaceOnly, setWorkspaceOnly] = useState(false)
+  const [feedTab, setFeedTab] = useState<'crea' | 'external'>('crea')
+  const [search, setSearch] = useState('')
+  const [externalJobs, setExternalJobs] = useState<ExternalJob[]>([])
+  const [activeExternalJob, setActiveExternalJob] = useState<ExternalJob | null>(null)
 
   const loadJobs = useCallback(async () => {
     const now = Date.now()
@@ -84,6 +117,26 @@ export default function JobsListScreen() {
     }
     const companyOnly = Boolean(user && isCompanyProfile(role))
     setIsCompanyUser(companyOnly)
+
+    if (!companyOnly && feedTab === 'external') {
+      const { data: extRows, error: extError } = await supabase
+        .from('external_jobs')
+        .select('id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram')
+        .eq('status', 'published')
+        .order('posted_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(40)
+      if (extError || !extRows) {
+        setExternalJobs([])
+      } else {
+        setExternalJobs((extRows as ExternalJob[]) ?? [])
+      }
+      setJobs([])
+      setLoading(false)
+      hasLoadedRef.current = true
+      lastLoadedAtRef.current = Date.now()
+      return
+    }
 
     let q = supabase
       .from('jobs')
@@ -148,10 +201,16 @@ export default function JobsListScreen() {
     })
 
     setJobs(list)
+    setExternalJobs([])
     setLoading(false)
     hasLoadedRef.current = true
     lastLoadedAtRef.current = Date.now()
-  }, [])
+  }, [feedTab])
+
+  useEffect(() => {
+    hasLoadedRef.current = false
+    lastLoadedAtRef.current = 0
+  }, [feedTab])
 
   useFocusEffect(
     useCallback(() => {
@@ -167,7 +226,30 @@ export default function JobsListScreen() {
     )
   }
 
-  const countLabel = isCompanyUser ? `${jobs.length} listing${jobs.length === 1 ? '' : 's'}` : `${jobs.length} open`
+  const filteredCreaJobs = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    if (!needle) return jobs
+    return jobs.filter((j) =>
+      j.title.toLowerCase().includes(needle) ||
+      j.category.toLowerCase().includes(needle) ||
+      j.location_type.toLowerCase().includes(needle) ||
+      j.company_name.toLowerCase().includes(needle)
+    )
+  }, [jobs, search])
+
+  const filteredExternalJobs = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    if (!needle) return externalJobs
+    return externalJobs.filter((j) =>
+      j.title.toLowerCase().includes(needle) ||
+      j.company.toLowerCase().includes(needle) ||
+      String(j.location ?? '').toLowerCase().includes(needle) ||
+      String(j.role ?? '').toLowerCase().includes(needle)
+    )
+  }, [externalJobs, search])
+
+  const currentItemsCount = !isCompanyUser && feedTab === 'external' ? filteredExternalJobs.length : filteredCreaJobs.length
+  const countLabel = isCompanyUser ? `${currentItemsCount} listing${currentItemsCount === 1 ? '' : 's'}` : `${currentItemsCount} open`
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -189,8 +271,41 @@ export default function JobsListScreen() {
         </TouchableOpacity>
       ) : null}
 
+      {!isCompanyUser && !workspaceOnly ? (
+        <View style={styles.feedTabs}>
+          <TouchableOpacity
+            style={[styles.feedTabBtn, feedTab === 'crea' && styles.feedTabBtnActive]}
+            onPress={() => setFeedTab('crea')}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.feedTabText, feedTab === 'crea' && styles.feedTabTextActive]}>Crea Exclusive</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.feedTabBtn, feedTab === 'external' && styles.feedTabBtnActive]}
+            onPress={() => setFeedTab('external')}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.feedTabText, feedTab === 'external' && styles.feedTabTextActive]}>External</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      <View style={styles.searchWrap}>
+        <TextInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder={
+            !isCompanyUser && feedTab === 'external'
+              ? 'Search external jobs...'
+              : 'Search jobs...'
+          }
+          placeholderTextColor="rgba(255,255,255,0.32)"
+          style={styles.searchInput}
+        />
+      </View>
+
       <FlatList
-        data={jobs}
+        data={!isCompanyUser && feedTab === 'external' ? filteredExternalJobs : filteredCreaJobs}
         keyExtractor={(j) => j.id}
         initialNumToRender={8}
         maxToRenderPerBatch={6}
@@ -202,40 +317,90 @@ export default function JobsListScreen() {
           <TouchableOpacity
             style={styles.card}
             activeOpacity={0.7}
-            onPress={() => router.push(`/(tabs)/jobs/${item.id}`)}
+            onPress={() =>
+              !isCompanyUser && feedTab === 'external'
+                ? setActiveExternalJob(item as ExternalJob)
+                : router.push(`/(tabs)/jobs/${item.id}`)
+            }
           >
-            <View style={styles.companyRow}>
-              {item.company_logo_url ? (
-                <Image source={{ uri: item.company_logo_url }} style={styles.companyLogo} />
-              ) : (
-                <View style={styles.companyLogoPlaceholder}>
-                  <Text style={styles.companyLogoLetter}>{companyInitial(item.company_name)}</Text>
+            {!isCompanyUser && feedTab === 'external' ? (
+              <>
+                <View style={styles.companyRow}>
+                  <View style={styles.companyLogoPlaceholder}>
+                    <Text style={styles.companyLogoLetter}>{companyInitial((item as ExternalJob).company)}</Text>
+                  </View>
+                  <Text style={styles.companyName} numberOfLines={1}>
+                    {(item as ExternalJob).company}
+                  </Text>
                 </View>
-              )}
-              <Text style={styles.companyName} numberOfLines={1}>
-                {item.company_name}
-              </Text>
-              {isCompanyUser ? (
-                <View style={styles.statusPill}>
-                  <Text style={styles.statusPillText}>{jobStatusLabel(item.status)}</Text>
+                <View style={styles.cardTop}>
+                  <Text style={styles.jobTitle}>{item.title}</Text>
+                  <View style={styles.budgetBadge}>
+                    <Text style={styles.budgetText}>{normalizeRateLabel((item as ExternalJob).rate) || 'Rate TBD'}</Text>
+                  </View>
                 </View>
-              ) : null}
-            </View>
-            <View style={styles.cardTop}>
-              <Text style={styles.jobTitle}>{item.title}</Text>
-              <View style={styles.budgetBadge}>
-                <Text style={styles.budgetText}>
-                  {formatBudgetDisplay({
-                    budget_type: item.budget_type,
-                    budget_amount: item.budget_amount,
-                    budget_currency: item.budget_currency,
-                  })}
+                <Text style={styles.jobMeta}>
+                  {(item as ExternalJob).role || 'Role n/a'} · {(item as ExternalJob).location || 'Location n/a'}
                 </Text>
-              </View>
-            </View>
-            <Text style={styles.jobMeta}>
-              {item.category} · {item.location_type}
-            </Text>
+                {(item as ExternalJob).needed_when ? (
+                  <Text style={styles.jobMeta}>Needed: {(item as ExternalJob).needed_when}</Text>
+                ) : null}
+                <View style={styles.externalActions}>
+                  <TouchableOpacity
+                    style={styles.externalActionBtn}
+                    activeOpacity={0.85}
+                    onPress={() => setActiveExternalJob(item as ExternalJob)}
+                  >
+                    <Text style={styles.externalActionBtnText}>View contact</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.externalGhostBtn}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      const url = (item as ExternalJob).source_url
+                      if (url) void Linking.openURL(url)
+                    }}
+                  >
+                    <Text style={styles.externalGhostBtnText}>View source</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.companyRow}>
+                  {item.company_logo_url ? (
+                    <Image source={{ uri: item.company_logo_url }} style={styles.companyLogo} />
+                  ) : (
+                    <View style={styles.companyLogoPlaceholder}>
+                      <Text style={styles.companyLogoLetter}>{companyInitial(item.company_name)}</Text>
+                    </View>
+                  )}
+                  <Text style={styles.companyName} numberOfLines={1}>
+                    {item.company_name}
+                  </Text>
+                  {isCompanyUser ? (
+                    <View style={styles.statusPill}>
+                      <Text style={styles.statusPillText}>{jobStatusLabel(item.status)}</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <View style={styles.cardTop}>
+                  <Text style={styles.jobTitle}>{item.title}</Text>
+                  <View style={styles.budgetBadge}>
+                    <Text style={styles.budgetText}>
+                      {formatBudgetDisplay({
+                        budget_type: item.budget_type,
+                        budget_amount: item.budget_amount,
+                        budget_currency: item.budget_currency,
+                      })}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.jobMeta}>
+                  {item.category} · {item.location_type}
+                </Text>
+              </>
+            )}
           </TouchableOpacity>
         )}
         ListEmptyComponent={
@@ -245,11 +410,53 @@ export default function JobsListScreen() {
                 ? 'Workspace plan: marketplace jobs are hidden.'
                 : isCompanyUser
                   ? 'No projects yet. Post one above.'
-                  : 'No jobs found'}
+                  : feedTab === 'external'
+                    ? 'No external jobs found'
+                    : 'No jobs found'}
             </Text>
           </View>
         }
       />
+
+      <Modal visible={!!activeExternalJob} transparent animationType="fade" onRequestClose={() => setActiveExternalJob(null)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalKicker}>View contact</Text>
+            <Text style={styles.modalTitle}>{activeExternalJob?.title}</Text>
+            <Text style={styles.modalSub}>{activeExternalJob?.company}</Text>
+            <View style={styles.modalContactCard}>
+              <Text style={styles.modalContactLabel}>Contact</Text>
+              <Text style={styles.modalContactName}>{activeExternalJob?.contact_name || 'n/a'}</Text>
+              {activeExternalJob?.contact_email ? (
+                <Text style={styles.modalContactMail}>{activeExternalJob.contact_email}</Text>
+              ) : (
+                <Text style={styles.modalContactMail}>No email available</Text>
+              )}
+            </View>
+            <Text style={styles.modalIntel}>
+              {(activeExternalJob?.intel_brief ?? '').trim() || 'No intel brief available yet.'}
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalGhost} onPress={() => setActiveExternalJob(null)} activeOpacity={0.85}>
+                <Text style={styles.modalGhostText}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalPrimary}
+                onPress={() => {
+                  const email = activeExternalJob?.contact_email?.trim()
+                  if (email) {
+                    void Linking.openURL(`mailto:${email}`)
+                  }
+                }}
+                activeOpacity={0.85}
+                disabled={!activeExternalJob?.contact_email}
+              >
+                <Text style={styles.modalPrimaryText}>Open email</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }
@@ -290,6 +497,47 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFDC00',
   },
   postJobBtnText: { fontSize: 16, fontWeight: '800', color: '#0a0a0a' },
+  feedTabs: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginBottom: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 4,
+  },
+  feedTabBtn: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  feedTabBtnActive: {
+    backgroundColor: '#FFDC00',
+  },
+  feedTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.55)',
+  },
+  feedTabTextActive: {
+    color: '#0a0a0a',
+  },
+  searchWrap: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  searchInput: {
+    backgroundColor: '#111111',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 14,
+    color: '#fff',
+  },
   list: { paddingHorizontal: 20, paddingBottom: 40, gap: 10 },
   listEmpty: { flexGrow: 1 },
   card: {
@@ -355,4 +603,123 @@ const styles = StyleSheet.create({
   budgetText: { color: '#FFDC00', fontSize: 11, fontWeight: '600' },
   jobMeta: { fontSize: 12, color: 'rgba(255,255,255,0.3)', letterSpacing: 0.5 },
   emptyText: { color: 'rgba(255,255,255,0.3)', fontSize: 15 },
+  externalActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  externalActionBtn: {
+    backgroundColor: '#FFDC00',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  externalActionBtnText: {
+    color: '#0a0a0a',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  externalGhostBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  externalGhostBtnText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center',
+    padding: 18,
+  },
+  modalCard: {
+    backgroundColor: '#161616',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 16,
+  },
+  modalKicker: {
+    color: '#FFDC00',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    fontSize: 10,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  modalSub: {
+    color: 'rgba(255,255,255,0.5)',
+    marginTop: 2,
+    marginBottom: 10,
+  },
+  modalIntel: {
+    color: 'rgba(255,255,255,0.75)',
+    lineHeight: 22,
+    marginBottom: 10,
+  },
+  modalContactCard: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  modalContactLabel: {
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.35)',
+    marginBottom: 6,
+  },
+  modalContactName: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  modalContactMail: {
+    color: '#FFDC00',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 12,
+  },
+  modalGhost: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  modalGhostText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  modalPrimary: {
+    backgroundColor: '#FFDC00',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  modalPrimaryText: {
+    color: '#0a0a0a',
+    fontWeight: '800',
+    fontSize: 12,
+  },
 })

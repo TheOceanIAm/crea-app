@@ -272,7 +272,7 @@ export default function CeoRevenueScreen() {
 
       <Text style={styles.kicker}>PLATFORM</Text>
       <Text style={styles.title}>Subscription revenue</Text>
-      <Text style={styles.subtitle}>Abo-Umsatz: brutto &amp; netto, nach Freelancer / Company und Plan.</Text>
+      <Text style={styles.subtitle}>Subscription revenue: gross &amp; net, split by freelancer/company and plan.</Text>
 
       {hint ? (
         <View style={styles.hintBox}>
