@@ -20,7 +20,7 @@ import { sendAvailabilityProjectInvite } from '@/lib/sendAvailabilityProjectInvi
 import { money, toMoneyNumber } from '@/lib/invoiceFormatting'
 import { sortIsoDates } from '@/lib/availabilityBookingSelection'
 
-type ProjectRow = { id: string; title: string }
+type InviteTarget = { id: string; title: string; kind: 'project' | 'job' }
 
 function formatBookingCaps(iso: string): string {
   const d = new Date(`${iso}T12:00:00`)
@@ -62,13 +62,11 @@ export function BookFreelancerModal({
 }: Props) {
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
-  const [projects, setProjects] = useState<ProjectRow[]>([])
+  const [targets, setTargets] = useState<InviteTarget[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
-  const [selectedProject, setSelectedProject] = useState<ProjectRow | null>(null)
+  const [selectedTarget, setSelectedTarget] = useState<InviteTarget | null>(null)
   const [message, setMessage] = useState('')
-  const [newProjectTitle, setNewProjectTitle] = useState('')
-  const [creatingProject, setCreatingProject] = useState(false)
 
   const sorted = useMemo(() => sortIsoDates(selectedIsos), [selectedIsos])
   const fromIso = sorted[0] ?? ''
@@ -83,30 +81,56 @@ export function BookFreelancerModal({
 
   const showAvatar = Boolean(freelancerAvatarUrl && /^https?:\/\//i.test(freelancerAvatarUrl.trim()))
 
-  const loadProjects = useCallback(async () => {
+  const loadTargets = useCallback(async () => {
     setLoadError(null)
     setLoading(true)
-    const { data, error } = await supabase
+    const [{ data: projectRows, error: projectErr }, { data: jobRows, error: jobsErr }] = await Promise.all([
+      supabase
       .from('projects')
       .select('id, title')
       .eq('company_id', companyUserId)
       .eq('freelancer_id', freelancerId)
-      .order('updated_at', { ascending: false })
+      .order('updated_at', { ascending: false }),
+      supabase
+      .from('jobs')
+      .select('id, title')
+      .eq('company_id', companyUserId)
+      .order('updated_at', { ascending: false }),
+    ])
 
-    if (error) {
-      setLoadError(error.message)
-      setProjects([])
-    } else {
-      const rows = (data ?? []).map((r) => ({
-        id: String(r.id),
-        title: String(r.title ?? '').trim() || 'Untitled project',
-      }))
-      setProjects(rows)
-      setSelectedProject((prev) => {
-        if (prev && rows.some((x) => x.id === prev.id)) return prev
-        return rows[0] ?? null
-      })
+    if (projectErr) {
+      setLoadError(projectErr.message)
     }
+
+    if (jobsErr && !projectErr) {
+      setLoadError(jobsErr.message)
+    }
+
+    const mappedProjects: InviteTarget[] = (projectRows ?? []).map((r) => ({
+      id: String(r.id),
+      title: String(r.title ?? '').trim() || 'Untitled project',
+      kind: 'project',
+    }))
+    const mappedJobs: InviteTarget[] = (jobRows ?? []).map((r) => ({
+      id: String(r.id),
+      title: String(r.title ?? '').trim() || 'Untitled job',
+      kind: 'job',
+    }))
+    const merged = [...mappedProjects, ...mappedJobs]
+    const deduped: InviteTarget[] = []
+    const seen = new Set<string>()
+    for (const row of merged) {
+      const key = `${row.kind}:${row.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      deduped.push(row)
+    }
+
+    setTargets(deduped)
+    setSelectedTarget((prev) => {
+      if (prev && deduped.some((x) => x.id === prev.id && x.kind === prev.kind)) return prev
+      return deduped[0] ?? null
+    })
     setLoading(false)
   }, [companyUserId, freelancerId])
 
@@ -114,63 +138,25 @@ export function BookFreelancerModal({
     if (!visible) {
       setMessage('')
       setProjectPickerOpen(false)
-      setNewProjectTitle('')
-      setCreatingProject(false)
       return
     }
-    void loadProjects()
-  }, [visible, loadProjects])
-
-  const onCreatePrivateProject = useCallback(async () => {
-    if (creatingProject || companyUserId === freelancerId) return
-    if (!canCreatePrivateProject) return
-    const t =
-      newProjectTitle.trim() ||
-      `Collaboration — ${freelancerName.trim() || 'freelancer'}`
-    setCreatingProject(true)
-    setLoadError(null)
-    const { data: created, error } = await supabase
-      .from('projects')
-      .insert({
-        company_id: companyUserId,
-        freelancer_id: freelancerId,
-        title: t,
-        brief_ai_outputs: {},
-        budget_type: 'negotiable',
-        location: 'Remote',
-      })
-      .select('id, title')
-      .single()
-    setCreatingProject(false)
-    if (error || !created?.id) {
-      setLoadError(error?.message ?? 'Could not create project')
-      return
-    }
-    setNewProjectTitle('')
-    await loadProjects()
-    setSelectedProject({
-      id: String(created.id),
-      title: String(created.title ?? t).trim() || t,
-    })
-  }, [
-    creatingProject,
-    companyUserId,
-    freelancerId,
-    freelancerName,
-    newProjectTitle,
-    loadProjects,
-    canCreatePrivateProject,
-  ])
+    void loadTargets()
+  }, [visible, loadTargets])
 
   const onSend = async () => {
-    if (!selectedProject || sending || sorted.length === 0) return
+    if (!selectedTarget || sending || sorted.length === 0) return
     setSending(true)
     setLoadError(null)
     const userMsg = message.trim()
+    const openDeepLink =
+      selectedTarget.kind === 'job'
+        ? `crea://jobs/${selectedTarget.id}`
+        : `crea://project/${selectedTarget.id}`
     const r = await sendAvailabilityProjectInvite({
       freelancerId,
-      projectId: selectedProject.id,
-      projectTitle: selectedProject.title,
+      projectId: selectedTarget.id,
+      projectTitle: selectedTarget.title,
+      openDeepLink,
       isoStartDate: fromIso,
       isoEndDate: toIso,
       selectedIsoDates: sorted,
@@ -246,38 +232,11 @@ export function BookFreelancerModal({
             <View style={styles.loadingRow}>
               <ActivityIndicator color="#FFDC00" />
             </View>
-          ) : projects.length === 0 ? (
+          ) : targets.length === 0 ? (
             <View style={styles.emptyProj}>
-              {canCreatePrivateProject ? (
-                <>
-                  <Text style={styles.emptyProjText}>
-                    No shared private project yet. Create one here — it will not appear on the public job board.
-                  </Text>
-                  <TextInput
-                    style={styles.draftTitleInput}
-                    value={newProjectTitle}
-                    onChangeText={setNewProjectTitle}
-                    placeholder="Project name (optional)"
-                    placeholderTextColor="rgba(255,255,255,0.28)"
-                  />
-                  <TouchableOpacity
-                    style={[styles.linkBtn, creatingProject && styles.linkBtnDim]}
-                    onPress={() => void onCreatePrivateProject()}
-                    disabled={creatingProject}
-                  >
-                    {creatingProject ? (
-                      <ActivityIndicator color="#0a0a0a" />
-                    ) : (
-                      <Text style={styles.linkBtnText}>Create private project</Text>
-                    )}
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <Text style={styles.emptyProjText}>
-                  No shared private project yet. Creating a lead-owned private workspace requires Pro or Workspace on
-                  your account (Starter can use company job projects). Upgrade on the web, then try again.
-                </Text>
-              )}
+              <Text style={styles.emptyProjText}>
+                No project found on your company account yet. Create one first, then invite this freelancer here.
+              </Text>
             </View>
           ) : (
             <>
@@ -287,26 +246,28 @@ export function BookFreelancerModal({
                 activeOpacity={0.85}
               >
                 <Text style={styles.selectText} numberOfLines={1}>
-                  {selectedProject?.title ?? 'Select a project…'}
+                  {selectedTarget
+                    ? `${selectedTarget.kind === 'job' ? 'Project (Job Pool)' : 'Project'} · ${selectedTarget.title}`
+                    : 'Select a project...'}
                 </Text>
                 <ChevronDown size={20} color="rgba(255,255,255,0.45)" strokeWidth={ICON_STROKE} />
               </TouchableOpacity>
               {projectPickerOpen ? (
                 <View style={styles.pickerList}>
                   <ScrollView style={styles.pickerScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                    {projects.map((p) => {
-                      const active = selectedProject?.id === p.id
+                    {targets.map((p) => {
+                      const active = selectedTarget?.id === p.id && selectedTarget.kind === p.kind
                       return (
                         <TouchableOpacity
-                          key={p.id}
+                          key={`${p.kind}:${p.id}`}
                           style={[styles.pickerRow, active && styles.pickerRowActive]}
                           onPress={() => {
-                            setSelectedProject(p)
+                            setSelectedTarget(p)
                             setProjectPickerOpen(false)
                           }}
                         >
                           <Text style={styles.pickerRowText} numberOfLines={2}>
-                            {p.title}
+                            {p.kind === 'job' ? 'Project (Job Pool)' : 'Project'} · {p.title}
                           </Text>
                         </TouchableOpacity>
                       )
@@ -335,9 +296,9 @@ export function BookFreelancerModal({
               <Text style={styles.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.sendBtn, (sending || !selectedProject || sorted.length === 0) && styles.sendBtnDim]}
+              style={[styles.sendBtn, (sending || !selectedTarget || sorted.length === 0) && styles.sendBtnDim]}
               onPress={() => void onSend()}
-              disabled={sending || !selectedProject || sorted.length === 0}
+              disabled={sending || !selectedTarget || sorted.length === 0}
             >
               {sending ? (
                 <ActivityIndicator color="#0a0a0a" />
@@ -509,29 +470,4 @@ const styles = StyleSheet.create({
   loadingRow: { paddingVertical: 16, alignItems: 'center', marginBottom: 12 },
   emptyProj: { marginBottom: 16 },
   emptyProjText: { fontSize: 13, color: 'rgba(255,255,255,0.42)', lineHeight: 19, marginBottom: 12 },
-  linkBtn: {
-    alignSelf: 'stretch',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: '#FFDC00',
-    borderWidth: 1,
-    borderColor: 'rgba(255,220,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 44,
-  },
-  linkBtnDim: { opacity: 0.55 },
-  linkBtnText: { fontSize: 13, fontWeight: '800', color: '#0a0a0a' },
-  draftTitleInput: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: '#fff',
-    marginBottom: 12,
-    backgroundColor: '#0f0f0f',
-  },
 })

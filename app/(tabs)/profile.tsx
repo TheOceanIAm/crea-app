@@ -805,7 +805,7 @@ export default function ProfileScreen() {
         text: 'Sign out',
         style: 'destructive',
         onPress: async () => {
-          const { error } = await supabase.auth.signOut()
+          const { error } = await supabase.auth.signOut({ scope: 'local' })
           if (error) {
             Alert.alert('Sign out failed', error.message)
             return

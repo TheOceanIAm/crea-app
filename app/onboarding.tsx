@@ -442,7 +442,7 @@ export default function OnboardingScreen() {
           <TouchableOpacity
             style={styles.signOutRow}
             onPress={async () => {
-              await supabase.auth.signOut()
+              await supabase.auth.signOut({ scope: 'local' })
               router.replace('/login')
             }}
             hitSlop={12}

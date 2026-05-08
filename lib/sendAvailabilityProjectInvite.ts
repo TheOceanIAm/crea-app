@@ -53,6 +53,8 @@ export async function sendAvailabilityProjectInvite(params: {
   freelancerId: string
   projectId: string
   projectTitle: string
+  /** Optional: override deep link target, e.g. `crea://jobs/<id>`. */
+  openDeepLink?: string
   /** First day (inclusive). */
   isoStartDate: string
   /** Last day (inclusive); defaults to start when omitted. */
@@ -114,13 +116,14 @@ export async function sendAvailabilityProjectInvite(params: {
 
   const title = params.projectTitle.trim() || 'Project'
   const msg = params.userMessage?.trim()
+  const openDeepLink = params.openDeepLink?.trim() || `crea://project/${params.projectId}`
   const body = [
     `Booking request: «${title}»`,
     rangeLine,
     'Dates:',
     dateLines,
     msg ? `\nMessage:\n${msg}` : '',
-    `\nOpen project: crea://project/${params.projectId}`,
+    `\nOpen context: ${openDeepLink}`,
   ]
     .filter(Boolean)
     .join('\n')
