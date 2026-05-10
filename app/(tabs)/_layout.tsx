@@ -16,6 +16,9 @@ import { GoodNewsDailyModal } from '@/components/GoodNewsDailyModal'
 import { fetchGoodNewsOfTheDayHeadline } from '@/lib/ceoLiveWidgets'
 import { markGoodNewsModalShownToday, shouldShowGoodNewsModalToday } from '@/lib/goodNewsDailyGate'
 
+/** Unique Supabase Realtime topic per subscription — reusing the same name returns an already-`subscribe()`d channel, which throws when chaining `.on()`. */
+let realtimeTopicSeq = 0
+
 export default function TabLayout() {
   const [workspaceOnlyTabs, setWorkspaceOnlyTabs] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
@@ -180,8 +183,9 @@ export default function TabLayout() {
 
   useEffect(() => {
     if (!userId || workspaceOnlyTabs) return
+    const topic = `tabs-unread-dm-${userId}-${++realtimeTopicSeq}`
     const channel = supabase
-      .channel('tabs-unread-dm')
+      .channel(topic)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
         void loadUnreadDmCount(userId)
       })
@@ -199,8 +203,9 @@ export default function TabLayout() {
 
   useEffect(() => {
     if (!userId || workspaceOnlyTabs) return
+    const topic = `tabs-unread-alerts-${userId}-${++realtimeTopicSeq}`
     const channel = supabase
-      .channel('tabs-unread-alerts')
+      .channel(topic)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => {
         void loadUnreadAlertsCount(userId)
       })

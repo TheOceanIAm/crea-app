@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Image, Linking, TouchableOpacity } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useLocalSearchParams } from 'expo-router'
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 
@@ -26,13 +26,37 @@ function companyInitial(name: string) {
 }
 
 export default function PublicJobShareScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const { id, bookingMsg, conv } = useLocalSearchParams<{
+    id: string
+    bookingMsg?: string
+    conv?: string
+  }>()
+  const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [job, setJob] = useState<JobPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const jobId = typeof id === 'string' ? id : undefined
+  const bookingMsgId = typeof bookingMsg === 'string' ? bookingMsg : undefined
+  const convId = typeof conv === 'string' ? conv : undefined
+  const bookingHandoff = Boolean(jobId && bookingMsgId && convId)
+
+  useEffect(() => {
+    if (!bookingHandoff || !jobId || !bookingMsgId || !convId) return
+    const qs = new URLSearchParams()
+    qs.set('bookingMsg', bookingMsgId)
+    qs.set('conv', convId)
+    router.replace(`/(tabs)/jobs/${jobId}?${qs.toString()}` as Href)
+  }, [bookingHandoff, jobId, bookingMsgId, convId, router])
+
   useEffect(() => {
     let cancelled = false
+    if (bookingHandoff) {
+      setLoading(false)
+      return () => {
+        cancelled = true
+      }
+    }
     ;(async () => {
       if (!id || typeof id !== 'string') {
         setLoading(false)
@@ -56,12 +80,20 @@ export default function PublicJobShareScreen() {
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, bookingHandoff])
 
   const openApp = () => {
     if (!id || typeof id !== 'string') return
     const deep = `crea://jobs/${id}`
     Linking.openURL(deep).catch(() => {})
+  }
+
+  if (bookingHandoff) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color="#FFDC00" size="large" />
+      </View>
+    )
   }
 
   if (loading) {

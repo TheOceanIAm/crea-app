@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { View, StyleSheet } from 'react-native'
+import type { Session } from '@supabase/supabase-js'
 import { Redirect } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import * as SplashScreen from 'expo-splash-screen'
+import { resolveSessionForAppBootstrap } from '@/lib/authSession'
 import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 
 const SPLASH_BG = '#FFDC00'
@@ -11,7 +13,7 @@ const SPLASH_BG = '#FFDC00'
 const SESSION_BOOTSTRAP_MS = 14_000
 
 type SessionRace =
-  | { kind: 'ok'; session: { user: { id: string } } | null }
+  | { kind: 'ok'; session: Session | null }
   | { kind: 'timeout' }
 
 async function getSessionOrTimeout(): Promise<SessionRace> {
@@ -33,7 +35,7 @@ async function getSessionOrTimeout(): Promise<SessionRace> {
 
 export default function Index() {
   const [loading, setLoading] = useState(true)
-  const [session, setSession] = useState<{ user: { id: string } } | null>(null)
+  const [session, setSession] = useState<Session | null>(null)
   const [onboardingDone, setOnboardingDone] = useState(true)
 
   useEffect(() => {
@@ -55,15 +57,13 @@ export default function Index() {
           return
         }
 
-        // After checkout on the website, Supabase has new user_metadata but the local JWT can be stale until refresh.
-        let sessionToUse = s
-        try {
-          const { data: ref, error: refErr } = await supabase.auth.refreshSession()
-          if (!refErr && ref.session) {
-            sessionToUse = ref.session
+        const sessionToUse = await resolveSessionForAppBootstrap(s)
+        if (!sessionToUse) {
+          if (__DEV__) {
+            console.warn('[auth] Session cleared after refresh failure during bootstrap')
           }
-        } catch {
-          /* offline / transient — keep cached session */
+          setSession(null)
+          return
         }
 
         setSession(sessionToUse)

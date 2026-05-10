@@ -1,12 +1,14 @@
 import { supabase } from '@/lib/supabase'
 import { toISODateLocal } from '@/lib/availabilityCalendar'
+import { bookingInboxPreview, formatBookingDmBody, type BookingDmPayloadV1 } from '@/lib/bookingDm'
 import { findOrCreateDirectConversation } from '@/lib/directConversation'
 import { requestNotifyRecipientPush } from '@/lib/notifyMessagePush'
 
 async function insertMessageBody(
   conversationId: string,
   senderId: string,
-  text: string
+  text: string,
+  opts?: { conversationPreview?: string }
 ): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
   const payload: Record<string, unknown> = {
     conversation_id: conversationId,
@@ -32,18 +34,12 @@ async function insertMessageBody(
   }
   await supabase
     .from('conversations')
-    .update({ last_message: text, last_message_at: new Date().toISOString() })
+    .update({
+      last_message: opts?.conversationPreview ?? text,
+      last_message_at: new Date().toISOString(),
+    })
     .eq('id', conversationId)
   return { ok: true, messageId }
-}
-
-function formatLongDate(iso: string): string {
-  return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
 }
 
 /**
@@ -104,32 +100,35 @@ export async function sendAvailabilityProjectInvite(params: {
       unique = out
     }
   }
-  const dateLines =
-    unique.length === 1
-      ? `${formatLongDate(unique[0])} (${unique[0]})`
-      : unique.map((iso) => `• ${iso}: ${formatLongDate(iso)}`).join('\n')
-
-  const rangeLine =
-    params.isoStartDate === end
-      ? `Range: ${params.isoStartDate} (${unique.length} day${unique.length === 1 ? '' : 's'})`
-      : `Range: ${params.isoStartDate} → ${end} (${unique.length} day${unique.length === 1 ? '' : 's'})`
-
   const title = params.projectTitle.trim() || 'Project'
-  const msg = params.userMessage?.trim()
   const openDeepLink = params.openDeepLink?.trim() || `crea://project/${params.projectId}`
-  const body = [
-    `Booking request: «${title}»`,
-    rangeLine,
-    'Dates:',
-    dateLines,
-    msg ? `\nMessage:\n${msg}` : '',
-    `\nOpen context: ${openDeepLink}`,
-  ]
-    .filter(Boolean)
-    .join('\n')
+  const payload: BookingDmPayloadV1 = {
+    v: 1,
+    title,
+    isoStartDate: params.isoStartDate,
+    isoEndDate: end,
+    selectedIsoDates: unique,
+    userMessage: params.userMessage?.trim() || undefined,
+    openDeepLink,
+  }
+  const body = formatBookingDmBody(payload)
+  const preview = bookingInboxPreview(payload)
 
-  const ins = await insertMessageBody(conv.conversationId, me, body)
+  const ins = await insertMessageBody(conv.conversationId, me, body, { conversationPreview: preview })
   if (ins.ok === false) return { ok: false, error: ins.error }
+
+  const base = params.openDeepLink?.trim() || `crea://project/${params.projectId}`
+  const sep = base.includes('?') ? '&' : '?'
+  const enrichedOpen = `${base}${sep}bookingMsg=${encodeURIComponent(ins.messageId)}&conv=${encodeURIComponent(conv.conversationId)}`
+  const payloadEnriched: BookingDmPayloadV1 = { ...payload, openDeepLink: enrichedOpen }
+  const bodyEnriched = formatBookingDmBody(payloadEnriched)
+  let upErr = (await supabase.from('messages').update({ body: bodyEnriched }).eq('id', ins.messageId)).error
+  if (upErr?.message?.includes('column') || upErr?.message?.includes('body')) {
+    upErr = (await supabase.from('messages').update({ content: bodyEnriched }).eq('id', ins.messageId)).error
+  }
+  if (upErr && typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.warn('[sendAvailabilityProjectInvite] patch deep link', upErr.message)
+  }
 
   void requestNotifyRecipientPush(ins.messageId)
 

@@ -18,6 +18,15 @@ import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { requestNotifyRecipientPush } from '@/lib/notifyMessagePush'
 import { invalidateDmBadge } from '@/lib/invalidateDmBadge'
+import { replyToBookingMessage } from '@/lib/replyToBookingMessage'
+import { BookingRequestCard } from '@/components/messaging/BookingRequestCard'
+import {
+  findBookingReplyStatus,
+  messagePreviewForInbox,
+  parseBookingDm,
+  parseBookingReply,
+  type BookingReplyStatus,
+} from '@/lib/bookingDm'
 
 type MsgRow = {
   id: string
@@ -42,7 +51,7 @@ async function syncConversationPreviewAfterMessagesChange(conversationId: string
     .limit(1)
 
   const last = lastRows?.[0] as MsgRow | undefined
-  const preview = last ? messageText(last).trim() || 'No messages yet' : 'No messages yet'
+  const preview = last ? messagePreviewForInbox(messageText(last)).trim() || 'No messages yet' : 'No messages yet'
   const at = last?.created_at ?? new Date().toISOString()
 
   await supabase
@@ -60,6 +69,8 @@ export default function ConversationThreadScreen() {
   const [title, setTitle] = useState('Messages')
   const [rows, setRows] = useState<MsgRow[]>([])
   const [draft, setDraft] = useState('')
+  const [otherUserId, setOtherUserId] = useState<string | null>(null)
+  const [replyingId, setReplyingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!conversationId || typeof conversationId !== 'string') {
@@ -83,6 +94,7 @@ export default function ConversationThreadScreen() {
     if (convo) {
       const other =
         convo.participant_1 === uid ? convo.participant_2 : convo.participant_1
+      setOtherUserId(typeof other === 'string' ? other : null)
       const { data: prof } = await supabase.from('profiles').select('name').eq('id', other).maybeSingle()
       if (prof?.name) setTitle(String(prof.name))
     }
@@ -184,6 +196,28 @@ export default function ConversationThreadScreen() {
     await load()
   }
 
+  const submitBookingReply = async (bookingMsg: MsgRow, status: BookingReplyStatus) => {
+    if (!conversationId || typeof conversationId !== 'string' || !me || replyingId) return
+    const bookingPayload = parseBookingDm(messageText(bookingMsg))
+    const projTitle = bookingPayload?.title ?? 'Project'
+    setReplyingId(bookingMsg.id)
+    try {
+      const r = await replyToBookingMessage({
+        conversationId,
+        bookingMessageId: bookingMsg.id,
+        status,
+        projectTitle: projTitle,
+      })
+      if (r.ok === false) {
+        Alert.alert('Could not send', r.error)
+        return
+      }
+      await load()
+    } finally {
+      setReplyingId(null)
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -228,6 +262,101 @@ export default function ConversationThreadScreen() {
             rows.map((m) => {
               const mine = m.sender_id === me
               const txt = messageText(m)
+              const replyMeta = parseBookingReply(txt)
+
+              if (replyMeta) {
+                const human =
+                  txt.split(/\n\n/).slice(1).join('\n\n').trim() ||
+                  (replyMeta.status === 'accepted' ? 'Booking accepted.' : 'Booking declined.')
+                return (
+                  <Swipeable
+                    key={m.id}
+                    friction={2}
+                    overshootRight={false}
+                    renderRightActions={() => (
+                      <View style={styles.swipeDeleteOuter}>
+                        <TouchableOpacity
+                          style={styles.swipeDeleteBtn}
+                          onPress={() => confirmDeleteMessage(m)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete message"
+                        >
+                          <Trash2 size={22} color="#fff" strokeWidth={ICON_STROKE} />
+                          <Text style={styles.swipeDeleteLabel}>Delete</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  >
+                    <View style={[styles.bubbleWrap, mine && styles.bubbleWrapMine]}>
+                      <TouchableOpacity
+                        activeOpacity={0.92}
+                        delayLongPress={380}
+                        onLongPress={() => confirmDeleteMessage(m)}
+                        accessibilityLabel="Booking response"
+                      >
+                        <View style={[styles.replyBanner, mine ? styles.replyBannerMine : styles.replyBannerTheirs]}>
+                          <Text style={styles.replyBannerText}>{human}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  </Swipeable>
+                )
+              }
+
+              const bookingPayload = parseBookingDm(txt)
+              if (bookingPayload) {
+                const responderId = mine ? otherUserId ?? '' : me ?? ''
+                const replyStatus =
+                  responderId ? findBookingReplyStatus(rows, m.id, responderId) : null
+
+                return (
+                  <Swipeable
+                    key={m.id}
+                    friction={2}
+                    overshootRight={false}
+                    renderRightActions={() => (
+                      <View style={styles.swipeDeleteOuter}>
+                        <TouchableOpacity
+                          style={styles.swipeDeleteBtn}
+                          onPress={() => confirmDeleteMessage(m)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete message"
+                        >
+                          <Trash2 size={22} color="#fff" strokeWidth={ICON_STROKE} />
+                          <Text style={styles.swipeDeleteLabel}>Delete</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  >
+                    <View style={[styles.bubbleWrap, mine && styles.bubbleWrapMine]}>
+                      <TouchableOpacity
+                        activeOpacity={0.92}
+                        delayLongPress={380}
+                        onLongPress={() => confirmDeleteMessage(m)}
+                        accessibilityLabel="Booking request"
+                      >
+                        <BookingRequestCard
+                          payload={bookingPayload}
+                          mine={mine}
+                          replyStatus={replyStatus}
+                          replyBusy={replyingId === m.id}
+                          onAccept={
+                            !mine && !replyStatus
+                              ? () => void submitBookingReply(m, 'accepted')
+                              : undefined
+                          }
+                          onDecline={
+                            !mine && !replyStatus
+                              ? () => void submitBookingReply(m, 'declined')
+                              : undefined
+                          }
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </Swipeable>
+                )
+              }
+
               return (
                 <Swipeable
                   key={m.id}
@@ -344,6 +473,29 @@ const styles = StyleSheet.create({
   bubbleText: { fontSize: 15, lineHeight: 20 },
   bubbleTextMine: { color: '#0a0a0a' },
   bubbleTextTheirs: { color: 'rgba(255,255,255,0.9)' },
+  replyBanner: {
+    maxWidth: '85%',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  replyBannerMine: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(255,220,0,0.14)',
+    borderColor: 'rgba(255,220,0,0.35)',
+  },
+  replyBannerTheirs: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#161616',
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  replyBannerText: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.88)',
+  },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',

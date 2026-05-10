@@ -10,7 +10,7 @@ import {
   Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useGlobalSearchParams, useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Share2 } from 'lucide-react-native'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { supabase } from '@/lib/supabase'
@@ -20,7 +20,28 @@ import { getCreaWebBaseUrl, openProjectOnWeb } from '@/lib/creaWeb'
 import { jobShareUrl } from '@/lib/shareLinks'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
+import {
+  findBookingReplyStatus,
+  bookingOpenDeepLinkMatchesJob,
+  parseBookingDm,
+  type BookingDmPayloadV1,
+  type BookingReplyStatus,
+} from '@/lib/bookingDm'
+import { replyToBookingMessage } from '@/lib/replyToBookingMessage'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
+import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
+
+type BookingDeepState =
+  | { kind: 'none' }
+  | { kind: 'loading' }
+  | { kind: 'invalid' }
+  | {
+      kind: 'ready'
+      payload: BookingDmPayloadV1
+      msgId: string
+      convId: string
+      replyStatus: BookingReplyStatus | null
+    }
 
 type JobRow = {
   id: string
@@ -41,8 +62,34 @@ function companyInitial(name: string) {
   return t ? t.charAt(0).toUpperCase() : '?'
 }
 
+function formatBookingRangeShort(isoA: string, isoB: string): string {
+  if (isoA === isoB) return isoA
+  return `${isoA} → ${isoB}`
+}
+
+/** Expo Router may pass a repeated query key as string[]. */
+function firstSearchParam(v: string | string[] | undefined): string | undefined {
+  if (typeof v === 'string') return v
+  if (Array.isArray(v) && v.length > 0 && typeof v[0] === 'string') return v[0]
+  return undefined
+}
+
 export default function JobDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const local = useLocalSearchParams<{
+    id?: string | string[]
+    bookingMsg?: string | string[]
+    conv?: string | string[]
+  }>()
+  const global = useGlobalSearchParams<{
+    bookingMsg?: string | string[]
+    conv?: string | string[]
+  }>()
+  /** Nested stack: invite query often appears only on global URL, not local — merge both. */
+  const id = firstSearchParam(local.id)
+  const bookingMsgId =
+    firstSearchParam(local.bookingMsg) ??
+    firstSearchParam(global.bookingMsg)
+  const convIdParam = firstSearchParam(local.conv) ?? firstSearchParam(global.conv)
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [job, setJob] = useState<JobRow | null>(null)
@@ -51,12 +98,22 @@ export default function JobDetailScreen() {
   const [applied, setApplied] = useState(false)
   const [applyBusy, setApplyBusy] = useState(false)
   const [projectId, setProjectId] = useState<string | null>(null)
-  const [createBusy, setCreateBusy] = useState(false)
   const [applicantsCount, setApplicantsCount] = useState(0)
   const [companyName, setCompanyName] = useState('Company')
   const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [accessDenied, setAccessDenied] = useState(false)
+  const [bookingDeep, setBookingDeep] = useState<BookingDeepState>({ kind: 'none' })
+  const [bookingBusy, setBookingBusy] = useState(false)
+
+  /** Params can hydrate after first paint — bump `none` → `loading` when invite query appears. */
+  useEffect(() => {
+    if (!bookingMsgId || !convIdParam) {
+      setBookingDeep({ kind: 'none' })
+      return
+    }
+    setBookingDeep((prev) => (prev.kind === 'none' ? { kind: 'loading' } : prev))
+  }, [bookingMsgId, convIdParam])
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
       setLoading(false)
@@ -154,8 +211,18 @@ export default function JobDetailScreen() {
         .eq('job_id', id)
       setApplicantsCount(count ?? 0)
 
+      const ownerIdRow = String((row as JobRow).company_id || '').trim()
+      if (resolvedRole && isCompanyProfile(resolvedRole) && ownerIdRow === user.id) {
+        await ensureMarketplaceJobWorkspaceRow(supabase, { jobId: id, userId: user.id })
+      }
+
       const { data: proj } = await supabase.from('projects').select('id').eq('job_id', id).maybeSingle()
-      setProjectId(proj?.id ?? null)
+      let pid = proj?.id ?? null
+      if (!pid) {
+        const { data: projById } = await supabase.from('projects').select('id').eq('id', id).maybeSingle()
+        pid = projById?.id ?? null
+      }
+      setProjectId(pid)
     }
 
     setLoading(false)
@@ -164,6 +231,66 @@ export default function JobDetailScreen() {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      if (!id || typeof id !== 'string' || !bookingMsgId || !convIdParam) {
+        setBookingDeep({ kind: 'none' })
+        return
+      }
+      if (loading || !uid || !job) {
+        return
+      }
+      if (!isFreelancerProfile(role ?? undefined)) {
+        setBookingDeep({ kind: 'none' })
+        return
+      }
+      if (uid === job.company_id) {
+        setBookingDeep({ kind: 'none' })
+        return
+      }
+      setBookingDeep({ kind: 'loading' })
+      const { data: msg, error: mErr } = await supabase
+        .from('messages')
+        .select('id, sender_id, body, content')
+        .eq('id', bookingMsgId)
+        .eq('conversation_id', convIdParam)
+        .maybeSingle()
+      if (cancelled) return
+      if (mErr || !msg) {
+        setBookingDeep({ kind: 'invalid' })
+        return
+      }
+      const raw = msg.body ?? msg.content ?? ''
+      const payload = parseBookingDm(typeof raw === 'string' ? raw : '')
+      if (!payload || !bookingOpenDeepLinkMatchesJob(payload.openDeepLink, id)) {
+        setBookingDeep({ kind: 'invalid' })
+        return
+      }
+      if (String(msg.sender_id) !== job.company_id) {
+        setBookingDeep({ kind: 'invalid' })
+        return
+      }
+      const { data: msgs } = await supabase
+        .from('messages')
+        .select('id, sender_id, created_at, body, content')
+        .eq('conversation_id', convIdParam)
+        .order('created_at', { ascending: true })
+      if (cancelled) return
+      const replyStatus = findBookingReplyStatus(msgs ?? [], bookingMsgId, uid)
+      setBookingDeep({
+        kind: 'ready',
+        payload,
+        msgId: bookingMsgId,
+        convId: convIdParam,
+        replyStatus,
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [id, bookingMsgId, convIdParam, uid, job, role, loading])
 
   const publicJobUrl = useMemo(() => {
     if (!id || typeof id !== 'string') return ''
@@ -182,6 +309,46 @@ export default function JobDetailScreen() {
   const company = isCompanyProfile(role ?? undefined)
   const listingWord = company ? 'Project' : 'Job'
   const listingWordPlural = company ? 'Projects' : 'Jobs'
+
+  const openedFromBooking = Boolean(bookingMsgId && convIdParam)
+
+  const pendingBookingGate = bookingDeep.kind === 'ready' && bookingDeep.replyStatus === null
+
+  /** Hide “Apply” for invite URLs until we fall back to `invalid` (broken/stale link). */
+  const hideApplyForInviteDeepLink = openedFromBooking && bookingDeep.kind !== 'invalid'
+
+  const onBookingRespond = async (status: BookingReplyStatus) => {
+    if (bookingDeep.kind !== 'ready') return
+    setBookingBusy(true)
+    const convId = bookingDeep.convId
+    const title = bookingDeep.payload.title.trim() || 'Project'
+    const r = await replyToBookingMessage({
+      conversationId: convId,
+      bookingMessageId: bookingDeep.msgId,
+      status,
+      projectTitle: title,
+    })
+    setBookingBusy(false)
+    if (r.ok === false) {
+      Alert.alert('Could not send', r.error)
+      return
+    }
+    if (status === 'declined') {
+      Alert.alert('Declined', 'The company has been notified in Messages.')
+      router.back()
+      return
+    }
+    const { data: proj } = await supabase.from('projects').select('id').eq('job_id', id).maybeSingle()
+    if (proj?.id) {
+      router.replace(`/project/${proj.id}`)
+      return
+    }
+    Alert.alert(
+      'Booking accepted',
+      'The company has been notified. You can follow up in Messages — the workspace will open here once it’s created.'
+    )
+    router.push(`/conversation/${convId}`)
+  }
 
   const onApply = async () => {
     if (!uid || !job) return
@@ -206,52 +373,6 @@ export default function JobDetailScreen() {
       void notifyExpoEvent({ kind: 'job_application', applicationId: insertedApp.id })
     }
     Alert.alert('Applied', 'The company will see your application.')
-  }
-
-  const onCreateWorkspace = async () => {
-    if (!uid || !job || !isOwner || !isCompanyProfile(role ?? undefined)) return
-    setCreateBusy(true)
-    const { data: apps, error: aerr } = await supabase
-      .from('job_applications')
-      .select('freelancer_id')
-      .eq('job_id', job.id)
-      .order('created_at', { ascending: true })
-      .limit(1)
-
-    if (aerr || !apps?.length) {
-      setCreateBusy(false)
-      Alert.alert(
-        'No applicants yet',
-        'Once a freelancer applies to this project, you can create a workspace here.'
-      )
-      return
-    }
-
-    const freelancerId = apps[0].freelancer_id
-    const { data: inserted, error: perr } = await supabase
-      .from('projects')
-      .insert({
-        job_id: job.id,
-        company_id: uid,
-        freelancer_id: freelancerId,
-        title: job.title,
-        status: 'active',
-        budget_amount: job.budget_amount,
-        budget_type: job.budget_type,
-        budget_currency: job.budget_currency ?? 'EUR',
-        location: job.location_type,
-      })
-      .select('id')
-      .single()
-
-    setCreateBusy(false)
-    if (perr) {
-      Alert.alert('Could not create workspace', perr.message)
-      return
-    }
-    setProjectId(inserted.id)
-    void notifyExpoEvent({ kind: 'workspace_ready', projectId: inserted.id })
-    Alert.alert('Workspace ready', 'Open it to use milestones, crew chat, files, and Brief AI in the app.')
   }
 
   const openWorkspace = () => {
@@ -322,6 +443,62 @@ export default function JobDetailScreen() {
       />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {bookingDeep.kind === 'loading' && freelancer && !isOwner && bookingMsgId && convIdParam ? (
+          <View style={styles.bookingLoading}>
+            <ActivityIndicator color="#FFDC00" />
+            <Text style={styles.bookingLoadingText}>Loading booking…</Text>
+          </View>
+        ) : null}
+
+        {bookingDeep.kind === 'ready' && freelancer && !isOwner ? (
+          <View style={styles.bookingGate}>
+            <Text style={styles.bookingGateKicker}>Booking request</Text>
+            <Text style={styles.bookingGateTitle}>{bookingDeep.payload.title}</Text>
+            <Text style={styles.bookingGateDates}>
+              {formatBookingRangeShort(bookingDeep.payload.isoStartDate, bookingDeep.payload.isoEndDate)}
+              {' · '}
+              {bookingDeep.payload.selectedIsoDates?.length ?? 0} day
+              {(bookingDeep.payload.selectedIsoDates?.length ?? 0) === 1 ? '' : 's'}
+            </Text>
+            {bookingDeep.replyStatus ? (
+              <View
+                style={[
+                  styles.bookingResolvedPill,
+                  bookingDeep.replyStatus === 'accepted'
+                    ? styles.bookingResolvedYes
+                    : styles.bookingResolvedNo,
+                ]}
+              >
+                <Text style={styles.bookingResolvedText}>
+                  You {bookingDeep.replyStatus === 'accepted' ? 'accepted' : 'declined'} this request
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.bookingActions}>
+                <TouchableOpacity
+                  style={[styles.bookingDeclineBtn, bookingBusy && styles.btnDisabled]}
+                  onPress={() => void onBookingRespond('declined')}
+                  disabled={bookingBusy}
+                >
+                  <Text style={styles.bookingDeclineText}>Decline</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.bookingAcceptBtn, bookingBusy && styles.btnDisabled]}
+                  onPress={() => void onBookingRespond('accepted')}
+                  disabled={bookingBusy}
+                >
+                  {bookingBusy ? (
+                    <ActivityIndicator color="#0a0a0a" />
+                  ) : (
+                    <Text style={styles.bookingAcceptText}>Accept</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+            <Text style={styles.bookingGateHint}>Details below if you need them.</Text>
+          </View>
+        ) : null}
+
         <View style={styles.companyRow}>
           {companyLogoUrl ? (
             <Image source={{ uri: companyLogoUrl }} style={styles.companyLogo} />
@@ -365,7 +542,7 @@ export default function JobDetailScreen() {
           </View>
         ) : null}
 
-        {freelancer && !isOwner && job.status === 'active' ? (
+        {freelancer && !isOwner && job.status === 'active' && !pendingBookingGate && !hideApplyForInviteDeepLink ? (
           <TouchableOpacity
             style={[styles.primaryBtn, (applied || applyBusy) && styles.btnDisabled]}
             onPress={onApply}
@@ -379,18 +556,22 @@ export default function JobDetailScreen() {
           </TouchableOpacity>
         ) : null}
 
-        {company && isOwner && !projectId ? (
-          <TouchableOpacity
-            style={[styles.secondaryBtn, createBusy && styles.btnDisabled]}
-            onPress={onCreateWorkspace}
-            disabled={createBusy}
-          >
-            {createBusy ? (
-              <ActivityIndicator color="#FFDC00" />
-            ) : (
-              <Text style={styles.secondaryBtnText}>Create project workspace</Text>
-            )}
-          </TouchableOpacity>
+        {company && isOwner && openedFromBooking ? (
+          <>
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() => {
+                if (convIdParam) router.push(`/conversation/${convIdParam}`)
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Open Messages"
+            >
+              <Text style={styles.primaryBtnText}>Open Messages</Text>
+            </TouchableOpacity>
+            <Text style={styles.bookingCompanyExplainer}>
+              The freelancer taps Accept or Decline in this chat. Your project workspace is available below — they only get access after accepting or once you accept their application.
+            </Text>
+          </>
         ) : null}
 
         {projectId ? (
@@ -526,6 +707,65 @@ const styles = StyleSheet.create({
   linkBtn: { marginTop: 14, paddingVertical: 8 },
   linkBtnText: { fontSize: 14, fontWeight: '600', color: 'rgba(255,220,0,0.85)' },
   hint: { marginTop: 12, fontSize: 12, color: 'rgba(255,255,255,0.3)', lineHeight: 18 },
+  bookingLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 18,
+    paddingVertical: 12,
+  },
+  bookingLoadingText: { fontSize: 13, color: 'rgba(255,255,255,0.45)' },
+  bookingGate: {
+    marginBottom: 22,
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.35)',
+    backgroundColor: '#111',
+    gap: 10,
+  },
+  bookingGateKicker: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    color: 'rgba(255,220,0,0.85)',
+    textTransform: 'uppercase',
+  },
+  bookingGateTitle: { fontSize: 20, fontWeight: '900', color: '#fff' },
+  bookingGateDates: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.55)' },
+  bookingGateHint: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 4 },
+  bookingCompanyExplainer: {
+    marginTop: 12,
+    marginBottom: 8,
+    fontSize: 13,
+    lineHeight: 19,
+    color: 'rgba(255,255,255,0.42)',
+    paddingHorizontal: 4,
+  },
+  bookingActions: { flexDirection: 'row', gap: 10, marginTop: 6 },
+  bookingDeclineBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center',
+  },
+  bookingDeclineText: { fontSize: 15, fontWeight: '800', color: 'rgba(255,255,255,0.9)' },
+  bookingAcceptBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#FFDC00',
+    alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+  bookingAcceptText: { fontSize: 15, fontWeight: '800', color: '#0a0a0a' },
+  bookingResolvedPill: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  bookingResolvedYes: { backgroundColor: 'rgba(21,128,61,0.28)' },
+  bookingResolvedNo: { backgroundColor: 'rgba(180,83,9,0.25)' },
+  bookingResolvedText: { fontSize: 13, fontWeight: '800', color: 'rgba(255,255,255,0.9)' },
   btnDisabled: { opacity: 0.55 },
   missTitle: { color: '#ffffff', fontSize: 18, fontWeight: '700' },
   missSub: {

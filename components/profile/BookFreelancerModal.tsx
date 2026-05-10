@@ -92,10 +92,10 @@ export function BookFreelancerModal({
       .eq('freelancer_id', freelancerId)
       .order('updated_at', { ascending: false }),
       supabase
-      .from('jobs')
-      .select('id, title')
-      .eq('company_id', companyUserId)
-      .order('updated_at', { ascending: false }),
+        .from('jobs')
+        .select('id, title')
+        .eq('company_id', companyUserId)
+        .order('created_at', { ascending: false }),
     ])
 
     if (projectErr) {

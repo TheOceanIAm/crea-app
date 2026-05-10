@@ -15,6 +15,7 @@ import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { parseIsoDateInput } from '@/lib/isoDateInput'
 
 const CATEGORIES = ['Film / Video', 'Photo', 'Post / Edit', 'Motion', 'Design', 'Other'] as const
 const BUDGET_TYPES = [
@@ -40,6 +41,8 @@ export default function CompanyPostJobScreen() {
   const [budgetCurrency, setBudgetCurrency] = useState('EUR')
   const [locationType, setLocationType] = useState<(typeof LOCATIONS)[number]['id']>('hybrid')
   const [description, setDescription] = useState('')
+  const [prodStart, setProdStart] = useState('')
+  const [prodEnd, setProdEnd] = useState('')
 
   useFocusEffect(
     useCallback(() => {
@@ -89,19 +92,62 @@ export default function CompanyPostJobScreen() {
     const curRaw = budgetCurrency.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3)
     const budget_currency = curRaw.length === 3 ? curRaw : 'EUR'
 
+    const ps = prodStart.trim()
+    const pe = prodEnd.trim()
+    if ((ps && !pe) || (!ps && pe)) {
+      Alert.alert('Production window', 'Enter both start and end (YYYY-MM-DD), or leave both empty.')
+      return
+    }
+    const prodA = ps ? parseIsoDateInput(ps) : null
+    const prodB = pe ? parseIsoDateInput(pe) : null
+    if (ps && !prodA) {
+      Alert.alert('Production window', 'Start date must be YYYY-MM-DD.')
+      return
+    }
+    if (pe && !prodB) {
+      Alert.alert('Production window', 'End date must be YYYY-MM-DD.')
+      return
+    }
+    if (prodA && prodB && prodB < prodA) {
+      Alert.alert('Production window', 'End date must be on or after start.')
+      return
+    }
+
     setSaving(true)
-    const { error } = await supabase.from('jobs').insert({
-      title: t,
-      category,
-      budget_type: budgetType,
-      budget_amount: amount,
-      budget_currency,
-      location_type: locationType,
-      description: description.trim() || null,
-      company_id: user.id,
-      status: 'active',
-      is_solo_workspace: false,
-    })
+    const { data: inserted, error } = await supabase
+      .from('jobs')
+      .insert({
+        title: t,
+        category,
+        budget_type: budgetType,
+        budget_amount: amount,
+        budget_currency,
+        location_type: locationType,
+        description: description.trim() || null,
+        company_id: user.id,
+        status: 'active',
+        is_solo_workspace: false,
+      })
+      .select('id')
+      .maybeSingle()
+    if (!error && inserted?.id && prodA && prodB) {
+      const { error: pErr } = await supabase
+        .from('projects')
+        .update({
+          scheduling_start_date: prodA,
+          scheduling_end_date: prodB,
+        })
+        .eq('id', inserted.id)
+      if (pErr) {
+        setSaving(false)
+        Alert.alert(
+          'Published without schedule',
+          `${pErr.message}\n\nYour listing is live; open the project workspace Overview to set production dates.`
+        )
+        router.replace('/(tabs)/jobs')
+        return
+      }
+    }
     setSaving(false)
     if (error) {
       Alert.alert(
@@ -232,6 +278,38 @@ export default function CompanyPostJobScreen() {
           })}
         </View>
 
+        <Text style={styles.label}>Production window (optional)</Text>
+        <Text style={styles.hintInline}>
+          Inclusive dates for the whole job — blocks the lead freelancer&apos;s public calendar when active. Per-role
+          lengths: Crew tab in the workspace.
+        </Text>
+        <View style={styles.dateRow}>
+          <View style={styles.dateField}>
+            <Text style={styles.dateFieldLbl}>Start</Text>
+            <TextInput
+              style={[styles.input, styles.inputNoMb]}
+              value={prodStart}
+              onChangeText={setProdStart}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor="rgba(255,255,255,0.28)"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.dateField}>
+            <Text style={styles.dateFieldLbl}>End</Text>
+            <TextInput
+              style={[styles.input, styles.inputNoMb]}
+              value={prodEnd}
+              onChangeText={setProdEnd}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor="rgba(255,255,255,0.28)"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+        </View>
+
         <Text style={styles.label}>Description</Text>
         <TextInput
           style={[styles.input, styles.bio]}
@@ -298,6 +376,24 @@ const styles = StyleSheet.create({
   chipSelected: { borderColor: 'rgba(255,220,0,0.45)', backgroundColor: 'rgba(255,220,0,0.08)' },
   chipText: { color: 'rgba(255,255,255,0.65)', fontSize: 13, fontWeight: '600' },
   chipTextSelected: { color: '#FFDC00' },
+  hintInline: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.32)',
+    lineHeight: 17,
+    marginBottom: 10,
+    marginTop: -6,
+  },
+  dateRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  dateField: { flex: 1, minWidth: 0 },
+  dateFieldLbl: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.35)',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  inputNoMb: { marginBottom: 0 },
   primaryBtn: {
     backgroundColor: '#FFDC00',
     borderRadius: 14,

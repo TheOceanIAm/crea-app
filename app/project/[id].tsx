@@ -24,6 +24,7 @@ import {
 import type { LucideIcon } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ensureSoloWorkspaceProjectRow } from '@/lib/ensureSoloWorkspaceProject'
+import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProjectMilestonesTab } from '@/components/project/ProjectMilestonesTab'
 import { ProjectMessagesTab } from '@/components/project/ProjectMessagesTab'
@@ -32,6 +33,7 @@ import { ProjectFilesTab } from '@/components/project/ProjectFilesTab'
 import { ProjectReviewTab } from '@/components/project/ProjectReviewTab'
 import { ProductionTab } from '@/app/components/project/[projectId]/ProductionTab'
 import { ProjectOverviewAbout } from '@/components/project/ProjectOverviewAbout'
+import { ProjectOverviewProductionWindow } from '@/components/project/ProjectOverviewProductionWindow'
 import { BriefAiFormattedOutput } from '@/components/project/BriefAiFormattedOutput'
 import { formatProjectBudgetLine } from '@/lib/budgetFormatting'
 import {
@@ -323,6 +325,17 @@ export default function ProjectWorkspaceScreen() {
       }
     }
     if (projErr || !row) {
+      const ensuredMarketplace = await ensureMarketplaceJobWorkspaceRow(supabase, {
+        jobId: id,
+        userId: user.id,
+      })
+      if (ensuredMarketplace.ok) {
+        const again = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
+        row = again.data
+        projErr = again.error
+      }
+    }
+    if (projErr || !row) {
       setForbidden(true)
       setProject(null)
       setSunPlannerEnabled(false)
@@ -438,6 +451,11 @@ export default function ProjectWorkspaceScreen() {
    */
   const canEditJobProjectStatus = useMemo(() => {
     if (!project || !userId || !project.job_id) return false
+    return project.company_id === userId
+  }, [project, userId])
+
+  const canEditProductionSchedule = useMemo(() => {
+    if (!project || !userId) return false
     return project.company_id === userId
   }, [project, userId])
 
@@ -585,6 +603,30 @@ export default function ProjectWorkspaceScreen() {
           }
         : prev
     )
+    Alert.alert('Saved', 'Production window updated.')
+  }
+
+  const clearSchedule = async () => {
+    if (!project || !canEditProductionSchedule) return
+    setSavingSchedule(true)
+    const { error } = await supabase
+      .from('projects')
+      .update({
+        scheduling_start_date: null,
+        scheduling_end_date: null,
+      })
+      .eq('id', project.id)
+    setSavingSchedule(false)
+    if (error) {
+      Alert.alert('Could not clear', error.message)
+      return
+    }
+    setScheduleStart('')
+    setScheduleEnd('')
+    setProject((prev) =>
+      prev ? { ...prev, scheduling_start_date: null, scheduling_end_date: null } : prev
+    )
+    Alert.alert('Cleared', 'Production dates removed.')
   }
 
   const saveBrief = async () => {
@@ -950,6 +992,20 @@ export default function ProjectWorkspaceScreen() {
                 </View>
               ) : null}
 
+            {tab === 'overview' && !workspaceOnlyPlan ? (
+              <ProjectOverviewProductionWindow
+                scheduleStart={scheduleStart}
+                scheduleEnd={scheduleEnd}
+                onChangeStart={setScheduleStart}
+                onChangeEnd={setScheduleEnd}
+                onSave={saveSchedule}
+                onClear={clearSchedule}
+                saving={savingSchedule}
+                lockedByPlan={starterFreelancerPlan}
+                readOnly={!canEditProductionSchedule}
+              />
+            ) : null}
+
             {tab === 'overview' && (
               <>
                 <ProjectOverviewAbout
@@ -1023,45 +1079,6 @@ export default function ProjectWorkspaceScreen() {
                       </View>
                     ) : null}
                   </>
-                ) : null}
-                {canManageCrew && !workspaceOnlyPlan ? (
-                  <View style={styles.scheduleCard}>
-                    <Text style={styles.scheduleTitle}>Public freelancer calendar</Text>
-                    <Text style={styles.scheduleSub}>
-                      Inclusive shoot dates (YYYY-MM-DD). They appear as busy on the freelancer&apos;s public profile
-                      while this project is active.
-                    </Text>
-                    {starterFreelancerPlan ? (
-                      <Text style={styles.scheduleLockedHint}>Only available for Pro users.</Text>
-                    ) : null}
-                    <TextInput
-                      style={[styles.scheduleInput, starterFreelancerPlan && styles.scheduleInputLocked]}
-                      placeholder="Start date e.g. 2026-05-12"
-                      placeholderTextColor="rgba(255,255,255,0.25)"
-                      value={scheduleStart}
-                      onChangeText={setScheduleStart}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      editable={!starterFreelancerPlan}
-                    />
-                    <TextInput
-                      style={[styles.scheduleInput, starterFreelancerPlan && styles.scheduleInputLocked]}
-                      placeholder="End date e.g. 2026-05-14"
-                      placeholderTextColor="rgba(255,255,255,0.25)"
-                      value={scheduleEnd}
-                      onChangeText={setScheduleEnd}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      editable={!starterFreelancerPlan}
-                    />
-                    <TouchableOpacity
-                      style={[styles.scheduleSaveBtn, (savingSchedule || starterFreelancerPlan) && styles.btnDim]}
-                      onPress={saveSchedule}
-                      disabled={savingSchedule || starterFreelancerPlan}
-                    >
-                      <Text style={styles.scheduleSaveText}>{savingSchedule ? 'Saving…' : 'Save schedule'}</Text>
-                    </TouchableOpacity>
-                  </View>
                 ) : null}
                 <Text style={styles.para}>
                   Milestones, crew, chat, files, Review (Frame.io + PicDrop), production tools, and Brief AI stay in sync
@@ -1239,14 +1256,6 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   bodyContent: { paddingBottom: 40 },
   jobPhaseCard: {
-    marginBottom: 20,
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: '#141414',
-  },
-  scheduleCard: {
     marginBottom: 20,
     padding: 14,
     borderRadius: 12,

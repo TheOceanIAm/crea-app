@@ -74,6 +74,10 @@ function normalizeRateLabel(rate: string | null): string | null {
     .replace(/\btagessatz\b/gi, 'day rate')
 }
 
+function isCreaJobItem(item: Job | ExternalJob): item is Job {
+  return 'company_name' in item
+}
+
 export default function JobsListScreen() {
   const router = useRouter()
   const hasLoadedRef = useRef(false)
@@ -218,14 +222,6 @@ export default function JobsListScreen() {
     }, [loadJobs])
   )
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
-    )
-  }
-
   const filteredCreaJobs = useMemo(() => {
     const needle = search.trim().toLowerCase()
     if (!needle) return jobs
@@ -250,6 +246,17 @@ export default function JobsListScreen() {
 
   const currentItemsCount = !isCompanyUser && feedTab === 'external' ? filteredExternalJobs.length : filteredCreaJobs.length
   const countLabel = isCompanyUser ? `${currentItemsCount} listing${currentItemsCount === 1 ? '' : 's'}` : `${currentItemsCount} open`
+
+  const showExternalFeed = !isCompanyUser && feedTab === 'external'
+  const feedListData: (Job | ExternalJob)[] = showExternalFeed ? filteredExternalJobs : filteredCreaJobs
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color="#FFDC00" size="large" />
+      </View>
+    )
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -304,8 +311,8 @@ export default function JobsListScreen() {
         />
       </View>
 
-      <FlatList
-        data={!isCompanyUser && feedTab === 'external' ? filteredExternalJobs : filteredCreaJobs}
+      <FlatList<Job | ExternalJob>
+        data={feedListData}
         keyExtractor={(j) => j.id}
         initialNumToRender={8}
         maxToRenderPerBatch={6}
@@ -318,38 +325,38 @@ export default function JobsListScreen() {
             style={styles.card}
             activeOpacity={0.7}
             onPress={() =>
-              !isCompanyUser && feedTab === 'external'
-                ? setActiveExternalJob(item as ExternalJob)
+              showExternalFeed && !isCreaJobItem(item)
+                ? setActiveExternalJob(item)
                 : router.push(`/(tabs)/jobs/${item.id}`)
             }
           >
-            {!isCompanyUser && feedTab === 'external' ? (
+            {showExternalFeed && !isCreaJobItem(item) ? (
               <>
                 <View style={styles.companyRow}>
                   <View style={styles.companyLogoPlaceholder}>
-                    <Text style={styles.companyLogoLetter}>{companyInitial((item as ExternalJob).company)}</Text>
+                    <Text style={styles.companyLogoLetter}>{companyInitial(item.company)}</Text>
                   </View>
                   <Text style={styles.companyName} numberOfLines={1}>
-                    {(item as ExternalJob).company}
+                    {item.company}
                   </Text>
                 </View>
                 <View style={styles.cardTop}>
                   <Text style={styles.jobTitle}>{item.title}</Text>
                   <View style={styles.budgetBadge}>
-                    <Text style={styles.budgetText}>{normalizeRateLabel((item as ExternalJob).rate) || 'Rate TBD'}</Text>
+                    <Text style={styles.budgetText}>{normalizeRateLabel(item.rate) || 'Rate TBD'}</Text>
                   </View>
                 </View>
                 <Text style={styles.jobMeta}>
-                  {(item as ExternalJob).role || 'Role n/a'} · {(item as ExternalJob).location || 'Location n/a'}
+                  {item.role || 'Role n/a'} · {item.location || 'Location n/a'}
                 </Text>
-                {(item as ExternalJob).needed_when ? (
-                  <Text style={styles.jobMeta}>Needed: {(item as ExternalJob).needed_when}</Text>
+                {item.needed_when ? (
+                  <Text style={styles.jobMeta}>Needed: {item.needed_when}</Text>
                 ) : null}
                 <View style={styles.externalActions}>
                   <TouchableOpacity
                     style={styles.externalActionBtn}
                     activeOpacity={0.85}
-                    onPress={() => setActiveExternalJob(item as ExternalJob)}
+                    onPress={() => setActiveExternalJob(item)}
                   >
                     <Text style={styles.externalActionBtnText}>View contact</Text>
                   </TouchableOpacity>
@@ -357,7 +364,7 @@ export default function JobsListScreen() {
                     style={styles.externalGhostBtn}
                     activeOpacity={0.85}
                     onPress={() => {
-                      const url = (item as ExternalJob).source_url
+                      const url = item.source_url
                       if (url) void Linking.openURL(url)
                     }}
                   >
@@ -365,7 +372,7 @@ export default function JobsListScreen() {
                   </TouchableOpacity>
                 </View>
               </>
-            ) : (
+            ) : isCreaJobItem(item) ? (
               <>
                 <View style={styles.companyRow}>
                   {item.company_logo_url ? (
@@ -400,7 +407,7 @@ export default function JobsListScreen() {
                   {item.category} · {item.location_type}
                 </Text>
               </>
-            )}
+            ) : null}
           </TouchableOpacity>
         )}
         ListEmptyComponent={

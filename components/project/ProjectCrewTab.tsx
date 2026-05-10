@@ -17,11 +17,15 @@ import { Trash2 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { parseIsoDateInput } from '@/lib/isoDateInput'
+import { formatProductionWindowSummary } from '@/lib/projectProductionWindow'
 
 type Member = {
   id: string
   profile_id: string
   member_role: string
+  scheduling_start_date?: string | null
+  scheduling_end_date?: string | null
   profiles: { name: string | null; avatar_url: string | null } | null
 }
 
@@ -44,6 +48,8 @@ type CrewRow =
       subtitle: string
       email: string | null
       phone: string | null
+      scheduling_start_date?: string | null
+      scheduling_end_date?: string | null
     }
   | {
       source: 'manual'
@@ -105,12 +111,15 @@ export function ProjectCrewTab({
   const [personRole, setPersonRole] = useState('crew')
   const [personEmail, setPersonEmail] = useState('')
   const [personPhone, setPersonPhone] = useState('')
+  const [memberSchedStart, setMemberSchedStart] = useState('')
+  const [memberSchedEnd, setMemberSchedEnd] = useState('')
+  const [savingMemberSchedule, setSavingMemberSchedule] = useState(false)
 
   const load = useCallback(async () => {
     const [registeredRes, manualRes] = await Promise.all([
       supabase
         .from('project_members')
-        .select('id, profile_id, member_role, profiles(name, avatar_url)')
+        .select('id, profile_id, member_role, scheduling_start_date, scheduling_end_date, profiles(name, avatar_url)')
         .eq('project_id', projectId)
         .order('member_role', { ascending: true }),
       supabase
@@ -140,6 +149,8 @@ export function ProjectCrewTab({
         | null
         | undefined
       const p = Array.isArray(prof) ? prof[0] : prof
+      const sStart = m.scheduling_start_date
+      const sEnd = m.scheduling_end_date
       return {
         source: 'registered' as const,
         id: m.id,
@@ -149,6 +160,10 @@ export function ProjectCrewTab({
         subtitle: roleLabel(m.member_role),
         email: null,
         phone: null,
+        scheduling_start_date:
+          typeof sStart === 'string' ? sStart.slice(0, 10) : sStart != null ? String(sStart).slice(0, 10) : null,
+        scheduling_end_date:
+          typeof sEnd === 'string' ? sEnd.slice(0, 10) : sEnd != null ? String(sEnd).slice(0, 10) : null,
       }
     })
 
@@ -318,6 +333,13 @@ export function ProjectCrewTab({
     setPersonRole(m.member_role || 'crew')
     setPersonEmail((m.email ?? '').trim())
     setPersonPhone((m.phone ?? '').trim())
+    if (m.source === 'registered') {
+      setMemberSchedStart((m.scheduling_start_date ?? '').trim())
+      setMemberSchedEnd((m.scheduling_end_date ?? '').trim())
+    } else {
+      setMemberSchedStart('')
+      setMemberSchedEnd('')
+    }
     setPersonModalOpen(true)
   }
 
@@ -327,6 +349,64 @@ export function ProjectCrewTab({
   }
 
   const canEditSelected = selectedCrew?.source === 'manual'
+
+  const saveMemberProductionDates = async () => {
+    if (!selectedCrew || selectedCrew.source !== 'registered' || selectedCrew.member_role === 'company') return
+    const a = memberSchedStart.trim() ? parseIsoDateInput(memberSchedStart) : null
+    const b = memberSchedEnd.trim() ? parseIsoDateInput(memberSchedEnd) : null
+    if (memberSchedStart.trim() && !a) {
+      Alert.alert('Dates', 'Start must be YYYY-MM-DD.')
+      return
+    }
+    if (memberSchedEnd.trim() && !b) {
+      Alert.alert('Dates', 'End must be YYYY-MM-DD.')
+      return
+    }
+    if ((a && !b) || (!a && b)) {
+      Alert.alert('Dates', 'Set both start and end, or clear both.')
+      return
+    }
+    if (a && b && b < a) {
+      Alert.alert('Dates', 'End must be on or after start.')
+      return
+    }
+    setSavingMemberSchedule(true)
+    const { error } = await supabase
+      .from('project_members')
+      .update({
+        scheduling_start_date: a,
+        scheduling_end_date: b,
+      })
+      .eq('id', selectedCrew.id)
+    setSavingMemberSchedule(false)
+    if (error) {
+      Alert.alert('Save failed', error.message)
+      return
+    }
+    load()
+    Alert.alert('Saved', 'Their public calendar will show busy on those days when the project is active.')
+  }
+
+  const clearMemberProductionDates = async () => {
+    if (!selectedCrew || selectedCrew.source !== 'registered' || selectedCrew.member_role === 'company') return
+    setSavingMemberSchedule(true)
+    const { error } = await supabase
+      .from('project_members')
+      .update({
+        scheduling_start_date: null,
+        scheduling_end_date: null,
+      })
+      .eq('id', selectedCrew.id)
+    setSavingMemberSchedule(false)
+    if (error) {
+      Alert.alert('Clear failed', error.message)
+      return
+    }
+    setMemberSchedStart('')
+    setMemberSchedEnd('')
+    load()
+    Alert.alert('Cleared', 'Production dates removed for this crew member.')
+  }
 
   const savePersonInfo = async () => {
     if (!selectedCrew) return
@@ -420,6 +500,12 @@ export function ProjectCrewTab({
                 Search freelancers on Crea by name, or add someone without an account (name, email, phone for your
                 records).
               </Text>
+              {!workspaceOnly ? (
+                <Text style={styles.hintTight}>
+                  Need different production lengths per role? Tap a person below → set their production dates (public
+                  calendar busy).
+                </Text>
+              ) : null}
               {!proFeaturesEnabled ? (
                 <Text style={styles.proHint}>Only available for Pro users.</Text>
               ) : null}
@@ -509,6 +595,12 @@ export function ProjectCrewTab({
             <TouchableOpacity style={styles.rowText} onPress={() => openPersonCard(m)}>
               <Text style={styles.name}>{m.name}</Text>
               <Text style={styles.role}>{m.subtitle}</Text>
+              {m.source === 'registered' &&
+              formatProductionWindowSummary(m.scheduling_start_date, m.scheduling_end_date) ? (
+                <Text style={styles.scheduleLine} numberOfLines={2}>
+                  {formatProductionWindowSummary(m.scheduling_start_date, m.scheduling_end_date)}
+                </Text>
+              ) : null}
             </TouchableOpacity>
           </View>
         )
@@ -602,6 +694,54 @@ export function ProjectCrewTab({
                 ? 'Edit contact details for this crew member.'
                 : 'This is a CREA account. Contact details are managed in the user profile.'}
             </Text>
+            {selectedCrew?.source === 'registered' &&
+            canManage &&
+            selectedCrew.member_role !== 'company' &&
+            !workspaceOnly ? (
+              <View style={styles.memberSchedBox}>
+                <Text style={styles.modalSectionKicker}>Their production window</Text>
+                <Text style={styles.modalHintSmall}>
+                  Inclusive YYYY-MM-DD. When the project is active, these days block on this person&apos;s public
+                  calendar.
+                </Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Start YYYY-MM-DD"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={memberSchedStart}
+                  onChangeText={setMemberSchedStart}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="End YYYY-MM-DD"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={memberSchedEnd}
+                  onChangeText={setMemberSchedEnd}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <View style={styles.modalSchedActions}>
+                  <TouchableOpacity
+                    style={[styles.modalSave, (savingMemberSchedule || busy) && styles.dim]}
+                    onPress={() => void saveMemberProductionDates()}
+                    disabled={savingMemberSchedule || busy}
+                  >
+                    <Text style={styles.modalSaveText}>
+                      {savingMemberSchedule ? 'Saving…' : 'Save production dates'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.modalGhost}
+                    onPress={() => void clearMemberProductionDates()}
+                    disabled={savingMemberSchedule || busy}
+                  >
+                    <Text style={styles.modalGhostText}>Clear</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
             <TextInput
               style={styles.modalInput}
               placeholder="Name"
@@ -687,6 +827,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   hint: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginBottom: 12 },
+  hintTight: { fontSize: 12, color: 'rgba(255,255,255,0.32)', marginBottom: 14, lineHeight: 17 },
   proHint: { fontSize: 12, color: '#FFDC00', marginBottom: 10, fontWeight: '700' },
   searchBlock: { marginBottom: 12, position: 'relative', zIndex: 20 },
   searchBlockOpen: { marginBottom: 8 },
@@ -787,6 +928,13 @@ const styles = StyleSheet.create({
   rowText: { flex: 1 },
   name: { fontSize: 16, fontWeight: '600', color: '#fff' },
   role: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 2 },
+  scheduleLine: {
+    fontSize: 11,
+    color: 'rgba(255,220,0,0.75)',
+    marginTop: 6,
+    fontWeight: '600',
+    lineHeight: 15,
+  },
   swipeDeleteOuter: {
     width: 86,
     justifyContent: 'center',
@@ -816,6 +964,24 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 6 },
   modalHint: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 14 },
+  memberSchedBox: {
+    marginBottom: 14,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  modalSectionKicker: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    color: 'rgba(255,255,255,0.45)',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  modalHintSmall: { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginBottom: 10, lineHeight: 16 },
+  modalSchedActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginTop: 4 },
+  modalGhost: { paddingVertical: 10, paddingHorizontal: 12 },
+  modalGhostText: { color: 'rgba(255,255,255,0.45)', fontWeight: '700', fontSize: 13 },
   modalInput: {
     backgroundColor: '#0a0a0a',
     borderRadius: 10,

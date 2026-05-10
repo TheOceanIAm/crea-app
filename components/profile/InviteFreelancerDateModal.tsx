@@ -64,7 +64,7 @@ export function InviteFreelancerDateModal({
         .from('jobs')
         .select('id, title')
         .eq('company_id', companyUserId)
-        .order('updated_at', { ascending: false }),
+        .order('created_at', { ascending: false }),
     ])
 
     if (projectErr) setLoadError(projectErr.message)
