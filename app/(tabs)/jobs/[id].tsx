@@ -312,6 +312,34 @@ export default function JobDetailScreen() {
 
   const openedFromBooking = Boolean(bookingMsgId && convIdParam)
 
+  /** Company owners skip this screen and open `/project/:id` unless booking deep-link needs this UI. */
+  const [detailReady, setDetailReady] = useState(false)
+  useEffect(() => {
+    setDetailReady(false)
+  }, [id])
+
+  useEffect(() => {
+    if (loading) return
+
+    if (accessDenied || !job) {
+      setDetailReady(true)
+      return
+    }
+
+    const skipToWorkspace =
+      isCompanyProfile(role ?? undefined) &&
+      uid === job.company_id &&
+      Boolean(projectId) &&
+      !openedFromBooking
+
+    if (skipToWorkspace && projectId) {
+      router.replace(`/project/${projectId}`)
+      return
+    }
+
+    setDetailReady(true)
+  }, [loading, accessDenied, job, uid, role, projectId, openedFromBooking, router])
+
   const pendingBookingGate = bookingDeep.kind === 'ready' && bookingDeep.replyStatus === null
 
   /** Hide “Apply” for invite URLs until we fall back to `invalid` (broken/stale link). */
@@ -379,7 +407,7 @@ export default function JobDetailScreen() {
     if (projectId) router.push(`/project/${projectId}`)
   }
 
-  if (loading) {
+  if (loading || !detailReady) {
     return (
       <View style={styles.center}>
         <ActivityIndicator color="#FFDC00" size="large" />

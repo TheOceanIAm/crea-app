@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
-    "start:localhost": "expo start --localhost",
-    "start:sim": "expo start --localhost --ios",
-    "start:go": "expo start --go",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "web": "expo start --web",
+    "start": "bash scripts/expo-with-nvm.sh start",
+    "start:localhost": "bash scripts/expo-with-nvm.sh start --localhost",
+    "start:sim": "bash scripts/expo-with-nvm.sh start --localhost --ios",
+    "start:go": "bash scripts/expo-with-nvm.sh start --go",
+    "android": "bash scripts/expo-with-nvm.sh run:android",
+    "ios": "bash scripts/expo-with-nvm.sh run:ios",
+    "web": "bash scripts/expo-with-nvm.sh start --web",
     "deploy:supabase": "bash scripts/deploy-supabase.sh",
     "deploy:notify-push": "bash scripts/deploy-notify-push.sh",
     "splash:transparent-bg": "node scripts/splash-make-transparent-bg.mjs",
@@ -68,5 +68,8 @@
     "patch-package": "^8.0.1",
     "pngjs": "^7.0.0",
     "typescript": "~5.3.0"
+  },
+  "engines": {
+    "node": ">=18 <24"
   }
 }

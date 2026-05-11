@@ -27,10 +27,10 @@ const TOOLS: ToolRow[] = [
     href: '/(tabs)/company-post-job',
   },
   {
-    label: 'My projects',
-    sub: 'Edit status, share links, open workspaces.',
+    label: 'Projects',
+    sub: 'Your listings, search, post — same view as the Projects tab.',
     icon: Briefcase,
-    href: '/(tabs)/company-my-jobs',
+    href: '/(tabs)/jobs',
   },
   {
     label: 'Applications',

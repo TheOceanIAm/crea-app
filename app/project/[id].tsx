@@ -202,6 +202,7 @@ export default function ProjectWorkspaceScreen() {
   const [overviewEditOpen, setOverviewEditOpen] = useState(false)
   const [savingBrief, setSavingBrief] = useState(false)
   const [savingOverview, setSavingOverview] = useState(false)
+  const [savingProjectSummary, setSavingProjectSummary] = useState(false)
   const [savingJobPhaseStatus, setSavingJobPhaseStatus] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [scheduleStart, setScheduleStart] = useState('')
@@ -350,7 +351,7 @@ export default function ProjectWorkspaceScreen() {
 
     const [{ data: jobPhase }, applicantsRes] = await Promise.all([
       p.job_id
-        ? supabase.from('jobs').select('project_status').eq('id', p.job_id).maybeSingle()
+        ? supabase.from('jobs').select('project_status, description').eq('id', p.job_id).maybeSingle()
         : Promise.resolve({ data: null }),
       p.job_id
         ? supabase
@@ -398,11 +399,19 @@ export default function ProjectWorkspaceScreen() {
     setProductionWeatherLockedHint(nextWeatherHint)
     setProject({ ...p, status: mergedStatus })
     setBriefText(p.brief_ai_context ?? '')
-    setOverviewSummary(
+    const workspaceSummary =
       p.brief_ai_outputs && typeof p.brief_ai_outputs.workspace_summary === 'string'
-        ? p.brief_ai_outputs.workspace_summary
-        : p.brief_ai_context ?? ''
-    )
+        ? p.brief_ai_outputs.workspace_summary.trim()
+        : ''
+    const jobListingDescription =
+      jobPhase && typeof (jobPhase as { description?: string | null }).description === 'string'
+        ? String((jobPhase as { description: string }).description).trim()
+        : ''
+    /** Same copy as web job listing / manage job: `jobs.description`. Fallback for legacy app-only edits. */
+    const overviewText = p.job_id
+      ? jobListingDescription || workspaceSummary || (p.brief_ai_context ?? '').trim()
+      : workspaceSummary || (p.brief_ai_context ?? '').trim()
+    setOverviewSummary(overviewText)
     setOverviewBudgetAmount(typeof p.budget_amount === 'number' ? String(p.budget_amount) : '')
     setOverviewBudgetType(p.budget_type ?? '')
     setOverviewStatus(mergedStatus)
@@ -707,6 +716,19 @@ export default function ProjectWorkspaceScreen() {
       Alert.alert('Save failed', error.message)
       return
     }
+    if (project.job_id && canEditProductionSchedule) {
+      const { error: descErr } = await supabase
+        .from('jobs')
+        .update({ description: nextSummary })
+        .eq('id', project.job_id)
+      if (descErr) {
+        Alert.alert(
+          'Partial save',
+          `Overview saved, but the job listing description could not sync:\n${descErr.message}`
+        )
+        return
+      }
+    }
     setProject((prev) =>
       prev
         ? {
@@ -719,6 +741,44 @@ export default function ProjectWorkspaceScreen() {
         : prev
     )
     Alert.alert('Saved', 'Overview details were updated.')
+  }
+
+  const saveProjectSummary = async (): Promise<boolean> => {
+    if (!project || !canEditProductionSchedule) return false
+    const nextSummary = overviewSummary.trim()
+    const prevOutputs = (project.brief_ai_outputs ?? {}) as Record<string, string>
+    setSavingProjectSummary(true)
+    const { error } = await supabase
+      .from('projects')
+      .update({
+        brief_ai_outputs: { ...prevOutputs, workspace_summary: nextSummary },
+      })
+      .eq('id', project.id)
+    setSavingProjectSummary(false)
+    if (error) {
+      Alert.alert('Save failed', error.message)
+      return false
+    }
+    if (project.job_id) {
+      const { error: jobDescErr } = await supabase
+        .from('jobs')
+        .update({ description: nextSummary })
+        .eq('id', project.job_id)
+      if (jobDescErr) {
+        Alert.alert('Partial save', `Summary saved in the workspace, but not on the job listing:\n${jobDescErr.message}`)
+        return false
+      }
+    }
+    setProject((prev) =>
+      prev
+        ? {
+            ...prev,
+            brief_ai_outputs: { ...prevOutputs, workspace_summary: nextSummary },
+          }
+        : prev
+    )
+    Alert.alert('Saved', 'Project summary updated.')
+    return true
   }
 
   const onGenerate = async () => {
@@ -793,6 +853,27 @@ export default function ProjectWorkspaceScreen() {
     }, 80)
   }, [tab])
 
+  /** Opening workspace via replace/push can leave no stack — GO_BACK would warn in dev. */
+  const exitProjectWorkspace = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back()
+      return
+    }
+    if (workspaceOnlyPlan || !project?.job_id) {
+      router.replace('/(tabs)/workspace-projects')
+      return
+    }
+    router.replace('/(tabs)/jobs')
+  }, [router, workspaceOnlyPlan, project?.job_id])
+
+  const exitProjectScreenFallbackHome = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back()
+      return
+    }
+    router.replace('/(tabs)/dashboard')
+  }, [router])
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -804,7 +885,7 @@ export default function ProjectWorkspaceScreen() {
   if (forbidden || !project || !userId) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backBtn} onPress={exitProjectScreenFallbackHome}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backLabel}>Close</Text>
         </TouchableOpacity>
@@ -875,7 +956,7 @@ export default function ProjectWorkspaceScreen() {
         keyboardVerticalOffset={12}
       >
         <View style={styles.topRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backBtn} onPress={exitProjectWorkspace}>
             <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
             <Text style={styles.backLabel}>Back</Text>
           </TouchableOpacity>
@@ -1010,6 +1091,10 @@ export default function ProjectWorkspaceScreen() {
               <>
                 <ProjectOverviewAbout
                   briefContext={overviewSummary}
+                  canEdit={!workspaceOnlyPlan && canEditProductionSchedule}
+                  onChangeBrief={setOverviewSummary}
+                  onSaveBrief={saveProjectSummary}
+                  saving={savingProjectSummary}
                 />
                 {workspaceOnlyPlan ? (
                   <>
@@ -1080,10 +1165,6 @@ export default function ProjectWorkspaceScreen() {
                     ) : null}
                   </>
                 ) : null}
-                <Text style={styles.para}>
-                  Milestones, crew, chat, files, Review (Frame.io + PicDrop), production tools, and Brief AI stay in sync
-                  via Supabase for everyone on this project.
-                </Text>
               </>
             )}
 
@@ -1511,6 +1592,5 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   btnDim: { opacity: 0.6 },
-  para: { fontSize: 14, color: 'rgba(255,255,255,0.45)', lineHeight: 20, marginBottom: 12 },
   miss: { color: 'rgba(255,255,255,0.5)', textAlign: 'center' },
 })

@@ -171,11 +171,14 @@ export default function WorkspaceProjectsScreen() {
         : null
     setPosterAvatarUrl(av)
 
-    const [{ error: syncErr }, { data: soloJobRows }, { data: apps }] = await Promise.all([
-      supabase.rpc('sync_solo_workspace_projects_for_owner'),
-      supabase.from('jobs').select('id').eq('company_id', user.id).eq('is_solo_workspace', true),
-      supabase.from('job_applications').select('job_id').eq('freelancer_id', user.id).eq('status', 'accepted'),
-    ])
+    const [{ error: syncErr }, { data: soloJobRows }, { data: apps }, { data: pmRows }, { data: leadProjRows }] =
+      await Promise.all([
+        supabase.rpc('sync_solo_workspace_projects_for_owner'),
+        supabase.from('jobs').select('id').eq('company_id', user.id).eq('is_solo_workspace', true),
+        supabase.from('job_applications').select('job_id').eq('freelancer_id', user.id).eq('status', 'accepted'),
+        supabase.from('project_members').select('project_id').eq('profile_id', user.id),
+        supabase.from('projects').select('job_id').eq('freelancer_id', user.id).not('job_id', 'is', null),
+      ])
     if (syncErr && __DEV__) {
       console.warn('[workspace-projects] sync_solo_workspace_projects_for_owner', syncErr.message)
     }
@@ -191,9 +194,25 @@ export default function WorkspaceProjectsScreen() {
     )
 
     const crewJobIds = [...new Set((apps ?? []).map((a) => a.job_id).filter(Boolean))] as string[]
+    const membershipJobIds: string[] = []
+    const pmProjectIds = [...new Set((pmRows ?? []).map((r) => String((r as { project_id: string }).project_id).trim()).filter(Boolean))]
+    if (pmProjectIds.length > 0) {
+      const { data: projFromPm } = await supabase
+        .from('projects')
+        .select('job_id')
+        .in('id', pmProjectIds)
+        .not('job_id', 'is', null)
+      for (const row of projFromPm ?? []) {
+        const jid = row.job_id as string | null
+        if (jid) membershipJobIds.push(jid)
+      }
+    }
+    const leadJobIds = ((leadProjRows ?? []) as { job_id: string | null }[])
+      .map((r) => r.job_id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
 
     const soloIds = (soloJobRows ?? []).map((r) => String((r as { id: string }).id))
-    const allJobIds = [...new Set([...crewJobIds, ...soloIds])]
+    const allJobIds = [...new Set([...crewJobIds, ...soloIds, ...membershipJobIds, ...leadJobIds])]
 
     let jobsById: Record<string, JobRow> = {}
     if (allJobIds.length > 0) {

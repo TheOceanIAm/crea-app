@@ -1,0 +1,7 @@
+diff --git a/node_modules/expo-document-picker/app.plugin.js b/node_modules/expo-document-picker/app.plugin.js
+--- a/node_modules/expo-document-picker/app.plugin.js
++++ b/node_modules/expo-document-picker/app.plugin.js
+@@ -1 +1,2 @@
+-module.exports = require('./plugin/build/withDocumentPicker');
++const mod = require('./plugin/build/withDocumentPicker');
++module.exports = typeof mod === 'function' ? mod : mod.default;

@@ -11,6 +11,7 @@ import {
   Modal,
   Linking,
   Image,
+  useWindowDimensions,
 } from 'react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { Trash2 } from 'lucide-react-native'
@@ -26,6 +27,9 @@ type Member = {
   member_role: string
   scheduling_start_date?: string | null
   scheduling_end_date?: string | null
+  contact_email?: string | null
+  contact_phone?: string | null
+  contact_label?: string | null
   profiles: { name: string | null; avatar_url: string | null } | null
 }
 
@@ -50,6 +54,9 @@ type CrewRow =
       phone: string | null
       scheduling_start_date?: string | null
       scheduling_end_date?: string | null
+      contact_email?: string | null
+      contact_phone?: string | null
+      contact_label?: string | null
     }
   | {
       source: 'manual'
@@ -90,6 +97,7 @@ export function ProjectCrewTab({
   workspaceOnly = false,
   proFeaturesEnabled = true,
 }: Props) {
+  const { height: windowHeight } = useWindowDimensions()
   const [rows, setRows] = useState<CrewRow[]>([])
   const [loading, setLoading] = useState(true)
   const [crewSearch, setCrewSearch] = useState('')
@@ -114,12 +122,27 @@ export function ProjectCrewTab({
   const [memberSchedStart, setMemberSchedStart] = useState('')
   const [memberSchedEnd, setMemberSchedEnd] = useState('')
   const [savingMemberSchedule, setSavingMemberSchedule] = useState(false)
+  const [viewerUserId, setViewerUserId] = useState<string | null>(null)
+  const [projectContactEmail, setProjectContactEmail] = useState('')
+  const [projectContactPhone, setProjectContactPhone] = useState('')
+  const [projectContactLabel, setProjectContactLabel] = useState('')
+
+  useEffect(() => {
+    void (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      setViewerUserId(user?.id ?? null)
+    })()
+  }, [])
 
   const load = useCallback(async () => {
     const [registeredRes, manualRes] = await Promise.all([
       supabase
         .from('project_members')
-        .select('id, profile_id, member_role, scheduling_start_date, scheduling_end_date, profiles(name, avatar_url)')
+        .select(
+          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, contact_email, contact_phone, contact_label, profiles(name, avatar_url)'
+        )
         .eq('project_id', projectId)
         .order('member_role', { ascending: true }),
       supabase
@@ -151,15 +174,27 @@ export function ProjectCrewTab({
       const p = Array.isArray(prof) ? prof[0] : prof
       const sStart = m.scheduling_start_date
       const sEnd = m.scheduling_end_date
+      const rawContactNote =
+        typeof m.contact_label === 'string' && m.contact_label.trim()
+          ? m.contact_label.trim()
+          : ''
+      const rl = roleLabel(m.member_role)
+      const subtitle =
+        rawContactNote.length > 0
+          ? `${rl} · ${rawContactNote.length > 38 ? `${rawContactNote.slice(0, 38)}…` : rawContactNote}`
+          : rl
       return {
         source: 'registered' as const,
         id: m.id,
         profile_id: m.profile_id,
         member_role: m.member_role,
         name: p?.name || 'Member',
-        subtitle: roleLabel(m.member_role),
+        subtitle,
         email: null,
         phone: null,
+        contact_email: typeof m.contact_email === 'string' ? m.contact_email : null,
+        contact_phone: typeof m.contact_phone === 'string' ? m.contact_phone : null,
+        contact_label: typeof m.contact_label === 'string' ? m.contact_label : null,
         scheduling_start_date:
           typeof sStart === 'string' ? sStart.slice(0, 10) : sStart != null ? String(sStart).slice(0, 10) : null,
         scheduling_end_date:
@@ -336,9 +371,15 @@ export function ProjectCrewTab({
     if (m.source === 'registered') {
       setMemberSchedStart((m.scheduling_start_date ?? '').trim())
       setMemberSchedEnd((m.scheduling_end_date ?? '').trim())
+      setProjectContactEmail((m.contact_email ?? '').trim())
+      setProjectContactPhone((m.contact_phone ?? '').trim())
+      setProjectContactLabel((m.contact_label ?? '').trim())
     } else {
       setMemberSchedStart('')
       setMemberSchedEnd('')
+      setProjectContactEmail('')
+      setProjectContactPhone('')
+      setProjectContactLabel('')
     }
     setPersonModalOpen(true)
   }
@@ -348,7 +389,22 @@ export function ProjectCrewTab({
     return canManage && m.member_role !== 'company'
   }
 
-  const canEditSelected = selectedCrew?.source === 'manual'
+  /** Manual rows always; registered row only when this device user is that profile (e.g. client/company row = you). */
+  const canEditOwnRegisteredRow =
+    Boolean(
+      selectedCrew?.source === 'registered' &&
+        viewerUserId &&
+        selectedCrew.profile_id === viewerUserId
+    )
+  const canEditPersonFields = selectedCrew?.source === 'manual' || canEditOwnRegisteredRow
+
+  /** Company / lead: project-specific email, phone, contact line on project_members. */
+  const canEditProjectContact = Boolean(selectedCrew?.source === 'registered' && canManage)
+
+  const canSavePersonModal =
+    selectedCrew?.source === 'manual'
+      ? canEditPersonFields
+      : Boolean(canEditProjectContact || canEditOwnRegisteredRow)
 
   const saveMemberProductionDates = async () => {
     if (!selectedCrew || selectedCrew.source !== 'registered' || selectedCrew.member_role === 'company') return
@@ -410,41 +466,85 @@ export function ProjectCrewTab({
 
   const savePersonInfo = async () => {
     if (!selectedCrew) return
-    if (selectedCrew.source !== 'manual') {
-      Alert.alert('Person info', 'CREA members can update their own profile details in the app profile settings.')
+
+    if (selectedCrew.source === 'manual') {
+      const nextName = personName.trim()
+      if (nextName.length < 2) {
+        Alert.alert('Person info', 'Please enter at least 2 characters for the name.')
+        return
+      }
+      const nextRole = personRole.trim() || 'crew'
+      const nextEmail = personEmail.trim().toLowerCase()
+      const nextPhone = personPhone.trim()
+      setBusy(true)
+      const { error } = await supabase
+        .from('project_manual_crew')
+        .update({
+          name: nextName,
+          member_role: nextRole,
+          email: nextEmail || null,
+          phone: nextPhone || null,
+        })
+        .eq('id', selectedCrew.id)
+      setBusy(false)
+      if (error) {
+        Alert.alert('Save failed', error.message)
+        return
+      }
+      setPersonModalOpen(false)
+      setSelectedCrew(null)
+      load()
+      Alert.alert('Saved', 'Crew contact info was updated.')
       return
     }
-    const nextName = personName.trim()
-    if (nextName.length < 2) {
-      Alert.alert('Person info', 'Please enter at least 2 characters for the name.')
+
+    if (!canEditOwnRegisteredRow && !canEditProjectContact) {
+      Alert.alert('Person info', 'You cannot edit this entry.')
       return
     }
-    const nextRole = personRole.trim() || 'crew'
-    const nextEmail = personEmail.trim().toLowerCase()
-    const nextPhone = personPhone.trim()
-    setBusy(true)
-    const { error } = await supabase
-      .from('project_manual_crew')
-      .update({
-        name: nextName,
-        member_role: nextRole,
-        email: nextEmail || null,
-        phone: nextPhone || null,
-      })
-      .eq('id', selectedCrew.id)
-    setBusy(false)
-    if (error) {
-      Alert.alert('Save failed', error.message)
-      return
+
+    if (canEditOwnRegisteredRow && viewerUserId) {
+      const nextName = personName.trim()
+      if (nextName.length < 2) {
+        Alert.alert('Person info', 'Please enter at least 2 characters for the name.')
+        return
+      }
+      setBusy(true)
+      const { error: nameErr } = await supabase.from('profiles').update({ name: nextName }).eq('id', viewerUserId)
+      setBusy(false)
+      if (nameErr) {
+        Alert.alert('Save failed', nameErr.message)
+        return
+      }
     }
+
+    if (canEditProjectContact) {
+      setBusy(true)
+      const { error: pmErr } = await supabase
+        .from('project_members')
+        .update({
+          contact_email: projectContactEmail.trim() || null,
+          contact_phone: projectContactPhone.trim() || null,
+          contact_label: projectContactLabel.trim() || null,
+        })
+        .eq('id', selectedCrew.id)
+      setBusy(false)
+      if (pmErr) {
+        Alert.alert('Save failed', pmErr.message)
+        return
+      }
+    }
+
     setPersonModalOpen(false)
     setSelectedCrew(null)
     load()
-    Alert.alert('Saved', 'Crew contact info was updated.')
+    Alert.alert('Saved', 'Updated.')
   }
 
   const callPerson = async () => {
-    const raw = personPhone.trim()
+    const raw = (
+      selectedCrew?.source === 'registered' ? projectContactPhone : personPhone
+    ).trim()
     if (!raw) {
       Alert.alert('Call', 'No phone number available.')
       return
@@ -459,7 +559,9 @@ export function ProjectCrewTab({
   }
 
   const emailPerson = async () => {
-    const raw = personEmail.trim()
+    const raw = (
+      selectedCrew?.source === 'registered' ? projectContactEmail : personEmail
+    ).trim()
     if (!raw) {
       Alert.alert('Email', 'No email address available.')
       return
@@ -482,6 +584,7 @@ export function ProjectCrewTab({
   }
 
   return (
+    <>
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {canManage && (
         <>
@@ -634,10 +737,17 @@ export function ProjectCrewTab({
           </Swipeable>
         )
       })}
+    </ScrollView>
 
       <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            style={{ maxHeight: windowHeight * 0.9 }}
+            contentContainerStyle={styles.modalScrollContent}
+          >
+            <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Add crew (no Crea account)</Text>
             <Text style={styles.modalHint}>
               For people not on Crea yet. Name and role are shown on the crew list; email and phone are stored so you can
@@ -682,17 +792,28 @@ export function ProjectCrewTab({
                 <Text style={styles.modalSaveText}>{busy ? 'Saving…' : 'Save'}</Text>
               </TouchableOpacity>
             </View>
-          </View>
+            </View>
+          </ScrollView>
         </View>
       </Modal>
       <Modal visible={personModalOpen} transparent animationType="fade" onRequestClose={() => setPersonModalOpen(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            style={{ maxHeight: windowHeight * 0.92 }}
+            contentContainerStyle={styles.modalScrollContent}
+          >
+            <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Person info</Text>
             <Text style={styles.modalHint}>
-              {canEditSelected
+              {selectedCrew?.source === 'manual'
                 ? 'Edit contact details for this crew member.'
-                : 'This is a CREA account. Contact details are managed in the user profile.'}
+                : canEditProjectContact
+                  ? '“On this project” is only for this job (call sheet / crew). Your own display name still updates your Crea profile when this card is you.'
+                  : canEditOwnRegisteredRow
+                    ? 'Your display name updates your Crea profile.'
+                    : 'Project contact details are set by the client or lead. Names come from each person’s Crea profile.'}
             </Text>
             {selectedCrew?.source === 'registered' &&
             canManage &&
@@ -748,35 +869,79 @@ export function ProjectCrewTab({
               placeholderTextColor="rgba(255,255,255,0.3)"
               value={personName}
               onChangeText={setPersonName}
-              editable={canEditSelected}
+              editable={canEditPersonFields}
             />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Role"
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              value={personRole}
-              onChangeText={setPersonRole}
-              editable={canEditSelected}
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Email"
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              value={personEmail}
-              onChangeText={setPersonEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              editable={canEditSelected}
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Phone"
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              value={personPhone}
-              onChangeText={setPersonPhone}
-              keyboardType="phone-pad"
-              editable={canEditSelected}
-            />
+            {selectedCrew?.source === 'manual' ? (
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Role"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={personRole}
+                onChangeText={setPersonRole}
+              />
+            ) : selectedCrew ? (
+              <View style={styles.modalReadonlyBlock}>
+                <Text style={styles.modalReadonlyLabel}>Role</Text>
+                <Text style={styles.modalReadonlyValue}>{roleLabel(selectedCrew.member_role)}</Text>
+              </View>
+            ) : null}
+            {selectedCrew?.source === 'manual' ? (
+              <>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Email"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={personEmail}
+                  onChangeText={setPersonEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Phone"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={personPhone}
+                  onChangeText={setPersonPhone}
+                  keyboardType="phone-pad"
+                />
+              </>
+            ) : selectedCrew ? (
+              <View style={styles.projectContactSection}>
+                <Text style={styles.modalSectionKicker}>On this project</Text>
+                <Text style={styles.modalHintSmall}>
+                  Who is the contact for this job (e.g. producer on set)? Optional — only stored for this listing.
+                </Text>
+                <TextInput
+                  style={[styles.modalInput, styles.modalInputMultiline]}
+                  placeholder="Contact person / note for crew…"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={projectContactLabel}
+                  onChangeText={setProjectContactLabel}
+                  multiline
+                  textAlignVertical="top"
+                  editable={canEditProjectContact}
+                />
+                <TextInput
+                  style={[styles.modalInput, !canEditProjectContact && styles.modalInputLocked]}
+                  placeholder="Email for this job"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={projectContactEmail}
+                  onChangeText={setProjectContactEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  editable={canEditProjectContact}
+                />
+                <TextInput
+                  style={[styles.modalInput, !canEditProjectContact && styles.modalInputLocked]}
+                  placeholder="Phone for this job"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={projectContactPhone}
+                  onChangeText={setProjectContactPhone}
+                  keyboardType="phone-pad"
+                  editable={canEditProjectContact}
+                />
+              </View>
+            ) : null}
             <View style={styles.contactActions}>
               <TouchableOpacity style={styles.contactBtn} onPress={callPerson}>
                 <Text style={styles.contactBtnText}>Call</Text>
@@ -801,16 +966,17 @@ export function ProjectCrewTab({
                   <Text style={styles.modalDeleteText}>Remove member</Text>
                 </TouchableOpacity>
               ) : null}
-              {canEditSelected ? (
+              {canSavePersonModal ? (
                 <TouchableOpacity style={[styles.modalSave, busy && styles.dim]} onPress={savePersonInfo} disabled={busy}>
                   <Text style={styles.modalSaveText}>{busy ? 'Saving…' : 'Save changes'}</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
-          </View>
+            </View>
+          </ScrollView>
         </View>
       </Modal>
-    </ScrollView>
+    </>
   )
 }
 
@@ -955,6 +1121,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 20,
   },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingVertical: 20,
+  },
   modalCard: {
     backgroundColor: '#111',
     borderRadius: 16,
@@ -993,6 +1164,33 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 10,
   },
+  modalReadonlyBlock: {
+    backgroundColor: '#0a0a0a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  modalReadonlyLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.38)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  modalReadonlyValue: { fontSize: 14, color: 'rgba(255,255,255,0.88)', fontWeight: '600' },
+  projectContactSection: {
+    marginTop: 6,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 4,
+  },
+  modalInputMultiline: { minHeight: 72, paddingTop: 10 },
+  modalInputLocked: { opacity: 0.65 },
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
   modalCancel: {
     paddingHorizontal: 14,

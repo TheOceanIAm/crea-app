@@ -19,6 +19,7 @@ import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
+import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
 
 type Job = {
   id: string
@@ -324,11 +325,29 @@ export default function JobsListScreen() {
           <TouchableOpacity
             style={styles.card}
             activeOpacity={0.7}
-            onPress={() =>
-              showExternalFeed && !isCreaJobItem(item)
-                ? setActiveExternalJob(item)
-                : router.push(`/(tabs)/jobs/${item.id}`)
-            }
+            onPress={() => {
+              if (showExternalFeed && !isCreaJobItem(item)) {
+                setActiveExternalJob(item)
+                return
+              }
+              if (isCompanyUser && isCreaJobItem(item)) {
+                void (async () => {
+                  const { data: { user } } = await supabase.auth.getUser()
+                  if (user) {
+                    const ensured = await ensureMarketplaceJobWorkspaceRow(supabase, {
+                      jobId: item.id,
+                      userId: user.id,
+                    })
+                    const pid = ensured.projectId ?? item.id
+                    router.push(`/project/${pid}`)
+                  } else {
+                    router.push(`/(tabs)/jobs/${item.id}`)
+                  }
+                })()
+                return
+              }
+              router.push(`/(tabs)/jobs/${item.id}`)
+            }}
           >
             {showExternalFeed && !isCreaJobItem(item) ? (
               <>

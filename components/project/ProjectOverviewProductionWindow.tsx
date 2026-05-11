@@ -33,12 +33,7 @@ export function ProjectOverviewProductionWindow({
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.kicker}>Scheduling</Text>
       <Text style={styles.title}>Production window</Text>
-      <Text style={styles.sub}>
-        Overall production span for this listing (inclusive). When the project is active, this blocks the lead
-        freelancer&apos;s public calendar. For different lengths per role, set dates per person in the Crew tab.
-      </Text>
       {lockedByPlan ? (
         <Text style={styles.lockedHint}>Upgrade to Pro to sync busy dates to the freelancer&apos;s public profile.</Text>
       ) : null}
@@ -85,9 +80,9 @@ export function ProjectOverviewProductionWindow({
               onPress={() => void onSave()}
               disabled={saving}
               accessibilityRole="button"
-              accessibilityLabel="Save production window"
+              accessibilityLabel="Save production dates"
             >
-              <Text style={styles.saveBtnText}>{saving ? 'Saving…' : 'Save production window'}</Text>
+              <Text style={styles.saveBtnText}>{saving ? 'Saving…' : 'Save'}</Text>
             </TouchableOpacity>
             {hasBothSaved ? (
               <TouchableOpacity
@@ -111,76 +106,70 @@ export function ProjectOverviewProductionWindow({
 
 const styles = StyleSheet.create({
   wrap: {
-    marginBottom: 22,
-    padding: 16,
-    borderRadius: 14,
+    marginBottom: 18,
+    padding: 12,
+    borderRadius: 12,
     backgroundColor: '#111',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
-  kicker: {
-    fontSize: 10,
+  title: {
+    fontSize: 13,
     fontWeight: '800',
-    letterSpacing: 1.6,
-    color: 'rgba(255,255,255,0.38)',
+    letterSpacing: 0.5,
+    color: 'rgba(255,255,255,0.85)',
+    marginBottom: 10,
     textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  title: { fontSize: 17, fontWeight: '800', color: '#fff', marginBottom: 8 },
-  sub: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.42)',
-    lineHeight: 18,
-    marginBottom: 12,
   },
   lockedHint: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#FFDC00',
-    marginBottom: 10,
+    marginBottom: 8,
     fontWeight: '700',
+    lineHeight: 15,
   },
   summaryPill: {
     alignSelf: 'flex-start',
     backgroundColor: 'rgba(255,220,0,0.1)',
     borderWidth: 1,
     borderColor: 'rgba(255,220,0,0.25)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    marginBottom: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginBottom: 10,
   },
-  summaryText: { fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
-  placeholder: { fontSize: 13, color: 'rgba(255,255,255,0.35)', marginBottom: 12 },
-  row: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  summaryText: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
+  placeholder: { fontSize: 12, color: 'rgba(255,255,255,0.32)', marginBottom: 8 },
+  row: { flexDirection: 'row', gap: 10, marginBottom: 10 },
   field: { flex: 1, minWidth: 0 },
   fieldLabel: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
-    color: 'rgba(255,255,255,0.35)',
+    color: 'rgba(255,255,255,0.32)',
     letterSpacing: 0.8,
-    marginBottom: 6,
+    marginBottom: 4,
     textTransform: 'uppercase',
   },
   input: {
     backgroundColor: '#0a0a0a',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 14,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    fontSize: 13,
     color: '#fff',
   },
-  actions: { gap: 10 },
+  actions: { gap: 8 },
   saveBtn: {
     backgroundColor: '#FFDC00',
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: 10,
+    paddingVertical: 11,
     alignItems: 'center',
   },
   btnDim: { opacity: 0.55 },
-  saveBtnText: { fontSize: 14, fontWeight: '800', color: '#0a0a0a' },
-  clearBtn: { alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 8 },
-  clearBtnText: { fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.45)' },
-  readOnlyHint: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 4 },
+  saveBtnText: { fontSize: 13, fontWeight: '800', color: '#0a0a0a' },
+  clearBtn: { alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 8 },
+  clearBtnText: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.4)' },
+  readOnlyHint: { fontSize: 11, color: 'rgba(255,255,255,0.32)', marginTop: 2 },
 })

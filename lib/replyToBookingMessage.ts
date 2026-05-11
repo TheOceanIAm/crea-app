@@ -24,6 +24,13 @@ export async function replyToBookingMessage(opts: {
     humanLine
   )
 
+  if (opts.status === 'accepted') {
+    const { error: syncErr } = await supabase.rpc('sync_project_member_from_booking_accept', {
+      p_booking_message_id: opts.bookingMessageId,
+    })
+    if (syncErr) return { ok: false, error: syncErr.message }
+  }
+
   const payload: Record<string, unknown> = {
     conversation_id: opts.conversationId,
     sender_id: me,
