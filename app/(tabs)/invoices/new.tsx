@@ -158,6 +158,35 @@ export default function NewInvoiceScreen() {
     }
 
     setSaving(true)
+    let versionFields: { supersedes_invoice_id?: string; version_group_id?: string } = {}
+    if (linkedJobId) {
+      const { data: latestRows } = await supabase
+        .from('invoices')
+        .select('id, status, version_group_id, created_at')
+        .eq('job_id', linkedJobId)
+        .eq('freelancer_id', user.id)
+        .eq('company_id', selectedCompany)
+        .eq('is_latest', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+      const latest = latestRows?.[0]
+      if (latest) {
+        const latestStatus = String(latest.status ?? '').toLowerCase()
+        if (latestStatus === 'paid') {
+          setSaving(false)
+          Alert.alert('Invoice', 'This invoice is already paid. Creating another revision is blocked.')
+          return
+        }
+        versionFields = {
+          supersedes_invoice_id: String(latest.id),
+          version_group_id:
+            typeof latest.version_group_id === 'string' && latest.version_group_id.trim()
+              ? latest.version_group_id
+              : String(latest.id),
+        }
+      }
+    }
+
     const { data: inserted, error } = await supabase
       .from('invoices')
       .insert({
@@ -171,6 +200,7 @@ export default function NewInvoiceScreen() {
         description: description.trim() || null,
         invoice_number: invoiceNumber.trim() || null,
         status: 'pending',
+        ...versionFields,
       })
       .select('id')
       .single()

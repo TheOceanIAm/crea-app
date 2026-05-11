@@ -11,7 +11,7 @@ import {
 } from 'react-native'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
-import { ChevronLeft, ChevronRight, Clock, MapPin, Plus, Users } from 'lucide-react-native'
+import { Check, ChevronLeft, ChevronRight, Clock, MapPin, Pencil, Plus, Users } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProductionWeatherSection } from '@/components/project/ProductionWeatherSection'
@@ -34,9 +34,19 @@ type ProductionShot = {
   framing: string
   /** Mic / sound notes */
   audio_notes: string
+  brief_ai_synced: boolean
   status: ShotStatus
   created_at: string
   updated_at: string
+}
+
+type ShotDraft = {
+  scene_nr: string
+  location: string
+  framing: string
+  description: string
+  lens: string
+  audio_notes: string
 }
 
 type CrewRow = {
@@ -88,6 +98,23 @@ function nextStatus(s: ShotStatus): ShotStatus {
   return STATUS_ORDER[(i + 1) % STATUS_ORDER.length]
 }
 
+function expandFramingAbbreviations(value: string): string {
+  const replacements: Array<[RegExp, string]> = [
+    [/\bECU\b/g, 'Extreme Close-Up'],
+    [/\bVCU\b/g, 'Very Close-Up'],
+    [/\bCU\b/g, 'Close-Up'],
+    [/\bMCU\b/g, 'Medium Close-Up'],
+    [/\bMS\b/g, 'Medium Shot'],
+    [/\bMLS\b/g, 'Medium Long Shot'],
+    [/\bWS\b/g, 'Wide Shot'],
+    [/\bEWS\b/g, 'Extreme Wide Shot'],
+    [/\bOTS\b/g, 'Over-the-Shoulder'],
+    [/\bPOV\b/g, 'Point of View'],
+    [/\bINSERT\b/g, 'Insert Shot'],
+  ]
+  return replacements.reduce((acc, [pattern, full]) => acc.replace(pattern, full), value)
+}
+
 function roleLabel(r: string) {
   if (r === 'company') return 'Client'
   if (r === 'lead') return 'Lead'
@@ -111,8 +138,9 @@ function normalizeShotRow(raw: Record<string, unknown>): ProductionShot {
     description: String(raw.description ?? ''),
     lens: String(raw.lens ?? ''),
     location: String(raw.location ?? ''),
-    framing: String(raw.framing ?? ''),
+    framing: expandFramingAbbreviations(String(raw.framing ?? '')),
     audio_notes: String(raw.audio_notes ?? ''),
+    brief_ai_synced: Boolean(raw.brief_ai_synced),
     status: raw.status as ShotStatus,
     created_at: String(raw.created_at ?? ''),
     updated_at: String(raw.updated_at ?? ''),
@@ -207,6 +235,8 @@ export function ProductionTab({
   const [prodDay, setProdDay] = useState<ProductionDayRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyShot, setBusyShot] = useState<string | null>(null)
+  const [editingShotId, setEditingShotId] = useState<string | null>(null)
+  const [shotDrafts, setShotDrafts] = useState<Record<string, ShotDraft>>({})
   const [creatingDay, setCreatingDay] = useState(false)
   const [savingNotes, setSavingNotes] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -278,13 +308,49 @@ export function ProductionTab({
 
   const upsertShotField = async (id: string, patch: Partial<ProductionShot>) => {
     setBusyShot(id)
-    const { error } = await supabase.from('production_shots').update(patch).eq('id', id)
+    const { error } = await supabase
+      .from('production_shots')
+      .update(patch)
+      .eq('id', id)
+      .eq('project_id', projectId)
     setBusyShot(null)
     if (error) {
       Alert.alert('Save failed', error.message)
-      return
+      return false
     }
     setShots((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
+    return true
+  }
+
+  const beginEditShot = (s: ProductionShot) => {
+    setShotDrafts((prev) => ({
+      ...prev,
+      [s.id]: {
+        scene_nr: s.scene_nr ?? '',
+        location: s.location ?? '',
+        framing: expandFramingAbbreviations(s.framing ?? ''),
+        description: s.description ?? '',
+        lens: s.lens ?? '',
+        audio_notes: s.audio_notes ?? '',
+      },
+    }))
+    setEditingShotId(s.id)
+  }
+
+  const saveEditingShot = async (s: ProductionShot) => {
+    const draft = shotDrafts[s.id]
+    if (!draft) {
+      setEditingShotId(null)
+      return
+    }
+    const normalized: ShotDraft = {
+      ...draft,
+      framing: expandFramingAbbreviations(draft.framing),
+    }
+    const ok = await upsertShotField(s.id, normalized)
+    if (!ok) return
+    setEditingShotId(null)
+    await load()
   }
 
   const addShot = async () => {
@@ -299,6 +365,7 @@ export function ProductionTab({
         location: '',
         framing: '',
         audio_notes: '',
+        brief_ai_synced: false,
         status: 'open',
       })
       .select('*')
@@ -634,97 +701,138 @@ export function ProductionTab({
       {shots.map((s, idx) => (
         <View key={s.id} style={styles.shotCard}>
           <View style={styles.shotCardTop}>
-            <Text style={styles.shotCardIndex}>Shot {idx + 1}</Text>
-            <TouchableOpacity
-              style={[styles.statusBtn, statusStyle(s.status)]}
-              onPress={() => cycleStatus(s)}
-              disabled={busyShot === s.id}
-            >
-              <Text style={[styles.statusBtnText, statusTextStyle(s.status)]}>{STATUS_LABEL[s.status]}</Text>
-            </TouchableOpacity>
+            <View style={styles.shotCardTopLeft}>
+              <Text style={styles.shotCardIndex}>Shot {idx + 1}</Text>
+              {s.brief_ai_synced ? <Text style={styles.syncedBadge}>Gesetzt (Brief AI)</Text> : null}
+            </View>
+            <View style={styles.shotCardTopActions}>
+              <TouchableOpacity
+                style={styles.editBtn}
+                onPress={() => {
+                  if (editingShotId === s.id) {
+                    void saveEditingShot(s)
+                  } else {
+                    beginEditShot(s)
+                  }
+                }}
+                disabled={busyShot === s.id}
+              >
+                {editingShotId === s.id ? (
+                  <Check size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+                ) : (
+                  <Pencil size={16} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.statusBtn, statusStyle(s.status)]}
+                onPress={() => cycleStatus(s)}
+                disabled={busyShot === s.id}
+              >
+                <Text style={[styles.statusBtnText, statusTextStyle(s.status)]}>{STATUS_LABEL[s.status]}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
-          <Text style={styles.shotFieldLabel}>Scene / slate</Text>
-          <TextInput
-            style={styles.shotInput}
-            placeholder="e.g. 3A"
-            placeholderTextColor="rgba(255,255,255,0.25)"
-            defaultValue={s.scene_nr}
-            editable={busyShot !== s.id}
-            onEndEditing={(e) => {
-              const v = e.nativeEvent.text
-              if (v !== s.scene_nr) void upsertShotField(s.id, { scene_nr: v })
-            }}
-          />
+          {editingShotId === s.id ? (
+            <>
+              <Text style={styles.shotFieldLabel}>Scene / slate</Text>
+              <TextInput
+                style={styles.shotInput}
+                placeholder="e.g. 3A"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={shotDrafts[s.id]?.scene_nr ?? ''}
+                editable={busyShot !== s.id}
+                onChangeText={(v) =>
+                  setShotDrafts((prev) => ({ ...prev, [s.id]: { ...prev[s.id], scene_nr: v } }))
+                }
+              />
 
-          <Text style={styles.shotFieldLabel}>Location</Text>
-          <TextInput
-            style={styles.shotInput}
-            placeholder="Set, room, stage…"
-            placeholderTextColor="rgba(255,255,255,0.25)"
-            defaultValue={s.location}
-            editable={busyShot !== s.id}
-            onEndEditing={(e) => {
-              const v = e.nativeEvent.text
-              if (v !== s.location) void upsertShotField(s.id, { location: v })
-            }}
-          />
+              <Text style={styles.shotFieldLabel}>Location</Text>
+              <TextInput
+                style={styles.shotInput}
+                placeholder="Set, room, stage…"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={shotDrafts[s.id]?.location ?? ''}
+                editable={busyShot !== s.id}
+                onChangeText={(v) =>
+                  setShotDrafts((prev) => ({ ...prev, [s.id]: { ...prev[s.id], location: v } }))
+                }
+              />
 
-          <Text style={styles.shotFieldLabel}>Framing</Text>
-          <TextInput
-            style={styles.shotInput}
-            placeholder="e.g. Wide est., MCU, product insert"
-            placeholderTextColor="rgba(255,255,255,0.25)"
-            defaultValue={s.framing}
-            editable={busyShot !== s.id}
-            onEndEditing={(e) => {
-              const v = e.nativeEvent.text
-              if (v !== s.framing) void upsertShotField(s.id, { framing: v })
-            }}
-          />
+              <Text style={styles.shotFieldLabel}>Framing</Text>
+              <TextInput
+                style={styles.shotInput}
+                placeholder="e.g. Wide est., MCU, product insert"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={shotDrafts[s.id]?.framing ?? ''}
+                editable={busyShot !== s.id}
+                onChangeText={(v) =>
+                  setShotDrafts((prev) => ({ ...prev, [s.id]: { ...prev[s.id], framing: v } }))
+                }
+              />
 
-          <Text style={styles.shotFieldLabel}>Action / description</Text>
-          <TextInput
-            style={[styles.shotInput, styles.shotInputTall]}
-            placeholder="What happens in the shot, blocking, talent…"
-            placeholderTextColor="rgba(255,255,255,0.25)"
-            defaultValue={s.description}
-            multiline
-            textAlignVertical="top"
-            editable={busyShot !== s.id}
-            onEndEditing={(e) => {
-              const v = e.nativeEvent.text
-              if (v !== s.description) void upsertShotField(s.id, { description: v })
-            }}
-          />
+              <Text style={styles.shotFieldLabel}>Action / description</Text>
+              <TextInput
+                style={[styles.shotInput, styles.shotInputTall]}
+                placeholder="What happens in the shot, blocking, talent…"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={shotDrafts[s.id]?.description ?? ''}
+                multiline
+                textAlignVertical="top"
+                editable={busyShot !== s.id}
+                onChangeText={(v) =>
+                  setShotDrafts((prev) => ({ ...prev, [s.id]: { ...prev[s.id], description: v } }))
+                }
+              />
 
-          <Text style={styles.shotFieldLabel}>Camera / lens</Text>
-          <TextInput
-            style={styles.shotInput}
-            placeholder="e.g. 35mm, 85mm / FX6"
-            placeholderTextColor="rgba(255,255,255,0.25)"
-            defaultValue={s.lens}
-            editable={busyShot !== s.id}
-            onEndEditing={(e) => {
-              const v = e.nativeEvent.text
-              if (v !== s.lens) void upsertShotField(s.id, { lens: v })
-            }}
-          />
+              <Text style={styles.shotFieldLabel}>Camera / lens</Text>
+              <TextInput
+                style={styles.shotInput}
+                placeholder="e.g. 35mm, 85mm / FX6"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={shotDrafts[s.id]?.lens ?? ''}
+                editable={busyShot !== s.id}
+                onChangeText={(v) =>
+                  setShotDrafts((prev) => ({ ...prev, [s.id]: { ...prev[s.id], lens: v } }))
+                }
+              />
 
-          <Text style={styles.shotFieldLabel}>Audio</Text>
-          <TextInput
-            style={[styles.shotInput, styles.shotInputTall]}
-            placeholder="Boom, lavs, ambient, music playback…"
-            placeholderTextColor="rgba(255,255,255,0.25)"
-            defaultValue={s.audio_notes}
-            multiline
-            textAlignVertical="top"
-            editable={busyShot !== s.id}
-            onEndEditing={(e) => {
-              const v = e.nativeEvent.text
-              if (v !== s.audio_notes) void upsertShotField(s.id, { audio_notes: v })
-            }}
-          />
+              <Text style={styles.shotFieldLabel}>Audio</Text>
+              <TextInput
+                style={[styles.shotInput, styles.shotInputTall]}
+                placeholder="Boom, lavs, ambient, music playback…"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={shotDrafts[s.id]?.audio_notes ?? ''}
+                multiline
+                textAlignVertical="top"
+                editable={busyShot !== s.id}
+                onChangeText={(v) =>
+                  setShotDrafts((prev) => ({ ...prev, [s.id]: { ...prev[s.id], audio_notes: v } }))
+                }
+              />
+            </>
+          ) : (
+            <View style={styles.shotSummary}>
+              <Text style={styles.shotSummaryLine}>
+                <Text style={styles.shotSummaryLabel}>Scene:</Text> {s.scene_nr || '—'}
+              </Text>
+              <Text style={styles.shotSummaryLine}>
+                <Text style={styles.shotSummaryLabel}>Location:</Text> {s.location || '—'}
+              </Text>
+              <Text style={styles.shotSummaryLine}>
+                <Text style={styles.shotSummaryLabel}>Framing:</Text> {s.framing || '—'}
+              </Text>
+              <Text style={styles.shotSummaryLine}>
+                <Text style={styles.shotSummaryLabel}>Action:</Text> {s.description || '—'}
+              </Text>
+              <Text style={styles.shotSummaryLine}>
+                <Text style={styles.shotSummaryLabel}>Camera/Lens:</Text> {s.lens || '—'}
+              </Text>
+              <Text style={styles.shotSummaryLine}>
+                <Text style={styles.shotSummaryLabel}>Audio:</Text> {s.audio_notes || '—'}
+              </Text>
+            </View>
+          )}
         </View>
       ))}
 
@@ -1030,7 +1138,39 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 12,
   },
+  shotCardTopLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+  },
+  shotCardTopActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   shotCardIndex: { fontSize: 15, fontWeight: '800', color: '#FFDC00', letterSpacing: 0.3 },
+  syncedBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#0a0a0a',
+    backgroundColor: '#FFDC00',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    overflow: 'hidden',
+  },
+  editBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.45)',
+    backgroundColor: 'rgba(255,220,0,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   shotFieldLabel: {
     fontSize: 10,
     color: 'rgba(255,255,255,0.38)',
@@ -1051,6 +1191,16 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   shotInputTall: { minHeight: 72, paddingTop: 10, marginBottom: 8 },
+  shotSummary: { gap: 6 },
+  shotSummaryLine: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.86)',
+    lineHeight: 19,
+  },
+  shotSummaryLabel: {
+    color: 'rgba(255,220,0,0.9)',
+    fontWeight: '700',
+  },
   statusBtn: {
     alignSelf: 'center',
     borderRadius: 8,

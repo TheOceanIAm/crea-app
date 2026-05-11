@@ -251,6 +251,22 @@ function BriefShotCardsBlock({ rows }: { rows: string[][] }) {
     }
     return ''
   }
+  const expandShotAbbreviations = (value: string) => {
+    const replacements: Array<[RegExp, string]> = [
+      [/\bECU\b/g, 'Extreme Close-Up'],
+      [/\bVCU\b/g, 'Very Close-Up'],
+      [/\bCU\b/g, 'Close-Up'],
+      [/\bMCU\b/g, 'Medium Close-Up'],
+      [/\bMS\b/g, 'Medium Shot'],
+      [/\bMLS\b/g, 'Medium Long Shot'],
+      [/\bWS\b/g, 'Wide Shot'],
+      [/\bEWS\b/g, 'Extreme Wide Shot'],
+      [/\bOTS\b/g, 'Over-the-Shoulder'],
+      [/\bPOV\b/g, 'Point of View'],
+      [/\bINSERT\b/g, 'Insert Shot'],
+    ]
+    return replacements.reduce((acc, [pattern, full]) => acc.replace(pattern, full), value)
+  }
 
   return (
     <View style={styles.shotCardsWrap}>
@@ -270,7 +286,10 @@ function BriefShotCardsBlock({ rows }: { rows: string[][] }) {
           .map((i) => ({
             label: labelMap[normalizedHeaders[i] ?? ''] ?? (headers[i] ?? ''),
             rawLabel: headers[i] ?? '',
-            value: row[i] ?? '',
+            value:
+              (labelMap[normalizedHeaders[i] ?? ''] ?? (headers[i] ?? '')) === 'Shot'
+                ? expandShotAbbreviations(row[i] ?? '')
+                : (row[i] ?? ''),
           }))
           .filter((x) => x.rawLabel.trim() && x.value.trim())
           .filter((x) => x.rawLabel.trim() !== '#' && x.rawLabel.trim().toLowerCase() !== 'scene/slate')

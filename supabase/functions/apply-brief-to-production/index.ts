@@ -179,12 +179,28 @@ type CallsheetPayload = {
 }
 
 function normalizeShotRow(s: ShotPayload) {
+  const expandFramingAbbreviations = (value: string) => {
+    const replacements: Array<[RegExp, string]> = [
+      [/\bECU\b/g, 'Extreme Close-Up'],
+      [/\bVCU\b/g, 'Very Close-Up'],
+      [/\bCU\b/g, 'Close-Up'],
+      [/\bMCU\b/g, 'Medium Close-Up'],
+      [/\bMS\b/g, 'Medium Shot'],
+      [/\bMLS\b/g, 'Medium Long Shot'],
+      [/\bWS\b/g, 'Wide Shot'],
+      [/\bEWS\b/g, 'Extreme Wide Shot'],
+      [/\bOTS\b/g, 'Over-the-Shoulder'],
+      [/\bPOV\b/g, 'Point of View'],
+      [/\bINSERT\b/g, 'Insert Shot'],
+    ]
+    return replacements.reduce((acc, [pattern, full]) => acc.replace(pattern, full), value)
+  }
   return {
     scene_nr: String(s.scene_nr ?? '').slice(0, 200),
     description: String(s.description ?? '').slice(0, 4000),
     lens: String(s.lens ?? '').slice(0, 500),
     location: String(s.location ?? '').slice(0, 500),
-    framing: String(s.framing ?? '').slice(0, 500),
+    framing: expandFramingAbbreviations(String(s.framing ?? '')).slice(0, 500),
     audio_notes: String(s.audio_notes ?? '').slice(0, 2000),
   }
 }
@@ -333,6 +349,7 @@ Rules: Use empty strings for unknown fields. At most ${MAX_SHOTS} shots. Preserv
         project_id: projectId,
         shoot_date: shootDate,
         status: 'open' as const,
+        brief_ai_synced: true,
         ...normalizeShotRow(s),
       }))
 

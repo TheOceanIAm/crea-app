@@ -43,6 +43,7 @@ type ProjectListing = {
 
 type WorkspaceProject = {
   id: string
+  job_id: string | null
   title: string
   status: string | null
   updated_at: string | null
@@ -121,10 +122,12 @@ export default function WorkspaceProjectsScreen() {
   const [actingId, setActingId] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
+  const [editJobId, setEditJobId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [editNotes, setEditNotes] = useState('')
   const [editOutputs, setEditOutputs] = useState<Record<string, unknown>>({})
   const [archiveOpen, setArchiveOpen] = useState(false)
+  const [viewerRole, setViewerRole] = useState<'freelancer' | 'company' | null>(null)
 
   const load = useCallback(async (opts?: { force?: boolean }) => {
     const now = Date.now()
@@ -151,7 +154,9 @@ export default function WorkspaceProjectsScreen() {
       .eq('id', user.id)
       .maybeSingle()
     const role = resolveAppRole(p?.role, user)
-    if (!isFreelancerProfile(role) || isCompanyProfile(role) || isCeoProfile(role)) {
+    const freelancerView = isFreelancerProfile(role) && !isCompanyProfile(role) && !isCeoProfile(role)
+    const companyView = isCompanyProfile(role)
+    if (!freelancerView && !companyView) {
       setAllowed(false)
       setDenyKind('role')
       setListings([])
@@ -160,6 +165,70 @@ export default function WorkspaceProjectsScreen() {
     }
     setDenyKind(null)
     setAllowed(true)
+    setViewerRole(companyView ? 'company' : 'freelancer')
+
+    if (companyView) {
+      setCanCreatePrivate(true)
+      const [{ data: companyProjects, error: projectsErr }, { data: cp }, { data: profileRow }] =
+        await Promise.all([
+          supabase
+            .from('projects')
+            .select('id, title, status, updated_at, budget_amount, budget_type, budget_currency')
+            .eq('company_id', user.id),
+          supabase
+            .from('company_profiles')
+            .select('logo_url, website')
+            .eq('id', user.id)
+            .maybeSingle(),
+          supabase
+            .from('profiles')
+            .select('name')
+            .eq('id', user.id)
+            .maybeSingle(),
+        ])
+      if (projectsErr) {
+        setError(projectsErr.message)
+        setListings([])
+        setArchivedListings([])
+        setLoading(false)
+        return
+      }
+      const companyName =
+        typeof profileRow?.name === 'string' && profileRow.name.trim().length > 0
+          ? profileRow.name.trim()
+          : 'Company'
+      const companyLogo =
+        (typeof cp?.logo_url === 'string' && cp.logo_url.trim()) ||
+        (typeof cp?.website === 'string' && cp.website.trim() ? faviconFromWebsite(cp.website.trim()) : null) ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(companyName)}&background=FFDC00&color=0a0a0a&size=64`
+      const builtCompany: ProjectListing[] = (companyProjects ?? []).map((pr) => {
+        const archived = String(pr.status ?? '').toLowerCase() === 'archived'
+        const budgetLine = formatBudgetDisplay({
+          budget_type: String(pr.budget_type ?? 'negotiable'),
+          budget_amount: typeof pr.budget_amount === 'number' ? pr.budget_amount : null,
+          budget_currency: typeof pr.budget_currency === 'string' ? pr.budget_currency : null,
+        })
+        return {
+          id: String(pr.id),
+          kind: 'private',
+          title: String(pr.title ?? '').trim() || 'Untitled project',
+          subtitle: null,
+          budgetLine,
+          logoUrl: companyLogo,
+          statusLabel: archived ? 'ARCHIVED' : 'ACTIVE',
+          updatedAt: typeof pr.updated_at === 'string' ? pr.updated_at : null,
+          categoryLabel: 'Company',
+          isArchived: archived,
+        }
+      })
+      builtCompany.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
+      setListings(builtCompany.filter((x) => !x.isArchived))
+      setArchivedListings(builtCompany.filter((x) => x.isArchived))
+      setLoading(false)
+      hasLoadedRef.current = true
+      lastLoadedAtRef.current = Date.now()
+      return { active: builtCompany.filter((x) => !x.isArchived).length, archived: builtCompany.filter((x) => x.isArchived).length }
+    }
 
     const plan = resolveFreelancerPlanFromUserAndProfileTier(user, p?.subscription_tier)
     setCanCreatePrivate(canFreelancerCreatePrivateProjects(plan))
@@ -412,7 +481,7 @@ export default function WorkspaceProjectsScreen() {
   const fetchProjectForEdit = async (projectId: string): Promise<WorkspaceProject | null> => {
     const { data, error: qErr } = await supabase
       .from('projects')
-      .select('id, title, status, updated_at, brief_ai_context, brief_ai_outputs')
+      .select('id, job_id, title, status, updated_at, brief_ai_context, brief_ai_outputs')
       .eq('id', projectId)
       .maybeSingle()
     if (qErr || !data) return null
@@ -424,6 +493,7 @@ export default function WorkspaceProjectsScreen() {
       typeof outputs.workspace_summary === 'string' ? outputs.workspace_summary : ''
     return {
       id: String(data.id),
+      job_id: typeof data.job_id === 'string' ? data.job_id : null,
       title: String(data.title ?? '').trim(),
       status: typeof data.status === 'string' ? data.status : null,
       updated_at: typeof data.updated_at === 'string' ? data.updated_at : null,
@@ -441,6 +511,7 @@ export default function WorkspaceProjectsScreen() {
       return
     }
     setEditId(row.id)
+    setEditJobId(row.job_id)
     setEditTitle(row.title)
     setEditNotes(row.workspace_summary ?? row.brief_ai_context ?? '')
     setEditOutputs(row.brief_ai_outputs ?? {})
@@ -460,6 +531,9 @@ export default function WorkspaceProjectsScreen() {
         brief_ai_outputs: { ...editOutputs, workspace_summary: editNotes.trim() || '' },
       })
       .eq('id', editId)
+    if (!updErr && editJobId) {
+      await supabase.from('jobs').update({ title: t }).eq('id', editJobId)
+    }
     setActingId(null)
     if (updErr) {
       setError(updErr.message)
@@ -467,6 +541,7 @@ export default function WorkspaceProjectsScreen() {
     }
     setEditOpen(false)
     setEditId(null)
+    setEditJobId(null)
     setEditTitle('')
     setEditNotes('')
     setEditOutputs({})
@@ -617,7 +692,7 @@ export default function WorkspaceProjectsScreen() {
         <View style={styles.center}>
           <Text style={styles.blockTitle}>Freelancers only</Text>
           <Text style={styles.blockSub}>
-            This overview is for freelancer accounts — private workspaces and jobs you&apos;re booked on.
+            This overview is for freelancer or company accounts.
           </Text>
         </View>
       </SafeAreaView>
@@ -643,8 +718,9 @@ export default function WorkspaceProjectsScreen() {
 
       <Text style={styles.title}>Projects</Text>
       <Text style={styles.sub}>
-        Private workspaces (your avatar) and customer jobs you&apos;re booked on — same overview as on the web. Budget
-        comes from each project or job.
+        {viewerRole === 'company'
+          ? 'Your company projects. You can open, edit, archive, or delete them here.'
+          : 'Private workspaces (your avatar) and customer jobs you&apos;re booked on — same overview as on the web. Budget comes from each project or job.'}
       </Text>
       {!canCreatePrivate ? (
         <Text style={styles.planHint}>

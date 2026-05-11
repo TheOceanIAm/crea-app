@@ -280,7 +280,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="jobs"
           options={{
-            href: workspaceOnlyTabs ? null : '/jobs',
+            href: workspaceOnlyTabs ? null : companyTabs ? '/workspace-projects' : '/jobs',
             title: companyTabs ? 'Projects' : 'Jobs',
             tabBarIcon: ({ color, size }) => (
               <Briefcase size={size} color={color} strokeWidth={ICON_STROKE_TAB} />

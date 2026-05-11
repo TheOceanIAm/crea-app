@@ -18,6 +18,7 @@ create table if not exists public.production_shots (
   location text not null default '',
   framing text not null default '',
   audio_notes text not null default '',
+  brief_ai_synced boolean not null default false,
   status text not null default 'open',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),

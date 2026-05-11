@@ -30,7 +30,7 @@ type Member = {
   contact_email?: string | null
   contact_phone?: string | null
   contact_label?: string | null
-  profiles: { name: string | null; avatar_url: string | null } | null
+  profiles: { name: string | null; avatar_url: string | null; headline?: string | null } | null
 }
 
 type ManualCrew = {
@@ -50,6 +50,7 @@ type CrewRow =
       member_role: string
       name: string
       subtitle: string
+      role_display?: string | null
       email: string | null
       phone: string | null
       scheduling_start_date?: string | null
@@ -64,6 +65,7 @@ type CrewRow =
       member_role: string
       name: string
       subtitle: string
+      role_display?: string | null
       email: string | null
       phone: string | null
     }
@@ -141,7 +143,7 @@ export function ProjectCrewTab({
       supabase
         .from('project_members')
         .select(
-          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, contact_email, contact_phone, contact_label, profiles(name, avatar_url)'
+          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, contact_email, contact_phone, contact_label, profiles(name, avatar_url, headline)'
         )
         .eq('project_id', projectId)
         .order('member_role', { ascending: true }),
@@ -167,8 +169,8 @@ export function ProjectCrewTab({
 
     const registered = ((registeredRes.data as unknown as Member[]) ?? []).map((m) => {
       const prof = m.profiles as
-        | { name: string | null; avatar_url: string | null }
-        | { name: string | null; avatar_url: string | null }[]
+        | { name: string | null; avatar_url: string | null; headline?: string | null }
+        | { name: string | null; avatar_url: string | null; headline?: string | null }[]
         | null
         | undefined
       const p = Array.isArray(prof) ? prof[0] : prof
@@ -179,15 +181,18 @@ export function ProjectCrewTab({
           ? m.contact_label.trim()
           : ''
       const rl = roleLabel(m.member_role)
+      const roleDisplay =
+        typeof p?.headline === 'string' && p.headline.trim().length > 0 ? p.headline.trim() : rl
       const subtitle =
         rawContactNote.length > 0
-          ? `${rl} · ${rawContactNote.length > 38 ? `${rawContactNote.slice(0, 38)}…` : rawContactNote}`
-          : rl
+          ? `${roleDisplay} · ${rawContactNote.length > 38 ? `${rawContactNote.slice(0, 38)}…` : rawContactNote}`
+          : roleDisplay
       return {
         source: 'registered' as const,
         id: m.id,
         profile_id: m.profile_id,
         member_role: m.member_role,
+        role_display: roleDisplay,
         name: p?.name || 'Member',
         subtitle,
         email: null,
@@ -208,6 +213,7 @@ export function ProjectCrewTab({
         source: 'manual' as const,
         id: m.id,
         member_role: m.member_role || 'crew',
+        role_display: role || 'Crew',
         name: m.name,
         subtitle: role || 'Crew',
         email: m.email?.trim() || null,
@@ -882,7 +888,9 @@ export function ProjectCrewTab({
             ) : selectedCrew ? (
               <View style={styles.modalReadonlyBlock}>
                 <Text style={styles.modalReadonlyLabel}>Role</Text>
-                <Text style={styles.modalReadonlyValue}>{roleLabel(selectedCrew.member_role)}</Text>
+                <Text style={styles.modalReadonlyValue}>
+                  {(selectedCrew.role_display ?? '').trim() || roleLabel(selectedCrew.member_role)}
+                </Text>
               </View>
             ) : null}
             {selectedCrew?.source === 'manual' ? (

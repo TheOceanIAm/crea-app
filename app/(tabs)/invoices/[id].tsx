@@ -41,6 +41,28 @@ function num(v: unknown): number | null {
   return null
 }
 
+function derivedInvoiceNumber(row: InvoiceRecord | null): string {
+  if (!row) return '—'
+  const explicit =
+    str(row.invoice_number) ||
+    str(row.invoice_no) ||
+    str(row.number) ||
+    str(row.payment_reference)
+  if (explicit && explicit.trim()) return explicit.trim()
+  const rawId = str(row.id)?.replace(/-/g, '').toUpperCase() ?? ''
+  return rawId ? `CR-${rawId.slice(0, 8)}` : '—'
+}
+
+function derivedInvoiceTitle(row: InvoiceRecord | null): string {
+  if (!row) return '—'
+  const t =
+    str(row.invoice_project_title) ||
+    str(row.title) ||
+    str(row.project_title) ||
+    str(row.job_title)
+  return t?.trim() || '—'
+}
+
 export default function InvoiceDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
@@ -290,10 +312,15 @@ export default function InvoiceDetailScreen() {
 
   const status = String(invoice.status ?? '')
   const sb = statusBadgeFor(statusVariant(status))
+  const invoiceNumber = derivedInvoiceNumber(invoice)
+  const invoiceTitle = derivedInvoiceTitle(invoice)
+  const versionNo = num(invoice.version_no) ?? 1
+  const isLatest = invoice.is_latest !== false
 
   const detailRows: { label: string; value: string }[] = [
-    { label: 'Invoice no.', value: str(invoice.invoice_number) || '—' },
-    { label: 'Title', value: str(invoice.title) || '—' },
+    { label: 'Invoice no.', value: invoiceNumber },
+    { label: 'Version', value: `v${versionNo}${isLatest ? ' (latest)' : ''}` },
+    { label: 'Title', value: invoiceTitle },
     { label: 'Description', value: str(invoice.description) || '—' },
     { label: 'Due date', value: formatDate(str(invoice.due_date)) },
     { label: 'Created', value: formatDateTime(str(invoice.created_at)) },
@@ -316,7 +343,7 @@ export default function InvoiceDetailScreen() {
       >
         <View style={styles.titleRow}>
           <Text style={styles.headline} numberOfLines={3}>
-            {str(invoice.title) || str(invoice.invoice_number) || 'Invoice'}
+            {invoiceTitle !== '—' ? invoiceTitle : invoiceNumber !== '—' ? invoiceNumber : 'Invoice'}
           </Text>
           <View style={[styles.statusBadge, sb.wrap]}>
             <Text style={[invoiceBadgeStyles.statusText, sb.text]}>{invoiceStatusLabel(status)}</Text>
@@ -324,6 +351,11 @@ export default function InvoiceDetailScreen() {
         </View>
 
         <Text style={styles.bigAmount}>{money(num(invoice.amount), str(invoice.currency))}</Text>
+        {!isLatest ? (
+          <Text style={styles.versionNotice}>
+            This is an older invoice revision. A newer version exists and is used for payment.
+          </Text>
+        ) : null}
 
         {detailRows.map((row) => (
           <View key={row.label} style={styles.row}>
@@ -420,6 +452,13 @@ const styles = StyleSheet.create({
   headline: { flex: 1, fontSize: 22, fontWeight: '800', color: '#ffffff', lineHeight: 28 },
   statusBadge: { borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4, marginTop: 2 },
   bigAmount: { fontSize: 32, fontWeight: '900', color: '#FFDC00', marginBottom: 28 },
+  versionNotice: {
+    marginTop: -12,
+    marginBottom: 16,
+    fontSize: 12,
+    color: 'rgba(255,220,0,0.8)',
+    lineHeight: 18,
+  },
   row: {
     paddingVertical: 14,
     borderBottomWidth: 1,

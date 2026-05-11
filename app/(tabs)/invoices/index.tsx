@@ -28,9 +28,17 @@ type InvoiceRow = {
   currency?: string | null
   due_date?: string | null
   created_at?: string | null
+  company_id?: string | null
+  freelancer_id?: string | null
+  job_id?: string | null
   title?: string | null
   description?: string | null
   invoice_number?: string | null
+  invoice_project_title?: string | null
+  payment_reference?: string | null
+  version_no?: number | null
+  version_group_id?: string | null
+  is_latest?: boolean | null
 }
 
 type ProjectBudgetRow = {
@@ -58,6 +66,38 @@ type ReadyInvoiceJob = {
   title: string
   clientName: string
   isSolo: boolean
+}
+
+function pickNewestInvoice(a: InvoiceRow, b: InvoiceRow): InvoiceRow {
+  const av = typeof a.version_no === 'number' ? a.version_no : 1
+  const bv = typeof b.version_no === 'number' ? b.version_no : 1
+  if (av !== bv) return av > bv ? a : b
+  const at = a.created_at ? new Date(a.created_at).getTime() : 0
+  const bt = b.created_at ? new Date(b.created_at).getTime() : 0
+  return at >= bt ? a : b
+}
+
+function collapseToLatestInvoices(rows: InvoiceRow[]): InvoiceRow[] {
+  if (rows.length <= 1) return rows
+  const map = new Map<string, InvoiceRow>()
+  for (const row of rows) {
+    const groupId =
+      (typeof row.version_group_id === 'string' && row.version_group_id.trim()) ||
+      (typeof row.job_id === 'string' && row.job_id.trim()
+        ? `job:${row.job_id}|f:${String(row.freelancer_id ?? '')}|c:${String(row.company_id ?? '')}`
+        : `id:${row.id}`)
+    const prev = map.get(groupId)
+    if (!prev) {
+      map.set(groupId, row)
+      continue
+    }
+    map.set(groupId, pickNewestInvoice(prev, row))
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    const at = a.created_at ? new Date(a.created_at).getTime() : 0
+    const bt = b.created_at ? new Date(b.created_at).getTime() : 0
+    return bt - at
+  })
 }
 
 function computeBudgetOverview(
@@ -168,8 +208,9 @@ export default function InvoicesListScreen() {
       setError(err.message)
       setRows([])
     } else {
-      setRows((data as InvoiceRow[]) ?? [])
-      setMonthlyPaid(computeMonthlyPaid((data as InvoiceRow[]) ?? []))
+      const latestRows = collapseToLatestInvoices((data as InvoiceRow[]) ?? [])
+      setRows(latestRows)
+      setMonthlyPaid(computeMonthlyPaid(latestRows))
     }
 
     if (budgetAllowed) {
@@ -643,8 +684,11 @@ export default function InvoicesListScreen() {
             >
               <View style={styles.cardTop}>
                 <Text style={styles.invoiceTitle} numberOfLines={2}>
-                  {item.title || item.description || item.invoice_number || 'Invoice'}
+                  {item.invoice_project_title || item.title || item.description || item.invoice_number || 'Invoice'}
                 </Text>
+                {(item.version_no ?? 1) > 1 ? (
+                  <Text style={styles.versionTag}>v{item.version_no}</Text>
+                ) : null}
                 <View style={[styles.statusBadge, sb.wrap]}>
                   <Text style={[invoiceBadgeStyles.statusText, sb.text]}>{invoiceStatusLabel(item.status)}</Text>
                 </View>
@@ -885,6 +929,12 @@ const styles = StyleSheet.create({
   },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10 },
   invoiceTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: '#ffffff' },
+  versionTag: {
+    marginRight: 8,
+    fontSize: 11,
+    fontWeight: '800',
+    color: 'rgba(255,220,0,0.85)',
+  },
   statusBadge: { borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4 },
   amount: { fontSize: 22, fontWeight: '800', color: '#FFDC00', marginBottom: 8 },
   metaRow: { flexDirection: 'row', justifyContent: 'space-between' },
