@@ -288,6 +288,11 @@ export default function ProfileScreen() {
       )
       .eq('id', user.id)
       .single()
+    const { data: freelancerRates } = await supabase
+      .from('freelancer_profiles')
+      .select('day_rate, half_day_rate')
+      .eq('id', user.id)
+      .maybeSingle()
 
     if (error) {
       setLoadError(error.message)
@@ -368,8 +373,14 @@ export default function ProfileScreen() {
             : 'starter'
       }
       setSubscriptionTier(effectiveTier)
-      setDayRate(data?.day_rate_amount != null ? String(data.day_rate_amount) : '')
-      setHalfDayRate(data?.half_day_rate_amount != null ? String(data.half_day_rate_amount) : '')
+      const dayRateCanonical =
+        freelancerRates?.day_rate != null ? freelancerRates.day_rate : data?.day_rate_amount ?? null
+      const halfDayCanonical =
+        freelancerRates?.half_day_rate != null
+          ? freelancerRates.half_day_rate
+          : data?.half_day_rate_amount ?? null
+      setDayRate(dayRateCanonical != null ? String(dayRateCanonical) : '')
+      setHalfDayRate(halfDayCanonical != null ? String(halfDayCanonical) : '')
       setRatesCurrency((data?.rates_currency as string) || 'EUR')
       setRatesNotes((data?.rates_notes as string) || '')
     }
@@ -613,9 +624,19 @@ export default function ProfileScreen() {
         rates_notes: ratesNotes.trim() || null,
       })
       .eq('id', user.id)
+    const { error: legacyRateError } = await supabase
+      .from('freelancer_profiles')
+      .upsert(
+        {
+          id: user.id,
+          day_rate: dr,
+          half_day_rate: hr,
+        },
+        { onConflict: 'id' }
+      )
     setSavingRates(false)
-    if (error) {
-      Alert.alert('Save failed', error.message)
+    if (error || legacyRateError) {
+      Alert.alert('Save failed', error?.message || legacyRateError?.message || 'Could not save rates.')
       return
     }
     Alert.alert('Saved', 'Your rates were updated.')

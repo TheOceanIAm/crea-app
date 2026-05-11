@@ -280,8 +280,18 @@ export default function TabLayout() {
         <Tabs.Screen
           name="jobs"
           options={{
-            href: workspaceOnlyTabs ? null : companyTabs ? '/workspace-projects' : '/jobs',
+            href: workspaceOnlyTabs || companyTabs ? null : '/(tabs)/jobs',
             title: companyTabs ? 'Projects' : 'Jobs',
+            tabBarIcon: ({ color, size }) => (
+              <Briefcase size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="workspace-projects"
+          options={{
+            href: companyTabs ? '/(tabs)/workspace-projects' : null,
+            title: 'Projects',
             tabBarIcon: ({ color, size }) => (
               <Briefcase size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
             ),
@@ -351,13 +361,6 @@ export default function TabLayout() {
           options={{
             href: null,
             title: 'Invoices',
-          }}
-        />
-        <Tabs.Screen
-          name="workspace-projects"
-          options={{
-            href: null,
-            title: 'Workspace projects',
           }}
         />
         <Tabs.Screen

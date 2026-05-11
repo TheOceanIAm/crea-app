@@ -22,6 +22,7 @@
     "@react-native-community/slider": "4.5.5",
     "@react-navigation/bottom-tabs": "^7.15.9",
     "@rnmapbox/maps": "^10.3.0",
+    "@stripe/stripe-react-native": "^0.65.0",
     "@supabase/supabase-js": "^2.45.0",
     "@vis.gl/react-mapbox": "^8.1.1",
     "aes-js": "^3.1.2",

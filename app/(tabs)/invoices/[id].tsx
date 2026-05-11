@@ -8,15 +8,22 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
 import { ChevronLeft } from 'lucide-react-native'
+import { useStripe } from '@stripe/stripe-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isCeoProfile, resolveAppRole } from '@/lib/profileRole'
-import { openInvoiceApplePayOnWeb, openInvoicePayOnWeb } from '@/lib/creaWeb'
+import {
+  getCreaPayBaseUrl,
+  getCreaWebBaseUrl,
+  openInvoiceApplePayOnWeb,
+  openInvoicePayOnWeb,
+} from '@/lib/creaWeb'
 import {
   formatDate,
   formatDateTime,
@@ -71,11 +78,13 @@ export default function InvoiceDetailScreen() {
   const [forbidden, setForbidden] = useState(false)
   const [viewerRole, setViewerRole] = useState<'company' | 'freelancer' | 'ceo' | null>(null)
   const [statusBusy, setStatusBusy] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [paymentSyncPending, setPaymentSyncPending] = useState(false)
   const [paymentSyncTimedOut, setPaymentSyncTimedOut] = useState(false)
   const [lastPaymentCheckAt, setLastPaymentCheckAt] = useState<Date | null>(null)
   const pollAttemptsRef = useRef(0)
   const MAX_PAYMENT_SYNC_POLLS = 20
+  const { initPaymentSheet, presentPaymentSheet, isPlatformPaySupported, confirmPlatformPayPayment } = useStripe()
 
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
@@ -178,6 +187,36 @@ export default function InvoiceDetailScreen() {
     }
   }
 
+  const deleteInvoice = () => {
+    if (!id || typeof id !== 'string') return
+    if (viewerRole === 'ceo') return
+    if (deleteBusy) return
+    Alert.alert(
+      'Delete invoice',
+      'Delete this invoice permanently? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setDeleteBusy(true)
+              const { error } = await supabase.from('invoices').delete().eq('id', id)
+              setDeleteBusy(false)
+              if (error) {
+                Alert.alert('Delete failed', error.message)
+                return
+              }
+              Alert.alert('Deleted', 'Invoice was removed.')
+              router.replace('/(tabs)/invoices')
+            })()
+          },
+        },
+      ]
+    )
+  }
+
   const refreshInvoiceStatusOnce = useCallback(async (): Promise<string | null> => {
     if (!id || typeof id !== 'string') return null
     const { data, error } = await supabase
@@ -194,34 +233,202 @@ export default function InvoiceDetailScreen() {
     return nextStatus
   }, [id])
 
+  const startCheckout = (preferApplePay: boolean) => {
+    if (!id || typeof id !== 'string') return
+    void (async () => {
+      const fallbackOpen = () => {
+        const ok = preferApplePay ? openInvoiceApplePayOnWeb(id) : openInvoicePayOnWeb(id)
+        if (!ok) {
+          Alert.alert(
+            'Payment unavailable',
+            'Could not start payment flow. Please check EXPO_PUBLIC_CREA_WEB_URL / EXPO_PUBLIC_CREA_PAY_URL.'
+          )
+          return false
+        }
+        setPaymentSyncPending(true)
+        setPaymentSyncTimedOut(false)
+        pollAttemptsRef.current = 0
+        return true
+      }
+
+      try {
+        const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
+        if (!base) {
+          fallbackOpen()
+          return
+        }
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        const token = session?.access_token
+        if (!token) {
+          fallbackOpen()
+          return
+        }
+        const res = await fetch(`${base}/api/stripe/crea-pay/checkout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            invoiceId: id,
+            paymentMethodHint: preferApplePay ? 'apple_pay' : 'card',
+          }),
+        })
+        const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string }
+        if (!res.ok || !json.url) {
+          // Keep the button useful even when direct API checkout fails.
+          if (!fallbackOpen()) {
+            Alert.alert('Payment failed', json.error || 'Could not start Stripe checkout.')
+          }
+          return
+        }
+        await Linking.openURL(json.url)
+        setPaymentSyncPending(true)
+        setPaymentSyncTimedOut(false)
+        pollAttemptsRef.current = 0
+      } catch (e) {
+        if (!fallbackOpen()) {
+          Alert.alert('Payment failed', e instanceof Error ? e.message : 'Could not open Stripe checkout.')
+        }
+      }
+    })()
+  }
+
   const openCreaPay = () => {
     if (!id || typeof id !== 'string') return
-    const ok = openInvoicePayOnWeb(id)
-    if (!ok) {
-      Alert.alert(
-        'CREA Pay not configured',
-        'Set EXPO_PUBLIC_CREA_WEB_URL (or EXPO_PUBLIC_CREA_PAY_URL) to open the payment flow.'
-      )
-      return
-    }
-    setPaymentSyncPending(true)
-    setPaymentSyncTimedOut(false)
-    pollAttemptsRef.current = 0
+    void (async () => {
+      try {
+        const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
+        if (!base) {
+          startCheckout(false)
+          return
+        }
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        const token = session?.access_token
+        if (!token) {
+          Alert.alert('Session expired', 'Please sign in again to continue payment.')
+          return
+        }
+        const createRes = await fetch(`${base}/api/stripe/crea-pay/mobile-intent`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ invoiceId: id }),
+        })
+        const createJson = (await createRes.json().catch(() => ({}))) as {
+          clientSecret?: string
+          customerName?: string
+          amountCents?: number
+          currency?: string
+          error?: string
+        }
+        if (!createRes.ok || !createJson.clientSecret) {
+          startCheckout(false)
+          return
+        }
+
+        const init = await initPaymentSheet({
+          merchantDisplayName: 'CREA',
+          paymentIntentClientSecret: createJson.clientSecret,
+          applePay: {
+            merchantCountryCode: 'DE',
+          },
+          defaultBillingDetails: createJson.customerName
+            ? {
+                name: createJson.customerName,
+              }
+            : undefined,
+        })
+        if (init.error) {
+          startCheckout(false)
+          return
+        }
+
+        const present = await presentPaymentSheet()
+        if (present.error) {
+          // User cancel should not throw a hard error.
+          if (present.error.code && String(present.error.code).toLowerCase().includes('canceled')) return
+          startCheckout(false)
+          return
+        }
+        setPaymentSyncPending(true)
+        setPaymentSyncTimedOut(false)
+        pollAttemptsRef.current = 0
+      } catch {
+        startCheckout(false)
+      }
+    })()
   }
 
   const openApplePayQuick = () => {
     if (!id || typeof id !== 'string') return
-    const ok = openInvoiceApplePayOnWeb(id)
-    if (!ok) {
-      Alert.alert(
-        'CREA Pay not configured',
-        'Set EXPO_PUBLIC_CREA_WEB_URL (or EXPO_PUBLIC_CREA_PAY_URL) to open the payment flow.'
-      )
-      return
-    }
-    setPaymentSyncPending(true)
-    setPaymentSyncTimedOut(false)
-    pollAttemptsRef.current = 0
+    void (async () => {
+      try {
+        const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
+        if (!base) {
+          startCheckout(true)
+          return
+        }
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        const token = session?.access_token
+        if (!token) {
+          Alert.alert('Session expired', 'Please sign in again to continue payment.')
+          return
+        }
+        const createRes = await fetch(`${base}/api/stripe/crea-pay/mobile-intent`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ invoiceId: id }),
+        })
+        const createJson = (await createRes.json().catch(() => ({}))) as {
+          clientSecret?: string
+          amountCents?: number
+          currency?: string
+          error?: string
+        }
+        if (!createRes.ok || !createJson.clientSecret) {
+          startCheckout(true)
+          return
+        }
+
+        const platformSupported = await isPlatformPaySupported({ applePay: { merchantCountryCode: 'DE' } })
+        if (!platformSupported) {
+          openCreaPay()
+          return
+        }
+
+        const amount = ((createJson.amountCents ?? 0) / 100).toFixed(2)
+        const confirm = await confirmPlatformPayPayment(createJson.clientSecret, {
+          applePay: {
+            merchantCountryCode: 'DE',
+            currencyCode: (createJson.currency || 'EUR').toUpperCase(),
+            cartItems: [{ label: 'CREA invoice', amount, paymentType: 'Immediate' }],
+          },
+        })
+        if (confirm.error) {
+          if (confirm.error.code && String(confirm.error.code).toLowerCase().includes('canceled')) return
+          openCreaPay()
+          return
+        }
+
+        setPaymentSyncPending(true)
+        setPaymentSyncTimedOut(false)
+        pollAttemptsRef.current = 0
+      } catch {
+        startCheckout(true)
+      }
+    })()
   }
 
   useEffect(() => {
@@ -433,8 +640,26 @@ export default function InvoiceDetailScreen() {
             {status === 'paid' ? (
               <Text style={styles.paidHint}>Paid via CREA Pay or manual confirmation.</Text>
             ) : null}
+            <TouchableOpacity
+              style={[styles.deleteBtn, deleteBusy && styles.dim]}
+              disabled={deleteBusy}
+              onPress={deleteInvoice}
+            >
+              <Text style={styles.deleteBtnText}>{deleteBusy ? 'Deleting…' : 'Delete invoice'}</Text>
+            </TouchableOpacity>
           </View>
         )}
+        {viewerRole === 'freelancer' ? (
+          <View style={styles.actions}>
+            <TouchableOpacity
+              style={[styles.deleteBtn, deleteBusy && styles.dim]}
+              disabled={deleteBusy}
+              onPress={deleteInvoice}
+            >
+              <Text style={styles.deleteBtnText}>{deleteBusy ? 'Deleting…' : 'Delete invoice'}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   )
@@ -485,6 +710,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFDC00',
   },
   actionBtnPrimaryText: { color: '#0a0a0a', fontWeight: '800', fontSize: 15 },
+  deleteBtn: {
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,110,110,0.45)',
+    backgroundColor: 'rgba(255,80,80,0.06)',
+  },
+  deleteBtnText: { color: '#ff8e8e', fontWeight: '800', fontSize: 14 },
   dim: { opacity: 0.55 },
   ceoReadOnly: {
     marginTop: 20,

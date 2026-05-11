@@ -52,6 +52,20 @@ type WorkspaceProject = {
   brief_ai_outputs: Record<string, unknown> | null
 }
 
+function mapProjectStatusLabel(project: {
+  status: string | null | undefined
+  job_status?: string | null
+  job_project_status?: string | null
+}): string {
+  const st = String(project.status ?? '').toLowerCase()
+  const js = String(project.job_status ?? '').toLowerCase()
+  const jps = String(project.job_project_status ?? '').toLowerCase()
+  if (st === 'archived') return 'ARCHIVED'
+  if (st === 'completed' || js === 'closed' || jps === 'completed') return 'COMPLETED'
+  if (st === 'recruiting' || jps === 'recruiting') return 'RECRUITING'
+  return 'ACTIVE'
+}
+
 function faviconFromWebsite(url: string): string | null {
   try {
     const u = url.startsWith('http') ? url : `https://${url}`
@@ -173,7 +187,7 @@ export default function WorkspaceProjectsScreen() {
         await Promise.all([
           supabase
             .from('projects')
-            .select('id, title, status, updated_at, budget_amount, budget_type, budget_currency')
+            .select('id, job_id, title, status, updated_at, budget_amount, budget_type, budget_currency')
             .eq('company_id', user.id),
           supabase
             .from('company_profiles')
@@ -201,8 +215,34 @@ export default function WorkspaceProjectsScreen() {
         (typeof cp?.logo_url === 'string' && cp.logo_url.trim()) ||
         (typeof cp?.website === 'string' && cp.website.trim() ? faviconFromWebsite(cp.website.trim()) : null) ||
         `https://ui-avatars.com/api/?name=${encodeURIComponent(companyName)}&background=FFDC00&color=0a0a0a&size=64`
+      const companyJobIds = [
+        ...new Set(
+          (companyProjects ?? [])
+            .map((pr) => (typeof pr.job_id === 'string' ? pr.job_id : null))
+            .filter((id): id is string => Boolean(id))
+        ),
+      ]
+      let jobStatusById: Record<string, { status: string | null; project_status: string | null }> = {}
+      if (companyJobIds.length > 0) {
+        const { data: companyJobs } = await supabase
+          .from('jobs')
+          .select('id, status, project_status')
+          .in('id', companyJobIds)
+        jobStatusById = Object.fromEntries(
+          (companyJobs ?? []).map((j) => [
+            String(j.id),
+            {
+              status: typeof j.status === 'string' ? j.status : null,
+              project_status: typeof j.project_status === 'string' ? j.project_status : null,
+            },
+          ])
+        )
+      }
+
       const builtCompany: ProjectListing[] = (companyProjects ?? []).map((pr) => {
         const archived = String(pr.status ?? '').toLowerCase() === 'archived'
+        const jobId = typeof pr.job_id === 'string' ? pr.job_id : null
+        const jobStatus = jobId ? jobStatusById[jobId] : null
         const budgetLine = formatBudgetDisplay({
           budget_type: String(pr.budget_type ?? 'negotiable'),
           budget_amount: typeof pr.budget_amount === 'number' ? pr.budget_amount : null,
@@ -215,7 +255,11 @@ export default function WorkspaceProjectsScreen() {
           subtitle: null,
           budgetLine,
           logoUrl: companyLogo,
-          statusLabel: archived ? 'ARCHIVED' : 'ACTIVE',
+          statusLabel: mapProjectStatusLabel({
+            status: pr.status,
+            job_status: jobStatus?.status ?? null,
+            job_project_status: jobStatus?.project_status ?? null,
+          }),
           updatedAt: typeof pr.updated_at === 'string' ? pr.updated_at : null,
           categoryLabel: 'Company',
           isArchived: archived,
@@ -626,11 +670,20 @@ export default function WorkspaceProjectsScreen() {
               <Text style={styles.cardTitle} numberOfLines={2}>
                 {item.title}
               </Text>
-              {item.kind === 'private' ? (
-                <View style={styles.badgePrivate}>
-                  <Text style={styles.badgePrivateText}>Private project</Text>
-                </View>
-              ) : null}
+              <View
+                style={[
+                  styles.badgeStatus,
+                  item.statusLabel === 'COMPLETED'
+                    ? styles.badgeCompleted
+                    : item.statusLabel === 'RECRUITING'
+                      ? styles.badgeRecruiting
+                      : item.statusLabel === 'ARCHIVED'
+                        ? styles.badgeArchived
+                        : styles.badgeActive,
+                ]}
+              >
+                <Text style={styles.badgeStatusText}>{item.statusLabel}</Text>
+              </View>
             </View>
             {item.subtitle ? (
               <Text style={styles.cardSubtitle} numberOfLines={1}>
@@ -913,19 +966,33 @@ const styles = StyleSheet.create({
   cardHead: { flex: 1, minWidth: 0 },
   titleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 4 },
   cardTitle: { fontSize: 16, color: '#fff', fontWeight: '800', flex: 1, minWidth: 0 },
-  badgePrivate: {
+  badgeStatus: {
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,220,0,0.12)',
     borderWidth: 1,
+  },
+  badgeActive: {
+    backgroundColor: 'rgba(40,205,65,0.12)',
+    borderColor: 'rgba(40,205,65,0.28)',
+  },
+  badgeCompleted: {
+    backgroundColor: 'rgba(255,220,0,0.12)',
     borderColor: 'rgba(255,220,0,0.28)',
   },
-  badgePrivateText: {
+  badgeRecruiting: {
+    backgroundColor: 'rgba(64,156,255,0.12)',
+    borderColor: 'rgba(64,156,255,0.28)',
+  },
+  badgeArchived: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  badgeStatusText: {
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.6,
-    color: '#FFDC00',
+    color: '#fff',
     textTransform: 'uppercase',
   },
   cardSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.55)', fontWeight: '600', marginBottom: 4 },

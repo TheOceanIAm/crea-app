@@ -61,6 +61,12 @@
           "enableBackgroundRemoteNotifications": true
         }
       ],
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.de.creaservices.app"
+        }
+      ],
       "expo-font"
     ],
     "experiments": {

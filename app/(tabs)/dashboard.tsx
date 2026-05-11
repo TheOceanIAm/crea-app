@@ -123,7 +123,7 @@ function quickActionsForRole(
     return [
       { label: 'Post project', icon: PlusCircle, href: '/(tabs)/company-post-job' },
       { label: 'Applications', icon: ClipboardList, href: '/(tabs)/company-applications' },
-      { label: 'Projects', icon: Briefcase, href: '/(tabs)/jobs' },
+      { label: 'Projects', icon: Briefcase, href: '/(tabs)/workspace-projects' },
       { label: 'Talent pool', icon: Users, href: '/(tabs)/talent-pool' },
       { label: 'Messages', icon: MessageCircle, href: '/(tabs)/messages' },
       { label: 'Invoices', icon: Receipt, href: '/(tabs)/invoices' },
