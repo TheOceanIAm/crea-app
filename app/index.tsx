@@ -28,7 +28,18 @@ async function getSessionOrTimeout(): Promise<SessionRace> {
     const t = setTimeout(() => done({ kind: 'timeout' }), SESSION_BOOTSTRAP_MS)
     void supabase.auth
       .getSession()
-      .then(({ data }) => done({ kind: 'ok', session: data.session }))
+      .then(async ({ data, error }) => {
+        if (error) {
+          const msg = (error.message ?? '').toLowerCase()
+          if (msg.includes('invalid refresh token') || msg.includes('refresh token not found')) {
+            // Stale local credentials after reinstall/session rotation: clear local auth storage and continue logged out.
+            await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
+            done({ kind: 'ok', session: null })
+            return
+          }
+        }
+        done({ kind: 'ok', session: data.session })
+      })
       .catch(() => done({ kind: 'ok', session: null }))
   })
 }

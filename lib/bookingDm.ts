@@ -116,9 +116,10 @@ function toIsoDateOnly(d: Date): string {
 
 export function parseBookingReply(raw: string): BookingDmReplyV1 | null {
   const t = typeof raw === 'string' ? raw.trim() : ''
-  if (!t.startsWith(BOOKING_REPLY_PREFIX)) return null
-  const rest = t.slice(BOOKING_REPLY_PREFIX.length).trimStart().replace(/^\n+/, '')
-  const line = rest.split(/\r?\n/)[0] ?? ''
+  if (!t) return null
+  const line = t.startsWith(BOOKING_REPLY_PREFIX)
+    ? t.slice(BOOKING_REPLY_PREFIX.length).trimStart().replace(/^\n+/, '').split(/\r?\n/)[0] ?? ''
+    : t
   try {
     const o = JSON.parse(line) as BookingDmReplyV1
     if (o?.v === 1 && o.forMessageId && (o.status === 'accepted' || o.status === 'declined')) return o
