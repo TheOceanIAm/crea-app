@@ -217,13 +217,96 @@ function BriefTableBlock({ rows, headerRow }: { rows: string[][]; headerRow: boo
   )
 }
 
+function BriefShotCardsBlock({ rows }: { rows: string[][] }) {
+  if (rows.length <= 1) return null
+  const headers = rows[0] ?? []
+  const body = rows.slice(1)
+  const normalizedHeaders = headers.map((h) => h.trim().toLowerCase().replace(/\s+/g, ' '))
+  const preferredOrder = [
+    'shot type/size',
+    'camera/movement',
+    'lens',
+    'framing/action',
+    'day',
+    'location',
+    'time',
+    'audio',
+    'notes',
+  ]
+  const labelMap: Record<string, string> = {
+    'shot type/size': 'Shot',
+    'camera/movement': 'Camera',
+    lens: 'Lens',
+    'framing/action': 'Action',
+    day: 'Day',
+    location: 'Location',
+    time: 'Time',
+    audio: 'Audio',
+    notes: 'Notes',
+  }
+  const getCell = (row: string[], ...headerCandidates: string[]) => {
+    for (const cand of headerCandidates) {
+      const idx = normalizedHeaders.indexOf(cand)
+      if (idx >= 0) return row[idx] ?? ''
+    }
+    return ''
+  }
+
+  return (
+    <View style={styles.shotCardsWrap}>
+      {body.map((row, rowIdx) => {
+        const shotNo = getCell(row, '#') || String(rowIdx + 1)
+        const shotTitle = getCell(row, 'scene/slate', 'scene', 'slate') || `Shot ${shotNo}`
+        const orderedIndices = [
+          ...preferredOrder
+            .map((key) => normalizedHeaders.indexOf(key))
+            .filter((idx) => idx >= 0),
+          ...normalizedHeaders
+            .map((key, idx) => ({ key, idx }))
+            .filter(({ key }) => !preferredOrder.includes(key))
+            .map(({ idx }) => idx),
+        ]
+        const details = orderedIndices
+          .map((i) => ({
+            label: labelMap[normalizedHeaders[i] ?? ''] ?? (headers[i] ?? ''),
+            rawLabel: headers[i] ?? '',
+            value: row[i] ?? '',
+          }))
+          .filter((x) => x.rawLabel.trim() && x.value.trim())
+          .filter((x) => x.rawLabel.trim() !== '#' && x.rawLabel.trim().toLowerCase() !== 'scene/slate')
+
+        return (
+          <View key={`shot-${rowIdx}`} style={styles.shotCard}>
+            <View style={styles.shotCardHead}>
+              <View style={styles.shotNoBadge}>
+                <Text style={styles.shotNoBadgeText}>{shotNo}</Text>
+              </View>
+              <Text style={styles.shotCardTitle}>{shotTitle}</Text>
+            </View>
+            <View style={styles.shotCardDetails}>
+              {details.map((d, i) => (
+                <View key={`${rowIdx}-${i}`} style={styles.shotCardDetailRow}>
+                  <Text style={styles.shotCardDetailLabel}>{d.label}</Text>
+                  <Text style={styles.shotCardDetailValue}>{d.value}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )
+      })}
+    </View>
+  )
+}
+
 export function BriefAiFormattedOutput({
   content,
   embedded = false,
+  renderMode = 'default',
 }: {
   content: string
   /** Parent already provides a card — skip extra chrome. */
   embedded?: boolean
+  renderMode?: 'default' | 'shot-cards'
 }) {
   const blocks = useMemo(() => parseBriefAiContent(content), [content])
   const sections = useMemo(() => {
@@ -244,6 +327,7 @@ export function BriefAiFormattedOutput({
       case 'rule':
         return <View key={key} style={styles.rule} />
       case 'table':
+        if (renderMode === 'shot-cards') return <BriefShotCardsBlock key={key} rows={b.rows} />
         return <BriefTableBlock key={key} rows={b.rows} headerRow={b.headerRow} />
       case 'heading':
         return (
@@ -539,5 +623,61 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.95)',
     fontSize: 12,
     letterSpacing: 0.2,
+  },
+  shotCardsWrap: {
+    marginVertical: 8,
+    gap: 10,
+  },
+  shotCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(12,12,12,0.9)',
+    padding: 12,
+  },
+  shotCardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  shotNoBadge: {
+    minWidth: 28,
+    height: 28,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,220,0,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shotNoBadgeText: {
+    color: '#FFDC00',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  shotCardTitle: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  shotCardDetails: { gap: 6 },
+  shotCardDetailRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  shotCardDetailLabel: {
+    width: 116,
+    color: 'rgba(255,220,0,0.9)',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  shotCardDetailValue: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: 13,
+    lineHeight: 18,
   },
 })

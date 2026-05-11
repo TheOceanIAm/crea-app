@@ -1247,7 +1247,10 @@ export default function ProjectWorkspaceScreen() {
                         <Text style={styles.outputToolName}>{TOOLS.find((t) => t.id === tool)?.title}</Text>
                       </View>
                     </View>
-                    <BriefAiFormattedOutput content={currentOutput} />
+                    <BriefAiFormattedOutput
+                      content={currentOutput}
+                      renderMode={tool === 'shotlist' ? 'shot-cards' : 'default'}
+                    />
                   </View>
                 )}
 

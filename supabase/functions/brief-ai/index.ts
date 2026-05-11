@@ -77,15 +77,15 @@ function promptsForTool(tool: ToolId): { system: string; userLead: string } {
   if (tool === 'shotlist') {
     return {
       system:
-        'You are a senior 1st AD and shot designer. Return clean Markdown only. Build a practical production-ready shot list with clear sequencing, slate/scene hints, locations, framing, camera/lens notes, audio notes, and execution details. Use tables where useful. Keep concise but complete.',
-      userLead: 'Create a detailed shot list in Markdown.',
+        'You are a senior 1st AD and shot designer. Return clean Markdown only. Output ONLY a shot list, nothing else. Do NOT include production overview, synopsis, mood, concept notes, timelines, or prose sections outside shot rows. The output must be directly usable as a shooting shot list.\n\nRequired format:\n- Start with heading: "## Shot List"\n- Then one Markdown table only with these columns exactly:\n  | # | Day | Scene/Slate | Location | Time | Shot Type/Size | Camera/Movement | Lens | Framing/Action | Audio | Notes |\n- Each row must be one concrete shot.\n- If information is missing, write "TBD" in that cell.\n- Minimum 12 shots when context is broad, otherwise include all inferable shots.\n- Keep cells concise and practical.',
+      userLead: 'Create the shot list now.',
     }
   }
   if (tool === 'tasks') {
     return {
       system:
-        'You are a production manager. Return Markdown only. Create a practical task breakdown grouped by phases (prep, shoot, post) with owners, due timing, dependencies, and status hints. Prefer checklists and compact tables.',
-      userLead: 'Create a detailed task breakdown in Markdown.',
+        'You are a production manager. Return Markdown only. Output ONLY an actionable task breakdown, nothing else. Do NOT include shotlist content, creative descriptions, equipment manifests, or long narrative paragraphs.\n\nRequired format:\n- Start with heading: "## Task Breakdown"\n- Create exactly these sections and no other top-level sections:\n  - "### Prep"\n  - "### Shoot"\n  - "### Post"\n- Under each section output a Markdown checklist only, one task per line:\n  - [ ] <task> — Owner: <role> — Due: <relative timing>\n- Tasks must be concrete and executable.\n- If owner/timing is unknown, use "TBD".',
+      userLead: 'Create the task breakdown now.',
     }
   }
   if (tool === 'callsheet') {
@@ -98,8 +98,8 @@ function promptsForTool(tool: ToolId): { system: string; userLead: string } {
   if (tool === 'gear') {
     return {
       system:
-        'You are a line producer + DoP preparing equipment manifests. Return Markdown only. Build a detailed equipment list grouped by department (camera/media, lenses, support, lighting, grip, sound, data, misc). Include quantity, key specs, and notes. Prefer tables.',
-      userLead: 'Create a detailed equipment list in Markdown.',
+        'You are a line producer + DoP preparing equipment manifests. Return Markdown only. Output ONLY an equipment list, nothing else. Do NOT include task breakdown, shot descriptions, schedule summaries, creative treatment, or prose outside equipment sections.\n\nRequired format:\n- Start with heading: "## Equipment List"\n- Use only these department headings when relevant:\n  - "### Camera & Media"\n  - "### Lenses"\n  - "### Support"\n  - "### Lighting"\n  - "### Grip"\n  - "### Sound"\n  - "### Data / DIT"\n  - "### Misc"\n- Under each used heading include one Markdown table only with columns exactly:\n  | Item | Qty | Spec / Model | Purpose / Notes |\n- Each row must be one equipment item.\n- If unknown, use "TBD".',
+      userLead: 'Create the equipment list now.',
     }
   }
   return {
