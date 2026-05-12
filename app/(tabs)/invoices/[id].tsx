@@ -40,9 +40,10 @@ import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
 const STRIPE_IOS_RETURN_URL = 'crea://stripe-redirect'
 
 const CREA_API_FETCH_MS = 38_000
-/** Hosted checkout creates a Stripe session server-side; cold starts + Stripe can exceed the default API budget. */
-const CREA_CHECKOUT_FETCH_MS = 95_000
-const CREA_CHECKOUT_RETRY_MS = 55_000
+/** Hosted checkout: Vercel cold start + Stripe Connect + Checkout session — allow generous budgets. */
+const CREA_CHECKOUT_FETCH_MS = 120_000
+const CREA_CHECKOUT_RETRY_MS = 90_000
+const CREA_CHECKOUT_FINAL_MS = 75_000
 const STRIPE_APPLE_PAY_CHECK_MS = 12_000
 const STRIPE_INIT_SHEET_MS = 45_000
 const STRIPE_PRESENT_SHEET_MS = 120_000
@@ -494,15 +495,25 @@ export default function InvoiceDetailScreen() {
 
       let res: Response
       try {
-        try {
-          res = await fetchWithTimeoutMs(checkoutUrl, checkoutInit, CREA_CHECKOUT_FETCH_MS)
-        } catch (firstErr) {
-          const abortedFirst =
-            firstErr instanceof Error && /aborted|abort/i.test(firstErr.message + (firstErr as Error).name)
-          if (!abortedFirst) throw firstErr
-          await new Promise((r) => setTimeout(r, 600))
-          res = await fetchWithTimeoutMs(checkoutUrl, checkoutInit, CREA_CHECKOUT_RETRY_MS)
+        const timeouts = [CREA_CHECKOUT_FETCH_MS, CREA_CHECKOUT_RETRY_MS, CREA_CHECKOUT_FINAL_MS]
+        let lastFe: unknown
+        let got: Response | undefined
+        for (let attempt = 0; attempt < timeouts.length; attempt++) {
+          try {
+            got = await fetchWithTimeoutMs(checkoutUrl, checkoutInit, timeouts[attempt])
+            break
+          } catch (fe) {
+            lastFe = fe
+            const aborted =
+              fe instanceof Error && /aborted|abort/i.test(fe.message + (fe as Error).name)
+            if (!aborted) throw fe
+            if (attempt < timeouts.length - 1) {
+              await new Promise((r) => setTimeout(r, 900 * (attempt + 1)))
+            }
+          }
         }
+        if (!got) throw lastFe
+        res = got
       } catch (fe) {
         const aborted =
           fe instanceof Error && /aborted|abort/i.test(fe.message + (fe as Error).name)
