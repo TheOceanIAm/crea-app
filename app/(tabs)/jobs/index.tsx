@@ -609,9 +609,15 @@ export default function JobsListScreen() {
                 style={styles.modalPrimary}
                 onPress={() => {
                   const email = activeExternalJob?.contact_email?.trim()
-                  if (email) {
-                    void Linking.openURL(`mailto:${email}`)
-                  }
+                  if (!email) return
+                  void Linking.openURL(`mailto:${email}`).catch(() => {
+                    Alert.alert(
+                      'Mail did not open',
+                      Platform.OS === 'ios'
+                        ? 'The iOS Simulator often cannot open Mail from email links. On a real device with Mail or another mail app configured, this usually works. You can copy the address shown above.'
+                        : 'No app opened this email link. Copy the address above and paste it into your mail app.'
+                    )
+                  })
                 }}
                 activeOpacity={0.85}
                 disabled={!activeExternalJob?.contact_email}

@@ -19,7 +19,8 @@
       "buildNumber": "2",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSLocationWhenInUseUsageDescription": "CREA uses your location while using the app to place project weather and sun planning context on the map."
+        "NSLocationWhenInUseUsageDescription": "CREA uses your location while using the app to place project weather and sun planning context on the map.",
+        "LSApplicationQueriesSchemes": ["mailto"]
       }
     },
     "android": {
