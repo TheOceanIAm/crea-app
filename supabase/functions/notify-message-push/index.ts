@@ -23,8 +23,13 @@ function messageBody(row: Record<string, unknown>): string {
 }
 
 function parseNotif(raw: unknown): NotificationSettings {
-  if (!raw || typeof raw !== 'object') return {}
-  return raw as NotificationSettings
+  const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  /** Missing keys treated as opted-in (legacy rows often only stored expoPushToken + pushEnabled). */
+  return {
+    expoPushToken: typeof o.expoPushToken === 'string' ? o.expoPushToken : undefined,
+    pushEnabled: o.pushEnabled !== false,
+    pushMessage: o.pushMessage !== false,
+  }
 }
 
 Deno.serve(async (req) => {

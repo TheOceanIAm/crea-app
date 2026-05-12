@@ -113,6 +113,8 @@ export default function TabLayout() {
       setCompanyTabs(role === 'company' || role === 'ceo')
       if (!workspaceOnly) {
         await Promise.all([loadUnreadDmCount(user.id), loadUnreadAlertsCount(user.id)])
+      }
+      if (Platform.OS !== 'web') {
         void registerPushTokenSilently()
       }
     }

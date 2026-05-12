@@ -22,8 +22,12 @@ type NotifSettings = {
 }
 
 function parseNotif(raw: unknown): NotifSettings {
-  if (!raw || typeof raw !== 'object') return {}
-  return raw as NotifSettings
+  const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  /** Treat missing pushEnabled as true so rows with only a stored Expo token still receive pushes. */
+  return {
+    ...(o as NotifSettings),
+    pushEnabled: o.pushEnabled !== false,
+  }
 }
 
 async function sendExpoPush(opts: {
