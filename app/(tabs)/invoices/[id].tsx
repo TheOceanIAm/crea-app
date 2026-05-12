@@ -304,7 +304,7 @@ export default function InvoiceDetailScreen() {
           await load()
         }
         if (json.duplicate !== true) {
-          void notifyExpoEvent({ kind: 'invoice', invoiceId: id, event: 'received' })
+          void notifyExpoEvent({ kind: 'invoice', invoiceId: id, event: 'receipt_confirmed' })
         }
       } catch (e) {
         Alert.alert('Receipt', e instanceof Error ? e.message : 'Something went wrong.')

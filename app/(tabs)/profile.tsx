@@ -1910,6 +1910,20 @@ export default function ProfileScreen() {
                               thumbColor={notif.pushInvoicePaid ? '#FFDC00' : '#888'}
                             />
                           </View>
+                          <View style={styles.notifyBlock}>
+                            <View style={styles.notifyBlockText}>
+                              <Text style={styles.notifyBlockTitle}>Client confirmed receipt</Text>
+                              <Text style={styles.notifyBlockSub}>
+                                When a client acknowledges your invoice before paying (CREA Pay).
+                              </Text>
+                            </View>
+                            <Switch
+                              value={notif.pushInvoiceReceiptConfirmed}
+                              onValueChange={(v) => setNotif((n) => ({ ...n, pushInvoiceReceiptConfirmed: v }))}
+                              trackColor={{ false: '#333', true: 'rgba(255,220,0,0.35)' }}
+                              thumbColor={notif.pushInvoiceReceiptConfirmed ? '#FFDC00' : '#888'}
+                            />
+                          </View>
                         </>
                       ) : null}
                       {company ? (

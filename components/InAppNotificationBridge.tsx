@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  Alert,
   Animated,
   AppState,
   Platform,
@@ -29,6 +30,7 @@ export function InAppNotificationBridge() {
   const [banner, setBanner] = useState<Banner | null>(null)
   const opacity = useRef(new Animated.Value(0)).current
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const receiptConfirmedDedupeRef = useRef(new Set<string>())
 
   const showBanner = (b: Banner, ms = 5200) => {
     if (hideTimer.current) clearTimeout(hideTimer.current)
@@ -115,16 +117,56 @@ export function InAppNotificationBridge() {
           (payload) => {
             if (AppState.currentState !== 'active' || !uid) return
             const row = payload.new as Record<string, unknown>
+            const oldRow =
+              typeof payload.old === 'object' && payload.old !== null
+                ? (payload.old as Record<string, unknown>)
+                : {}
+
+            const invId = typeof row.id === 'string' ? row.id : ''
+            if (!invId || String(row.freelancer_id) !== uid) return
+
             const st = String(row.status ?? '').toLowerCase()
-            if (st !== 'paid') return
-            if (String(row.freelancer_id) !== uid) return
+            if (st === 'paid') {
+              invalidateAlertsBadge()
+              showBanner({
+                id: `inv-paid-${invId}`,
+                title: 'Invoice paid',
+                body: String(row.title ?? row.invoice_number ?? 'Payment received'),
+                onPress: () => router.push(`/(tabs)/invoices/${invId}`),
+              })
+              return
+            }
+
+            const newRecvRaw = row.received_at != null ? String(row.received_at).trim() : ''
+            if (!newRecvRaw) return
+
+            let oldHadReceipt = false
+            if ('received_at' in oldRow && oldRow.received_at != null) {
+              oldHadReceipt = String(oldRow.received_at).trim().length > 0
+            }
+            if (oldHadReceipt) return
+
+            const dedupeKey = `${invId}:${newRecvRaw}`
+            const bag = receiptConfirmedDedupeRef.current
+            if (bag.has(dedupeKey)) return
+            if (bag.size > 128) {
+              const stale = bag.values().next().value as string | undefined
+              if (stale) bag.delete(stale)
+            }
+            bag.add(dedupeKey)
+
             invalidateAlertsBadge()
-            showBanner({
-              id: `inv-paid-${String(row.id)}`,
-              title: 'Invoice paid',
-              body: String(row.title ?? row.invoice_number ?? 'Payment received'),
-              onPress: () => router.push(`/(tabs)/invoices/${String(row.id)}`),
-            })
+            const lab = String(row.invoice_project_title ?? row.title ?? row.invoice_number ?? 'Invoice').trim()
+            Alert.alert(
+              'Invoice receipt confirmed',
+              lab
+                ? `Your client confirmed receipt of «${lab}». They can continue with CREA Pay.`
+                : 'Your client confirmed receipt of your invoice.',
+              [
+                { text: 'View invoice', onPress: () => router.push(`/(tabs)/invoices/${invId}`) },
+                { text: 'OK', style: 'cancel' },
+              ]
+            )
           }
         )
         .on(

@@ -14,6 +14,8 @@ type NotifSettings = {
   pushNewApplication?: boolean
   pushInvoiceReceived?: boolean
   pushInvoicePaid?: boolean
+  /** Freelancer; default-on when omitted. */
+  pushInvoiceReceiptConfirmed?: boolean
   pushProjectChat?: boolean
   pushJobMatch?: boolean
   expoPushToken?: string | null
@@ -168,11 +170,18 @@ Deno.serve(async (req) => {
   if (kind === 'invoice') {
     const invoiceId = typeof body.invoiceId === 'string' ? body.invoiceId.trim() : ''
     const event = typeof body.event === 'string' ? body.event.trim() : ''
-    if (!invoiceId || (event !== 'received' && event !== 'paid')) {
-      return new Response(JSON.stringify({ error: 'invoiceId and event (received|paid) required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    const invoiceEventsOk = ['received', 'paid', 'receipt_confirmed'] as const
+    if (
+      !invoiceId ||
+      !invoiceEventsOk.includes(event as (typeof invoiceEventsOk)[number])
+    ) {
+      return new Response(
+        JSON.stringify({ error: 'invoiceId and event (received|paid|receipt_confirmed) required' }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      )
     }
     const { data: inv } = await admin
       .from('invoices')
@@ -205,7 +214,31 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
-    // paid → notify freelancer
+
+    /** Company confirms on-platform receipt (sets `received_at`); freelancer gets transparency before payment. */
+    if (event === 'receipt_confirmed') {
+      if (inv.company_id !== user.id) {
+        return new Response(JSON.stringify({ error: 'Forbidden' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const label = String(inv.invoice_number ?? inv.title ?? 'Invoice').trim() || 'Invoice'
+      const res = await sendExpoPush({
+        recipientId: inv.freelancer_id as string,
+        admin,
+        title: 'Invoice receipt confirmed',
+        body: `${label} — your client confirmed receipt on CREA.`,
+        data: { type: 'invoice', invoiceId, event: 'receipt_confirmed' },
+        allow: (s) => s.pushInvoiceReceiptConfirmed !== false,
+      })
+      return new Response(JSON.stringify(res), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    /** paid → notify freelancer */
     if (inv.company_id !== user.id) {
       return new Response(JSON.stringify({ error: 'Forbidden' }), {
         status: 403,

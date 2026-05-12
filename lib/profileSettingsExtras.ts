@@ -23,6 +23,8 @@ export type NotificationSettings = {
   pushJobMatch: boolean
   pushMessage: boolean
   pushInvoicePaid: boolean
+  /** Freelancer: client confirmed invoice receipt before paying (CREA Pay). */
+  pushInvoiceReceiptConfirmed: boolean
   pushNewApplication: boolean
   pushInvoiceReceived: boolean
   /** Project crew chat (project_messages), not DMs */
@@ -41,6 +43,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   pushJobMatch: true,
   pushMessage: true,
   pushInvoicePaid: true,
+  pushInvoiceReceiptConfirmed: true,
   pushNewApplication: true,
   pushInvoiceReceived: true,
   pushProjectChat: true,
@@ -71,6 +74,9 @@ export function parseNotificationSettings(raw: unknown): NotificationSettings {
     pushJobMatch: Boolean(o.pushJobMatch ?? DEFAULT_NOTIFICATION_SETTINGS.pushJobMatch),
     pushMessage: Boolean(o.pushMessage ?? DEFAULT_NOTIFICATION_SETTINGS.pushMessage),
     pushInvoicePaid: Boolean(o.pushInvoicePaid ?? DEFAULT_NOTIFICATION_SETTINGS.pushInvoicePaid),
+    pushInvoiceReceiptConfirmed: Boolean(
+      o.pushInvoiceReceiptConfirmed ?? DEFAULT_NOTIFICATION_SETTINGS.pushInvoiceReceiptConfirmed
+    ),
     pushNewApplication: Boolean(
       o.pushNewApplication ?? DEFAULT_NOTIFICATION_SETTINGS.pushNewApplication
     ),
