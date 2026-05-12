@@ -10,4 +10,7 @@ if [[ -z "$REF" ]]; then
   echo "Set SUPABASE_PROJECT_REF or add EXPO_PUBLIC_SUPABASE_URL to .env.local"
   exit 1
 fi
-exec npx supabase functions deploy notify-message-push --project-ref "$REF"
+for fn in notify-message-push notify-expo-event; do
+  echo "Deploying $fn ..."
+  npx supabase functions deploy "$fn" --project-ref "$REF" --use-api --yes
+done
