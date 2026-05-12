@@ -35,7 +35,12 @@ export default function RootLayout() {
   const stripePublishableKey = (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim()
   return (
     <GestureHandlerRootView style={styles.root}>
-      <StripeProvider publishableKey={stripePublishableKey} merchantIdentifier="merchant.de.creaservices.app">
+      {/* urlScheme matches app.json `scheme` — iOS Payment Sheet / 3DS return to app */}
+      <StripeProvider
+        publishableKey={stripePublishableKey}
+        merchantIdentifier="merchant.de.creaservices.app"
+        urlScheme="crea"
+      >
         <AuthDeepLinkBridge />
         {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
         <StatusBar style="light" backgroundColor="#0a0a0a" />

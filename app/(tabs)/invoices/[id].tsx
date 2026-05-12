@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
 import { ChevronLeft } from 'lucide-react-native'
-import { useStripe } from '@stripe/stripe-react-native'
+import { useStripe, PlatformPay } from '@stripe/stripe-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isCeoProfile, resolveAppRole } from '@/lib/profileRole'
@@ -34,6 +34,9 @@ import {
 } from '@/lib/invoiceFormatting'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
+
+/** Matches StripeProvider urlScheme (`crea` in app.json); required on iOS for redirect-capable Payment Sheet methods / 3DS. */
+const STRIPE_IOS_RETURN_URL = 'crea://stripe-redirect'
 
 type InvoiceRecord = Record<string, unknown> & { id: string; status?: string }
 
@@ -72,7 +75,13 @@ function derivedInvoiceTitle(row: InvoiceRecord | null): string {
 }
 
 export default function InvoiceDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const params = useLocalSearchParams<{ id?: string | string[] }>()
+  const id =
+    typeof params.id === 'string'
+      ? params.id
+      : Array.isArray(params.id) && params.id[0]
+        ? params.id[0]
+        : undefined
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [invoice, setInvoice] = useState<InvoiceRecord | null>(null)
@@ -80,12 +89,14 @@ export default function InvoiceDetailScreen() {
   const [viewerRole, setViewerRole] = useState<'company' | 'freelancer' | 'ceo' | null>(null)
   const [statusBusy, setStatusBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
+  const [payBusy, setPayBusy] = useState(false)
   const [paymentSyncPending, setPaymentSyncPending] = useState(false)
   const [paymentSyncTimedOut, setPaymentSyncTimedOut] = useState(false)
   const [lastPaymentCheckAt, setLastPaymentCheckAt] = useState<Date | null>(null)
   const pollAttemptsRef = useRef(0)
   const MAX_PAYMENT_SYNC_POLLS = 20
   const { initPaymentSheet, presentPaymentSheet, isPlatformPaySupported, confirmPlatformPayPayment } = useStripe()
+  type PlatformPaySupportArg = Parameters<typeof isPlatformPaySupported>[0]
 
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
@@ -306,19 +317,24 @@ export default function InvoiceDetailScreen() {
   const openCreaPay = () => {
     if (!id || typeof id !== 'string') return
     void (async () => {
+      setPayBusy(true)
       const pk = (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim()
-      if (!pk) {
-        Alert.alert(
-          'Stripe not configured',
-          'Add EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY to crea-app/.env.local (your pk_live_… from Stripe), restart Expo (stop + npx expo start), then try again. Opening browser checkout instead…'
-        )
-        startCheckout(false)
-        return
-      }
       try {
+        if (!pk) {
+          Alert.alert(
+            'Stripe not configured',
+            'Add EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY to crea-app/.env.local (your pk_live_… from Stripe), restart Expo (stop + npx expo start --clear), then try again. Opening browser checkout instead…'
+          )
+          startCheckout(false)
+          return
+        }
+
         const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
         if (!base) {
-          startCheckout(false)
+          Alert.alert(
+            'Missing CREA web URL',
+            'Set EXPO_PUBLIC_CREA_WEB_URL in crea-app/.env.local (e.g. https://www.creaservices.de), restart Expo with npx expo start --clear.'
+          )
           return
         }
         const {
@@ -356,12 +372,16 @@ export default function InvoiceDetailScreen() {
           return
         }
 
+        const appleOk =
+          Platform.OS === 'ios' &&
+          (await isPlatformPaySupported({
+            applePay: { merchantCountryCode: 'DE' },
+          } as PlatformPaySupportArg))
         const init = await initPaymentSheet({
           merchantDisplayName: 'CREA',
           paymentIntentClientSecret: createJson.clientSecret,
-          applePay: {
-            merchantCountryCode: 'DE',
-          },
+          ...(Platform.OS === 'ios' ? { returnURL: STRIPE_IOS_RETURN_URL } : {}),
+          ...(appleOk ? { applePay: { merchantCountryCode: 'DE' } } : {}),
           defaultBillingDetails: createJson.customerName
             ? {
                 name: createJson.customerName,
@@ -397,6 +417,8 @@ export default function InvoiceDetailScreen() {
           e instanceof Error ? e.message : 'Something went wrong. Trying browser checkout…'
         )
         startCheckout(false)
+      } finally {
+        setPayBusy(false)
       }
     })()
   }
@@ -404,6 +426,8 @@ export default function InvoiceDetailScreen() {
   const openApplePayQuick = () => {
     if (!id || typeof id !== 'string') return
     void (async () => {
+      setPayBusy(true)
+      try {
       const pk = (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim()
       if (!pk) {
         Alert.alert(
@@ -456,7 +480,9 @@ export default function InvoiceDetailScreen() {
           return
         }
 
-        const platformSupported = await isPlatformPaySupported({ applePay: { merchantCountryCode: 'DE' } })
+        const platformSupported = await isPlatformPaySupported({
+          applePay: { merchantCountryCode: 'DE' },
+        } as PlatformPaySupportArg)
         if (!platformSupported) {
           const hint =
             Platform.OS === 'ios'
@@ -478,7 +504,7 @@ export default function InvoiceDetailScreen() {
           applePay: {
             merchantCountryCode: 'DE',
             currencyCode: (createJson.currency || 'EUR').toUpperCase(),
-            cartItems: [{ label: 'CREA invoice', amount, paymentType: 'Immediate' }],
+            cartItems: [{ label: 'CREA invoice', amount, paymentType: PlatformPay.PaymentType.Immediate }],
           },
         })
         if (confirm.error) {
@@ -500,6 +526,9 @@ export default function InvoiceDetailScreen() {
       } catch (e) {
         Alert.alert('Apple Pay', e instanceof Error ? e.message : 'Something went wrong. Trying browser checkout…')
         startCheckout(true)
+      }
+      } finally {
+        setPayBusy(false)
       }
     })()
   }
@@ -590,7 +619,7 @@ export default function InvoiceDetailScreen() {
     )
   }
 
-  const status = String(invoice.status ?? '')
+  const status = String(invoice.status ?? '').toLowerCase()
   const sb = statusBadgeFor(statusVariant(status))
   const invoiceNumber = derivedInvoiceNumber(invoice)
   const invoiceTitle = derivedInvoiceTitle(invoice)
@@ -662,21 +691,26 @@ export default function InvoiceDetailScreen() {
             {(status === 'pending' || status === 'overdue') && (
               <>
                 <TouchableOpacity
-                  style={[styles.actionBtnPrimary, statusBusy && styles.dim]}
-                  disabled={statusBusy}
+                  style={[styles.actionBtnPrimary, (payBusy || statusBusy) && styles.dim]}
+                  disabled={payBusy || statusBusy}
                   onPress={openCreaPay}
                 >
-                  <Text style={styles.actionBtnPrimaryText}>Pay now (recommended)</Text>
+                  {payBusy ? (
+                    <ActivityIndicator color="#0a0a0a" />
+                  ) : (
+                    <Text style={styles.actionBtnPrimaryText}>Pay now (recommended)</Text>
+                  )}
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.actionBtn, statusBusy && styles.dim]}
-                  disabled={statusBusy}
+                  style={[styles.actionBtn, (payBusy || statusBusy) && styles.dim]}
+                  disabled={payBusy || statusBusy}
                   onPress={openApplePayQuick}
                 >
                   <Text style={styles.actionBtnText}>Quick pay with Apple Pay</Text>
                 </TouchableOpacity>
                 <Text style={styles.flowHint}>
-                  Recommended opens full CREA Pay with payment method selection (incl. company cards).
+                  Recommended opens full CREA Pay with payment method selection (incl. company cards). On the iOS
+                  Simulator, Apple Pay is usually unavailable—use Pay now or browser checkout.
                 </Text>
                 {paymentSyncPending ? (
                   <Text style={styles.syncHint}>Waiting for CREA Pay confirmation…</Text>
