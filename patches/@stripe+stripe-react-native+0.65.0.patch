@@ -1,0 +1,44 @@
+diff --git a/node_modules/@stripe/stripe-react-native/src/components/PaymentMethodMessagingElement.tsx b/node_modules/@stripe/stripe-react-native/src/components/PaymentMethodMessagingElement.tsx
+index 1743736..d138621 100644
+--- a/node_modules/@stripe/stripe-react-native/src/components/PaymentMethodMessagingElement.tsx
++++ b/node_modules/@stripe/stripe-react-native/src/components/PaymentMethodMessagingElement.tsx
+@@ -1,4 +1,4 @@
+-import React, { forwardRef, useEffect, useRef, useState } from 'react';
++import React, { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
+ import {
+   AccessibilityProps,
+   HostComponent,
+@@ -51,10 +51,23 @@ export interface Props extends AccessibilityProps {
+  * @category ReactComponents
+  */
+ export const PaymentMethodMessagingElement = forwardRef<any, Props>(
+-  ({ appearance, configuration, onStateChange, ...props }) => {
++  ({ appearance, configuration, onStateChange, ...props }, ref) => {
+     const viewRef =
+       useRef<React.ComponentRef<HostComponent<NativeProps>>>(null);
+ 
++    const setHostRef = useCallback(
++      (node: React.ComponentRef<HostComponent<NativeProps>> | null) => {
++        viewRef.current = node;
++        if (ref == null) return;
++        if (typeof ref === 'function') {
++          ref(node);
++        } else {
++          (ref as React.MutableRefObject<typeof node | null>).current = node;
++        }
++      },
++      [ref]
++    );
++
+     const [height, setHeight] = useState<number | undefined>();
+ 
+     useEffect(() => {
+@@ -102,7 +115,7 @@ export const PaymentMethodMessagingElement = forwardRef<any, Props>(
+         style={[{ width: '100%', height: height }]}
+         configuration={configuration}
+         {...props}
+-        ref={viewRef}
++        ref={setHostRef}
+       />
+     );
+   }

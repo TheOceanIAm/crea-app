@@ -57,6 +57,7 @@ import { registerForExpoPushTokenAsync } from '@/lib/pushNotifications'
 import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
 import { resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { postTrialPlan } from '@/lib/trialPlanApi'
+import { openCreaServicesStripeUrl } from '@/lib/stripeWebCheckout'
 
 const SUPPORT_MAIL = 'mailto:support@crea.app?subject=CREA%20App%20Support'
 const TRIAL_END_LABEL = 'June 1, 2026'
@@ -224,6 +225,8 @@ export default function ProfileScreen() {
 
   const [subscriptionTier, setSubscriptionTier] = useState('starter')
   const [switchingTrialPlan, setSwitchingTrialPlan] = useState(false)
+  const [stripeCheckoutBusy, setStripeCheckoutBusy] = useState(false)
+  const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null)
 
   const [dayRate, setDayRate] = useState('')
   const [halfDayRate, setHalfDayRate] = useState('')
@@ -274,12 +277,15 @@ export default function ProfileScreen() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       setAuthUserId(null)
+      setStripeCustomerId(null)
       setLoading(false)
       router.replace('/login')
       return
     }
     setEmail(user.email ?? '')
     setAuthUserId(user.id)
+    const cid = user.user_metadata?.stripe_customer_id
+    setStripeCustomerId(typeof cid === 'string' && cid.trim() ? cid.trim() : null)
 
     const { data, error } = await supabase
       .from('profiles')
@@ -504,6 +510,67 @@ export default function ProfileScreen() {
       }
     },
     [load, switchingTrialPlan]
+  )
+
+  const openStripeCustomerPortal = useCallback(async () => {
+    if (stripeCheckoutBusy || !stripeCustomerId) return
+    setStripeCheckoutBusy(true)
+    try {
+      const returnPath = company ? '/settings/company' : '/settings/freelancer'
+      const ok = await openCreaServicesStripeUrl({
+        apiPath: '/api/stripe/portal',
+        body: { returnPath },
+      })
+      if (ok) {
+        Alert.alert(
+          'Billing portal',
+          'When you are done in Stripe, return to the app. Open Plan again to refresh if your subscription changed.'
+        )
+      }
+    } finally {
+      setStripeCheckoutBusy(false)
+    }
+  }, [stripeCheckoutBusy, stripeCustomerId, company])
+
+  const startFreelancerPaidCheckout = useCallback(
+    async (plan: 'starter' | 'pro') => {
+      if (stripeCheckoutBusy) return
+      setStripeCheckoutBusy(true)
+      try {
+        const ok = await openCreaServicesStripeUrl({ apiPath: '/api/stripe/checkout', body: { plan } })
+        if (ok) {
+          Alert.alert(
+            'Stripe checkout',
+            'Complete payment in the browser. Apple Pay and cards are offered when supported. Then return here and open Plan again to refresh.'
+          )
+        }
+      } finally {
+        setStripeCheckoutBusy(false)
+      }
+    },
+    [stripeCheckoutBusy]
+  )
+
+  const startCompanyPaidCheckout = useCallback(
+    async (company_plan: 'studio' | 'agency') => {
+      if (stripeCheckoutBusy) return
+      setStripeCheckoutBusy(true)
+      try {
+        const ok = await openCreaServicesStripeUrl({
+          apiPath: '/api/stripe/checkout-company',
+          body: { company_plan },
+        })
+        if (ok) {
+          Alert.alert(
+            'Stripe checkout',
+            'Complete payment in the browser. Apple Pay and cards are offered when supported. Then return here and open Plan again to refresh.'
+          )
+        }
+      } finally {
+        setStripeCheckoutBusy(false)
+      }
+    },
+    [stripeCheckoutBusy]
   )
 
   const displayLetter = useMemo(
@@ -1552,8 +1619,9 @@ export default function ProfileScreen() {
               <View style={styles.sectionCard}>
                 <Text style={styles.cardTitle}>Plan &amp; billing</Text>
                 <Text style={styles.cardSubtitle}>
-                  Subscriptions are managed on creaservices.de. After you subscribe there, you can update payment details
-                  or change plans from Plan &amp; billing.
+                  Start a paid plan from this screen (Stripe Checkout in the browser) or on creaservices.de. With an
+                  active Stripe subscription, use Manage subscription & billing or Plan &amp; billing on the website to
+                  change payment method or cancel.
                 </Text>
 
                 <View style={styles.currentPlanBox}>
@@ -1603,6 +1671,71 @@ export default function ProfileScreen() {
                 >
                   <Text style={styles.secondaryBtnText}>View comparison</Text>
                 </TouchableOpacity>
+
+                {!ceo && !workspacePlan ? (
+                  <View style={styles.inAppPayBlock}>
+                    <Text style={styles.inAppPayTitle}>Subscribe from the app</Text>
+                    <Text style={styles.inAppPaySub}>
+                      Secure Stripe Checkout in the browser — Apple Pay and cards when your device and region support
+                      them. CREA Pay invoice payments use native Stripe / Apple Pay on the invoice screen.
+                    </Text>
+                    {stripeCustomerId ? (
+                      <TouchableOpacity
+                        style={[styles.secondaryBtn, stripeCheckoutBusy && styles.btnDisabled]}
+                        disabled={stripeCheckoutBusy}
+                        onPress={() => void openStripeCustomerPortal()}
+                      >
+                        <Text style={styles.secondaryBtnText}>
+                          {stripeCheckoutBusy ? 'Opening…' : 'Manage subscription & billing'}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {freelancer && !stripeCustomerId ? (
+                      <View style={styles.inAppPayRow}>
+                        <TouchableOpacity
+                          style={[styles.secondaryBtn, stripeCheckoutBusy && styles.btnDisabled]}
+                          disabled={stripeCheckoutBusy}
+                          onPress={() => void startFreelancerPaidCheckout('starter')}
+                        >
+                          <Text style={styles.secondaryBtnText}>
+                            {stripeCheckoutBusy ? 'Please wait…' : 'Subscribe — Starter €9/mo'}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.secondaryBtn, stripeCheckoutBusy && styles.btnDisabled]}
+                          disabled={stripeCheckoutBusy}
+                          onPress={() => void startFreelancerPaidCheckout('pro')}
+                        >
+                          <Text style={styles.secondaryBtnText}>
+                            {stripeCheckoutBusy ? 'Please wait…' : 'Subscribe — Pro €19/mo'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                    {company && !stripeCustomerId ? (
+                      <View style={styles.inAppPayRow}>
+                        <TouchableOpacity
+                          style={[styles.secondaryBtn, stripeCheckoutBusy && styles.btnDisabled]}
+                          disabled={stripeCheckoutBusy}
+                          onPress={() => void startCompanyPaidCheckout('studio')}
+                        >
+                          <Text style={styles.secondaryBtnText}>
+                            {stripeCheckoutBusy ? 'Please wait…' : 'Subscribe — Studio €89/mo'}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.secondaryBtn, stripeCheckoutBusy && styles.btnDisabled]}
+                          disabled={stripeCheckoutBusy}
+                          onPress={() => void startCompanyPaidCheckout('agency')}
+                        >
+                          <Text style={styles.secondaryBtnText}>
+                            {stripeCheckoutBusy ? 'Please wait…' : 'Subscribe — Agency €129/mo'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
 
                 {company ? (
                   <>
@@ -2209,6 +2342,16 @@ const styles = StyleSheet.create({
   },
   secondaryBtnText: { fontSize: 15, fontWeight: '700', color: '#FFDC00' },
   btnDisabled: { opacity: 0.55 },
+  inAppPayBlock: { marginTop: 20, gap: 0 },
+  inAppPayTitle: { fontSize: 14, fontWeight: '800', color: '#ffffff', marginTop: 4 },
+  inAppPaySub: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.42)',
+    marginTop: 8,
+    marginBottom: 4,
+    lineHeight: 18,
+  },
+  inAppPayRow: { marginTop: 4, gap: 0 },
   primaryBtnText: { fontSize: 16, fontWeight: '800', color: '#0a0a0a' },
   placeholderBox: {
     marginTop: 20,

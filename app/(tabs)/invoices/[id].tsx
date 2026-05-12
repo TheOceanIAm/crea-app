@@ -9,6 +9,7 @@ import {
   Alert,
   AppState,
   Linking,
+  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
@@ -236,12 +237,12 @@ export default function InvoiceDetailScreen() {
   const startCheckout = (preferApplePay: boolean) => {
     if (!id || typeof id !== 'string') return
     void (async () => {
-      const fallbackOpen = () => {
-        const ok = preferApplePay ? openInvoiceApplePayOnWeb(id) : openInvoicePayOnWeb(id)
+      const fallbackOpen = async (): Promise<boolean> => {
+        const ok = preferApplePay ? await openInvoiceApplePayOnWeb(id) : await openInvoicePayOnWeb(id)
         if (!ok) {
           Alert.alert(
             'Payment unavailable',
-            'Could not start payment flow. Please check EXPO_PUBLIC_CREA_WEB_URL / EXPO_PUBLIC_CREA_PAY_URL.'
+            'Could not open the payment page (browser). Check EXPO_PUBLIC_CREA_WEB_URL, or try again.'
           )
           return false
         }
@@ -254,7 +255,7 @@ export default function InvoiceDetailScreen() {
       try {
         const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
         if (!base) {
-          fallbackOpen()
+          await fallbackOpen()
           return
         }
         const {
@@ -262,7 +263,7 @@ export default function InvoiceDetailScreen() {
         } = await supabase.auth.getSession()
         const token = session?.access_token
         if (!token) {
-          fallbackOpen()
+          await fallbackOpen()
           return
         }
         const res = await fetch(`${base}/api/stripe/crea-pay/checkout`, {
@@ -278,18 +279,24 @@ export default function InvoiceDetailScreen() {
         })
         const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string }
         if (!res.ok || !json.url) {
-          // Keep the button useful even when direct API checkout fails.
-          if (!fallbackOpen()) {
-            Alert.alert('Payment failed', json.error || 'Could not start Stripe checkout.')
+          if (!(await fallbackOpen())) {
+            Alert.alert('Payment failed', json.error || `Could not start Stripe checkout (${res.status}).`)
           }
           return
         }
-        await Linking.openURL(json.url)
-        setPaymentSyncPending(true)
-        setPaymentSyncTimedOut(false)
-        pollAttemptsRef.current = 0
+        try {
+          await Linking.openURL(json.url)
+          setPaymentSyncPending(true)
+          setPaymentSyncTimedOut(false)
+          pollAttemptsRef.current = 0
+        } catch (linkErr) {
+          Alert.alert(
+            'Could not open Stripe',
+            linkErr instanceof Error ? linkErr.message : 'Safari/checkout did not open. Try again or pay on creaservices.de in your browser.'
+          )
+        }
       } catch (e) {
-        if (!fallbackOpen()) {
+        if (!(await fallbackOpen())) {
           Alert.alert('Payment failed', e instanceof Error ? e.message : 'Could not open Stripe checkout.')
         }
       }
@@ -299,6 +306,15 @@ export default function InvoiceDetailScreen() {
   const openCreaPay = () => {
     if (!id || typeof id !== 'string') return
     void (async () => {
+      const pk = (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim()
+      if (!pk) {
+        Alert.alert(
+          'Stripe not configured',
+          'Add EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY to crea-app/.env.local (your pk_live_… from Stripe), restart Expo (stop + npx expo start), then try again. Opening browser checkout instead…'
+        )
+        startCheckout(false)
+        return
+      }
       try {
         const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
         if (!base) {
@@ -327,8 +343,15 @@ export default function InvoiceDetailScreen() {
           amountCents?: number
           currency?: string
           error?: string
+          code?: string
         }
         if (!createRes.ok || !createJson.clientSecret) {
+          Alert.alert(
+            'CREA Pay (app)',
+            createJson.error?.trim()
+              ? createJson.error
+              : `Could not start payment in the app (${createRes.status}). Opening browser checkout if possible…`
+          )
           startCheckout(false)
           return
         }
@@ -346,6 +369,10 @@ export default function InvoiceDetailScreen() {
             : undefined,
         })
         if (init.error) {
+          Alert.alert(
+            'Stripe Payment Sheet',
+            `${init.error.message ?? 'Could not initialize payment sheet.'}\n\nOpening browser checkout instead…`
+          )
           startCheckout(false)
           return
         }
@@ -354,13 +381,21 @@ export default function InvoiceDetailScreen() {
         if (present.error) {
           // User cancel should not throw a hard error.
           if (present.error.code && String(present.error.code).toLowerCase().includes('canceled')) return
+          Alert.alert(
+            'Payment',
+            `${present.error.message ?? 'Payment sheet closed.'}\n\nYou can try again or use browser checkout.`
+          )
           startCheckout(false)
           return
         }
         setPaymentSyncPending(true)
         setPaymentSyncTimedOut(false)
         pollAttemptsRef.current = 0
-      } catch {
+      } catch (e) {
+        Alert.alert(
+          'CREA Pay',
+          e instanceof Error ? e.message : 'Something went wrong. Trying browser checkout…'
+        )
         startCheckout(false)
       }
     })()
@@ -369,10 +404,23 @@ export default function InvoiceDetailScreen() {
   const openApplePayQuick = () => {
     if (!id || typeof id !== 'string') return
     void (async () => {
+      const pk = (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim()
+      if (!pk) {
+        Alert.alert(
+          'Stripe not configured',
+          'Apple Pay uses the same native Stripe setup as Pay now. Add EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY to .env.local and restart Expo. Opening browser checkout…'
+        )
+        startCheckout(true)
+        return
+      }
+
       try {
         const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
         if (!base) {
-          startCheckout(true)
+          Alert.alert(
+            'Configuration',
+            'Set EXPO_PUBLIC_CREA_WEB_URL so we can reach creaservices.de for CREA Pay.'
+          )
           return
         }
         const {
@@ -398,13 +446,30 @@ export default function InvoiceDetailScreen() {
           error?: string
         }
         if (!createRes.ok || !createJson.clientSecret) {
+          Alert.alert(
+            'CREA Pay (Apple Pay)',
+            createJson.error?.trim()
+              ? createJson.error
+              : `Could not start Apple Pay (${createRes.status}). Trying browser checkout…`
+          )
           startCheckout(true)
           return
         }
 
         const platformSupported = await isPlatformPaySupported({ applePay: { merchantCountryCode: 'DE' } })
         if (!platformSupported) {
-          openCreaPay()
+          const hint =
+            Platform.OS === 'ios'
+              ? 'The iOS Simulator usually has no usable Apple Wallet for Apple Pay. On a real iPhone, add a card to Wallet — or use Pay now below for cards.'
+              : 'Apple Pay is not supported on this device. Use Pay now (card payment sheet) or checkout in your browser.'
+          Alert.alert('Apple Pay not available', `${hint}`, [
+            { text: 'Use card sheet', style: 'default', onPress: () => openCreaPay() },
+            {
+              text: 'Browser checkout',
+              style: 'cancel',
+              onPress: () => startCheckout(false),
+            },
+          ])
           return
         }
 
@@ -418,14 +483,22 @@ export default function InvoiceDetailScreen() {
         })
         if (confirm.error) {
           if (confirm.error.code && String(confirm.error.code).toLowerCase().includes('canceled')) return
-          openCreaPay()
+          Alert.alert(
+            confirm.error.localizedMessage || 'Apple Pay',
+            confirm.error.message ?? 'Apple Pay could not finish. You can pay with card or in the browser.',
+            [
+              { text: 'Card sheet', onPress: () => openCreaPay() },
+              { text: 'Browser', style: 'cancel', onPress: () => startCheckout(false) },
+            ]
+          )
           return
         }
 
         setPaymentSyncPending(true)
         setPaymentSyncTimedOut(false)
         pollAttemptsRef.current = 0
-      } catch {
+      } catch (e) {
+        Alert.alert('Apple Pay', e instanceof Error ? e.message : 'Something went wrong. Trying browser checkout…')
         startCheckout(true)
       }
     })()

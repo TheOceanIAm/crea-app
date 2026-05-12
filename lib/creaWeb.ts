@@ -24,7 +24,7 @@ export function getCreaPayBaseUrl(): string {
 }
 
 /** Opens CREA Pay for a specific invoice in the web app. */
-export function openInvoicePayOnWeb(invoiceId: string): boolean {
+export async function openInvoicePayOnWeb(invoiceId: string): Promise<boolean> {
   const payBase = getCreaPayBaseUrl()
   const webBase = getCreaWebBaseUrl()
   const target = payBase
@@ -33,12 +33,16 @@ export function openInvoicePayOnWeb(invoiceId: string): boolean {
       ? `${webBase}/invoices/${invoiceId}?pay=1`
       : ''
   if (!target) return false
-  Linking.openURL(target).catch(() => {})
-  return true
+  try {
+    await Linking.openURL(target)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Opens CREA Pay with Apple Pay preselection hint (handled by web if supported). */
-export function openInvoiceApplePayOnWeb(invoiceId: string): boolean {
+export async function openInvoiceApplePayOnWeb(invoiceId: string): Promise<boolean> {
   const payBase = getCreaPayBaseUrl()
   const webBase = getCreaWebBaseUrl()
   const target = payBase
@@ -47,6 +51,10 @@ export function openInvoiceApplePayOnWeb(invoiceId: string): boolean {
       ? `${webBase}/invoices/${invoiceId}?pay=1&method=apple_pay`
       : ''
   if (!target) return false
-  Linking.openURL(target).catch(() => {})
-  return true
+  try {
+    await Linking.openURL(target)
+    return true
+  } catch {
+    return false
+  }
 }
