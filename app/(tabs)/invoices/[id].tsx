@@ -40,6 +40,9 @@ import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
 const STRIPE_IOS_RETURN_URL = 'crea://stripe-redirect'
 
 const CREA_API_FETCH_MS = 38_000
+/** Hosted checkout creates a Stripe session server-side; cold starts + Stripe can exceed the default API budget. */
+const CREA_CHECKOUT_FETCH_MS = 95_000
+const CREA_CHECKOUT_RETRY_MS = 55_000
 const STRIPE_APPLE_PAY_CHECK_MS = 12_000
 const STRIPE_INIT_SHEET_MS = 45_000
 const STRIPE_PRESENT_SHEET_MS = 120_000
@@ -428,30 +431,38 @@ export default function InvoiceDetailScreen() {
         )
         return
       }
+      const checkoutInit: RequestInit = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          invoiceId: id,
+          paymentMethodHint: preferApplePay ? 'apple_pay' : 'card',
+        }),
+      }
+      const checkoutUrl = `${base}/api/stripe/crea-pay/checkout`
+
       let res: Response
       try {
-        res = await fetchWithTimeoutMs(
-          `${base}/api/stripe/crea-pay/checkout`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              invoiceId: id,
-              paymentMethodHint: preferApplePay ? 'apple_pay' : 'card',
-            }),
-          },
-          CREA_API_FETCH_MS
-        )
+        try {
+          res = await fetchWithTimeoutMs(checkoutUrl, checkoutInit, CREA_CHECKOUT_FETCH_MS)
+        } catch (firstErr) {
+          const abortedFirst =
+            firstErr instanceof Error && /aborted|abort/i.test(firstErr.message + (firstErr as Error).name)
+          if (!abortedFirst) throw firstErr
+          await new Promise((r) => setTimeout(r, 600))
+          res = await fetchWithTimeoutMs(checkoutUrl, checkoutInit, CREA_CHECKOUT_RETRY_MS)
+        }
       } catch (fe) {
         const aborted =
           fe instanceof Error && /aborted|abort/i.test(fe.message + (fe as Error).name)
         offerOpenInvoiceOnWebsite(
           'CREA Pay (checkout)',
           aborted
-            ? 'Request to CREA Pay timed out. Check your internet and that your EXPO_PUBLIC_CREA_WEB_URL is correct. We do not open the site automatically—you can open the invoice on the web after signing in there.'
+            ? 'The checkout request took too long (server cold start or slow network). Try Pay now again. If it keeps failing, check EXPO_PUBLIC_CREA_WEB_URL (e.g. https://www.creaservices.de) and your connection. You can open the invoice on the website after signing in there.'
             : fe instanceof Error
               ? fe.message
               : 'Network error.'
