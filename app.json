@@ -35,6 +35,7 @@
     },
     "plugins": [
       "./plugins/withFmtPodfileFix.js",
+      "./plugins/withStripeFabricCodegenFix.js",
       [
         "expo-splash-screen",
         {

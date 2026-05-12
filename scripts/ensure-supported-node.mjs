@@ -4,7 +4,7 @@ if (major >= 24) {
     `[crea-app] Node ${process.version} wird von Expo 52 nicht unterstützt (Fehler z. B. ERR_INVALID_PACKAGE_CONFIG).\n` +
       "Bitte Node 20 LTS nutzen, z. B.:\n" +
       "  source ~/.nvm/nvm.sh && nvm use\n" +
-      "Oder im Projektordner: npm start / npm run start:sim (lädt nvm und .nvmrc, falls nvm installiert ist)."
+      "Oder im Projektordner: npm start (Simulator + Metro) / npm run dev nur Metro (lädt nvm und .nvmrc, falls nvm installiert ist)."
   );
   process.exit(1);
 }
