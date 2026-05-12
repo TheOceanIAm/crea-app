@@ -40,7 +40,11 @@ async function sendExpoPush(opts: {
   const { data: profile } = await admin.from('profiles').select('notification_settings').eq('id', recipientId).maybeSingle()
   const settings = parseNotif(profile?.notification_settings)
   const rawTok = typeof settings.expoPushToken === 'string' ? settings.expoPushToken.trim() : ''
-  const pushToken = rawTok.length > 0 && rawTok.includes('ExponentPushToken') ? rawTok : null
+  const pushToken =
+    rawTok.length > 0 &&
+    (rawTok.includes('ExponentPushToken') || rawTok.includes('ExpoPushToken'))
+      ? rawTok
+      : null
 
   if (!settings.pushEnabled || !allow(settings) || !pushToken) {
     return { ok: true, skipped: 'push_disabled_or_no_token' }

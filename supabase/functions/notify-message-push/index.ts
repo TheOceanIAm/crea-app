@@ -156,7 +156,11 @@ Deno.serve(async (req) => {
 
   const settings = parseNotif(recipientProfile.notification_settings)
   const rawTok = typeof settings.expoPushToken === 'string' ? settings.expoPushToken.trim() : ''
-  const pushToken = rawTok.length > 0 && rawTok.includes('ExponentPushToken') ? rawTok : null
+  const pushToken =
+    rawTok.length > 0 &&
+    (rawTok.includes('ExponentPushToken') || rawTok.includes('ExpoPushToken'))
+      ? rawTok
+      : null
 
   if (!settings.pushEnabled || !settings.pushMessage || !pushToken) {
     return new Response(JSON.stringify({ skipped: true, reason: 'push_disabled_or_no_token' }), {

@@ -115,16 +115,62 @@ function num(v: unknown): number | null {
   return null
 }
 
+/** Matches crea-services PDF numbering (`invoiceNumberFromJobId`). */
+function invoiceNumberFromJobId(jobId: string | null | undefined): string | null {
+  const id = typeof jobId === 'string' ? jobId.trim() : ''
+  if (!id) return null
+  const slice = id.replace(/-/g, '').slice(0, 8).toUpperCase()
+  return slice.length ? `CR-${slice}` : null
+}
+
+function invoiceIdFallbackSegment(row: InvoiceRecord | null): string {
+  if (!row || row.id == null) return ''
+  const id = row.id
+  const s = typeof id === 'string' ? id : typeof id === 'number' ? String(id) : ''
+  return s.replace(/-/g, '').toUpperCase().slice(0, 8)
+}
+
+function summarizeRoleLines(raw: unknown): string | null {
+  if (!raw || !Array.isArray(raw)) return null
+  const labels: string[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const label =
+      typeof (item as { label?: unknown }).label === 'string'
+        ? (item as { label: string }).label.trim()
+        : ''
+    if (label) labels.push(label)
+  }
+  return labels.length ? labels.join(' · ') : null
+}
+
+async function attachJobTitleFromJob(row: InvoiceRecord): Promise<InvoiceRecord> {
+  const jid = str(row.job_id)
+  if (!jid?.trim()) return row
+  const already =
+    str(row.invoice_project_title)?.trim() ||
+    str(row.title)?.trim() ||
+    str(row.project_title)?.trim() ||
+    str(row.job_title)?.trim()
+  if (already) return row
+  const { data: jobRow } = await supabase.from('jobs').select('title').eq('id', jid).maybeSingle()
+  const jt = typeof jobRow?.title === 'string' ? jobRow.title.trim() : ''
+  return jt ? { ...row, job_title: jt } : row
+}
+
 function derivedInvoiceNumber(row: InvoiceRecord | null): string {
   if (!row) return '—'
   const explicit =
     str(row.invoice_number) ||
     str(row.invoice_no) ||
     str(row.number) ||
-    str(row.payment_reference)
+    str(row.payment_reference) ||
+    str(row.po_number)
   if (explicit && explicit.trim()) return explicit.trim()
-  const rawId = str(row.id)?.replace(/-/g, '').toUpperCase() ?? ''
-  return rawId ? `CR-${rawId.slice(0, 8)}` : '—'
+  const fromJob = invoiceNumberFromJobId(str(row.job_id))
+  if (fromJob) return fromJob
+  const seg = invoiceIdFallbackSegment(row)
+  return seg ? `CR-${seg}` : '—'
 }
 
 function derivedInvoiceTitle(row: InvoiceRecord | null): string {
@@ -195,6 +241,7 @@ export default function InvoiceDetailScreen() {
         if (d) row = d as InvoiceRecord
       }
       if (row) {
+        row = await attachJobTitleFromJob(row)
         setInvoice(row)
         setForbidden(false)
       } else {
@@ -228,7 +275,7 @@ export default function InvoiceDetailScreen() {
       setForbidden(true)
       setInvoice(null)
     } else {
-      setInvoice(row)
+      setInvoice(await attachJobTitleFromJob(row))
       setForbidden(false)
     }
     setLoading(false)
@@ -904,11 +951,18 @@ export default function InvoiceDetailScreen() {
   const receiptConfirmed = hasConfirmedReceipt(invoice)
   const creaPayReady = isLatest && receiptConfirmed
 
+  const descriptionDisplay =
+    str(invoice.description)?.trim() ||
+    str(invoice.invoice_payment_info)?.trim() ||
+    str(invoice.invoice_role_label)?.trim() ||
+    summarizeRoleLines(invoice.invoice_role_lines) ||
+    '—'
+
   const detailRows: { label: string; value: string }[] = [
     { label: 'Invoice no.', value: invoiceNumber },
     { label: 'Version', value: `v${versionNo}${isLatest ? ' (latest)' : ''}` },
     { label: 'Title', value: invoiceTitle },
-    { label: 'Description', value: str(invoice.description) || '—' },
+    { label: 'Description', value: descriptionDisplay },
     { label: 'Due date', value: formatDate(str(invoice.due_date)) },
     { label: 'Created', value: formatDateTime(str(invoice.created_at)) },
     { label: 'Updated', value: formatDateTime(str(invoice.updated_at)) },

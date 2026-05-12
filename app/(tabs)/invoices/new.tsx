@@ -193,7 +193,7 @@ export default function NewInvoiceScreen() {
         company_id: selectedCompany,
         freelancer_id: user.id,
         job_id: linkedJobId,
-        title: t,
+        invoice_project_title: t,
         amount: amt,
         currency: currency.trim().toUpperCase() || 'EUR',
         due_date: dueIso,
