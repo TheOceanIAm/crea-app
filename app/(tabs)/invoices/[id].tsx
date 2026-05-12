@@ -74,6 +74,11 @@ function derivedInvoiceTitle(row: InvoiceRecord | null): string {
   return t?.trim() || '—'
 }
 
+function hasConfirmedReceipt(inv: InvoiceRecord | null): boolean {
+  const r = inv ? str(inv.received_at) : null
+  return !!(r && r.trim())
+}
+
 export default function InvoiceDetailScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>()
   const id =
@@ -90,6 +95,7 @@ export default function InvoiceDetailScreen() {
   const [statusBusy, setStatusBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [payBusy, setPayBusy] = useState(false)
+  const [receivedBusy, setReceivedBusy] = useState(false)
   const [paymentSyncPending, setPaymentSyncPending] = useState(false)
   const [paymentSyncTimedOut, setPaymentSyncTimedOut] = useState(false)
   const [lastPaymentCheckAt, setLastPaymentCheckAt] = useState<Date | null>(null)
@@ -233,17 +239,80 @@ export default function InvoiceDetailScreen() {
     if (!id || typeof id !== 'string') return null
     const { data, error } = await supabase
       .from('invoices')
-      .select('status')
+      .select('status, received_at')
       .eq('id', id)
       .maybeSingle()
     if (error || !data) return null
-    const nextStatus = String((data as { status?: string }).status ?? '').toLowerCase() || null
-    if (nextStatus) {
-      setInvoice((prev) => (prev ? { ...prev, status: nextStatus } : prev))
-    }
+    const row = data as { status?: string; received_at?: unknown }
+    const nextStatus = String(row.status ?? '').toLowerCase() || null
+    const nextReceived = row.received_at != null ? String(row.received_at).trim() : ''
+    setInvoice((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        ...(nextStatus ? { status: nextStatus } : {}),
+        ...(nextReceived ? { received_at: nextReceived } : {}),
+      }
+    })
     setLastPaymentCheckAt(new Date())
     return nextStatus
   }, [id])
+
+  const markInvoiceReceived = () => {
+    if (!id || typeof id !== 'string') return
+    void (async () => {
+      setReceivedBusy(true)
+      try {
+        const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
+        if (!base) {
+          Alert.alert(
+            'Missing CREA web URL',
+            'Set EXPO_PUBLIC_CREA_WEB_URL in crea-app/.env.local, restart Expo with npx expo start --clear.'
+          )
+          return
+        }
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        const token = session?.access_token
+        if (!token) {
+          Alert.alert('Session expired', 'Please sign in again.')
+          return
+        }
+        const res = await fetch(`${base}/api/invoices/mark-received`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ invoiceId: id }),
+        })
+        const json = (await res.json().catch(() => ({}))) as {
+          error?: string
+          received_at?: string
+          duplicate?: boolean
+          ok?: boolean
+        }
+        if (!res.ok) {
+          Alert.alert('Could not confirm receipt', json.error?.trim() || `Request failed (${res.status}).`)
+          return
+        }
+        const ra = json.received_at?.trim()
+        if (ra) {
+          setInvoice((prev) => (prev ? { ...prev, received_at: ra } : prev))
+        } else {
+          await load()
+        }
+        if (json.duplicate !== true) {
+          void notifyExpoEvent({ kind: 'invoice', invoiceId: id, event: 'received' })
+        }
+      } catch (e) {
+        Alert.alert('Receipt', e instanceof Error ? e.message : 'Something went wrong.')
+      } finally {
+        setReceivedBusy(false)
+      }
+    })()
+  }
 
   const startCheckout = (preferApplePay: boolean) => {
     if (!id || typeof id !== 'string') return
@@ -625,6 +694,8 @@ export default function InvoiceDetailScreen() {
   const invoiceTitle = derivedInvoiceTitle(invoice)
   const versionNo = num(invoice.version_no) ?? 1
   const isLatest = invoice.is_latest !== false
+  const receiptConfirmed = hasConfirmedReceipt(invoice)
+  const creaPayReady = isLatest && receiptConfirmed
 
   const detailRows: { label: string; value: string }[] = [
     { label: 'Invoice no.', value: invoiceNumber },
@@ -634,6 +705,9 @@ export default function InvoiceDetailScreen() {
     { label: 'Due date', value: formatDate(str(invoice.due_date)) },
     { label: 'Created', value: formatDateTime(str(invoice.created_at)) },
     { label: 'Updated', value: formatDateTime(str(invoice.updated_at)) },
+    ...(receiptConfirmed
+      ? [{ label: 'Receipt confirmed', value: formatDateTime(str(invoice.received_at)) }]
+      : []),
   ].filter((row) => row.value !== '—' || ['Title', 'Description', 'Invoice no.'].includes(row.label))
 
   return (
@@ -690,9 +764,39 @@ export default function InvoiceDetailScreen() {
             )}
             {(status === 'pending' || status === 'overdue') && (
               <>
+                {isLatest && !receiptConfirmed ? (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.actionBtnPrimary, (receivedBusy || statusBusy) && styles.dim]}
+                      disabled={receivedBusy || statusBusy}
+                      onPress={markInvoiceReceived}
+                    >
+                      {receivedBusy ? (
+                        <ActivityIndicator color="#0a0a0a" />
+                      ) : (
+                        <Text style={styles.actionBtnPrimaryText}>Confirm receipt</Text>
+                      )}
+                    </TouchableOpacity>
+                    <Text style={styles.receiptHint}>
+                      Confirm on CREA that you received this invoice. CREA Pay card and Apple Pay unlock after this
+                      step (same rule as on the website).
+                    </Text>
+                  </>
+                ) : null}
+                {isLatest && receiptConfirmed ? (
+                  <Text style={styles.receiptOkHint}>Receipt confirmed — you can pay with CREA Pay below.</Text>
+                ) : null}
+                {!isLatest ? (
+                  <Text style={styles.receiptHint}>
+                    This is not the latest invoice version. Open the current version to confirm receipt and pay.
+                  </Text>
+                ) : null}
                 <TouchableOpacity
-                  style={[styles.actionBtnPrimary, (payBusy || statusBusy) && styles.dim]}
-                  disabled={payBusy || statusBusy}
+                  style={[
+                    styles.actionBtnPrimary,
+                    (payBusy || statusBusy || !creaPayReady) && styles.dim,
+                  ]}
+                  disabled={payBusy || statusBusy || !creaPayReady}
                   onPress={openCreaPay}
                 >
                   {payBusy ? (
@@ -702,8 +806,8 @@ export default function InvoiceDetailScreen() {
                   )}
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.actionBtn, (payBusy || statusBusy) && styles.dim]}
-                  disabled={payBusy || statusBusy}
+                  style={[styles.actionBtn, (payBusy || statusBusy || !creaPayReady) && styles.dim]}
+                  disabled={payBusy || statusBusy || !creaPayReady}
                   onPress={openApplePayQuick}
                 >
                   <Text style={styles.actionBtnText}>Quick pay with Apple Pay</Text>
@@ -859,4 +963,16 @@ const styles = StyleSheet.create({
   syncRefreshBtn: { alignSelf: 'flex-start', width: '100%' },
   syncMeta: { marginTop: 2, fontSize: 11, color: 'rgba(255,255,255,0.35)' },
   flowHint: { marginTop: -2, fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 18 },
+  receiptHint: {
+    marginTop: -4,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.55)',
+    lineHeight: 18,
+  },
+  receiptOkHint: {
+    fontSize: 12,
+    color: 'rgba(255,220,0,0.85)',
+    lineHeight: 18,
+    fontWeight: '600',
+  },
 })
