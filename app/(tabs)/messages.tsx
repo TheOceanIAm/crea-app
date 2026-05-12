@@ -5,7 +5,6 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   Image,
   RefreshControl,
   Alert,
@@ -20,6 +19,7 @@ import { loadDirectMessageInbox, type ConvoRow } from '@/lib/messagesInboxLoad'
 import { invalidateDmBadge } from '@/lib/invalidateDmBadge'
 import { deleteCache, getCache, setCache } from '@/lib/appCache'
 import { runTimed } from '@/lib/perfMarks'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 export default function MessagesScreen() {
   const router = useRouter()
@@ -180,9 +180,10 @@ export default function MessagesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
+      <SafeAreaView style={styles.safe}>
+        <Text style={styles.title}>Messages</Text>
+        <ScreenListSkeleton rows={6} />
+      </SafeAreaView>
     )
   }
 

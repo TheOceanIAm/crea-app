@@ -9,17 +9,30 @@ import {
   Image,
   TextInput,
   Modal,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+  RefreshControl,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { PlusCircle } from 'lucide-react-native'
 import * as Linking from 'expo-linking'
 import { supabase } from '@/lib/supabase'
-import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
+import { isCeoProfile, isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
+import { publishCeoExternalJob } from '@/lib/ceoExternalJobsApi'
+import { getCache, setCache } from '@/lib/appCache'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
+
+type JobsFeedCache = {
+  jobs: Job[]
+  externalJobs: ExternalJob[]
+}
 
 type Job = {
   id: string
@@ -87,130 +100,188 @@ export default function JobsListScreen() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
   const [isCompanyUser, setIsCompanyUser] = useState(false)
+  const [isCeoUser, setIsCeoUser] = useState(false)
   const [workspaceOnly, setWorkspaceOnly] = useState(false)
   const [feedTab, setFeedTab] = useState<'crea' | 'external'>('crea')
   const [search, setSearch] = useState('')
   const [externalJobs, setExternalJobs] = useState<ExternalJob[]>([])
   const [activeExternalJob, setActiveExternalJob] = useState<ExternalJob | null>(null)
 
-  const loadJobs = useCallback(async () => {
-    const now = Date.now()
-    if (hasLoadedRef.current && now - lastLoadedAtRef.current < RELOAD_COOLDOWN_MS) return
-    if (!hasLoadedRef.current) setLoading(true)
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    let role: string | null = null
-    if (user) {
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('role, subscription_tier')
-        .eq('id', user.id)
-        .maybeSingle()
-      role = resolveAppRole(prof?.role, user)
-      const isWorkspaceFreelancer =
-        role === 'freelancer' &&
-        isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier))
-      setWorkspaceOnly(isWorkspaceFreelancer)
-      if (isWorkspaceFreelancer) {
-        setJobs([])
-        setLoading(false)
-        return
-      }
-    } else {
-      setWorkspaceOnly(false)
-    }
-    const companyOnly = Boolean(user && isCompanyProfile(role))
-    setIsCompanyUser(companyOnly)
+  /** CEO-only: manual external listing (parity with CREA web). */
+  const [addExternalOpen, setAddExternalOpen] = useState(false)
+  const [ceoExtSaving, setCeoExtSaving] = useState(false)
+  const [ceoTitle, setCeoTitle] = useState('')
+  const [ceoLocation, setCeoLocation] = useState('')
+  const [ceoRate, setCeoRate] = useState('')
+  const [ceoRoleLine, setCeoRoleLine] = useState('')
+  const [ceoCompany, setCeoCompany] = useState('')
+  const [ceoNeededWhen, setCeoNeededWhen] = useState('')
+  const [ceoIntel, setCeoIntel] = useState('')
+  const [ceoContactName, setCeoContactName] = useState('')
+  const [ceoContactEmail, setCeoContactEmail] = useState('')
+  const [ceoLinkedIn, setCeoLinkedIn] = useState('')
+  const [ceoInstagram, setCeoInstagram] = useState('')
 
-    if (!companyOnly && feedTab === 'external') {
-      const { data: extRows, error: extError } = await supabase
-        .from('external_jobs')
-        .select('id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram')
-        .eq('status', 'published')
-        .order('posted_date', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(40)
-      if (extError || !extRows) {
-        setExternalJobs([])
-      } else {
-        setExternalJobs((extRows as ExternalJob[]) ?? [])
-      }
-      setJobs([])
-      setLoading(false)
-      hasLoadedRef.current = true
-      lastLoadedAtRef.current = Date.now()
-      return
-    }
+  const [refreshing, setRefreshing] = useState(false)
 
-    let q = supabase
-      .from('jobs')
-      .select(
-        'id, title, category, budget_type, budget_amount, budget_currency, location_type, company_id, status, is_solo_workspace'
+  const loadJobs = useCallback(
+    async (opts?: { bypassCooldown?: boolean }) => {
+      const now = Date.now()
+      if (
+        !opts?.bypassCooldown &&
+        hasLoadedRef.current &&
+        now - lastLoadedAtRef.current < RELOAD_COOLDOWN_MS
       )
-      .order('created_at', { ascending: false })
-      .limit(companyOnly ? 100 : 30)
+        return
 
-    if (companyOnly) {
-      q = q.eq('company_id', user!.id)
-    } else {
-      q = q.eq('status', 'active')
-    }
-    q = q.eq('is_solo_workspace', false)
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      let role: string | null = null
+      if (user) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('role, subscription_tier')
+          .eq('id', user.id)
+          .maybeSingle()
+        role = resolveAppRole(prof?.role, user)
+        const isWorkspaceFreelancer =
+          role === 'freelancer' &&
+          isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier))
+        setWorkspaceOnly(isWorkspaceFreelancer)
+        if (isWorkspaceFreelancer) {
+          setIsCeoUser(false)
+          setJobs([])
+          setExternalJobs([])
+          setLoading(false)
+          return
+        }
+      } else {
+        setWorkspaceOnly(false)
+        setIsCeoUser(false)
+      }
+      const companyOnly = Boolean(user && isCompanyProfile(role))
+      setIsCompanyUser(companyOnly)
+      setIsCeoUser(Boolean(user && isCeoProfile(role)))
 
-    const { data: jobRows, error } = await q
+      const cacheKey =
+        user && !opts?.bypassCooldown ? `jobs-feed:${user.id}:${feedTab}:${companyOnly ? 'c' : 'f'}` : null
 
-    if (error || !jobRows?.length) {
-      setJobs([])
-      setLoading(false)
-      hasLoadedRef.current = true
-      lastLoadedAtRef.current = Date.now()
-      return
-    }
-
-    const ids = [
-      ...new Set(
-        jobRows.map((j) => j.company_id).filter((x): x is string => typeof x === 'string' && x.length > 0)
-      ),
-    ]
-
-    const companyById: Record<string, { name: string; avatar_url: string | null }> = {}
-    if (ids.length > 0) {
-      const { data: profiles } = await supabase.from('profiles').select('id, name, avatar_url').in('id', ids)
-      for (const p of profiles ?? []) {
-        const url = p.avatar_url?.trim()
-        companyById[p.id] = {
-          name: (p.name || 'Company').trim() || 'Company',
-          avatar_url: url && /^https?:\/\//i.test(url) ? url : null,
+      let hydrated = false
+      if (cacheKey && !hasLoadedRef.current) {
+        const hit = getCache<JobsFeedCache>(cacheKey)
+        if (hit && Array.isArray(hit.jobs) && Array.isArray(hit.externalJobs)) {
+          setJobs(hit.jobs)
+          setExternalJobs(hit.externalJobs)
+          setLoading(false)
+          hydrated = true
         }
       }
-    }
+      if (!hydrated && !hasLoadedRef.current) setLoading(true)
 
-    const list: Job[] = jobRows.map((j) => {
-      const cid = j.company_id as string | null
-      const c = cid ? companyById[cid] : undefined
-      return {
-        id: j.id as string,
-        title: String(j.title ?? ''),
-        category: String(j.category ?? ''),
-        budget_type: String(j.budget_type ?? ''),
-        budget_amount: typeof j.budget_amount === 'number' ? j.budget_amount : null,
-        budget_currency: typeof j.budget_currency === 'string' ? j.budget_currency : null,
-        location_type: String(j.location_type ?? ''),
-        company_id: cid,
-        company_name: c?.name ?? 'Company',
-        company_logo_url: c?.avatar_url ?? null,
-        status: String(j.status ?? ''),
-        is_solo_workspace: Boolean(j.is_solo_workspace),
+      if (!companyOnly && feedTab === 'external') {
+        const { data: extRows, error: extError } = await supabase
+          .from('external_jobs')
+          .select(
+            'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram'
+          )
+          .eq('status', 'published')
+          .order('posted_date', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(40)
+        const extArr =
+          extError || !extRows ? [] : ((extRows as ExternalJob[]) ?? [])
+        setExternalJobs(extArr)
+        setJobs([])
+        if (cacheKey) setCache(cacheKey, { jobs: [], externalJobs: extArr }, 35_000)
+        setLoading(false)
+        hasLoadedRef.current = true
+        lastLoadedAtRef.current = Date.now()
+        return
       }
-    })
 
-    setJobs(list)
-    setExternalJobs([])
-    setLoading(false)
-    hasLoadedRef.current = true
-    lastLoadedAtRef.current = Date.now()
-  }, [feedTab])
+      let q = supabase
+        .from('jobs')
+        .select(
+          'id, title, category, budget_type, budget_amount, budget_currency, location_type, company_id, status, is_solo_workspace'
+        )
+        .order('created_at', { ascending: false })
+        .limit(companyOnly ? 100 : 30)
+
+      if (companyOnly) {
+        q = q.eq('company_id', user.id)
+      } else {
+        q = q.eq('status', 'active')
+      }
+      q = q.eq('is_solo_workspace', false)
+
+      const { data: jobRows, error } = await q
+
+      if (error || !jobRows?.length) {
+        setJobs([])
+        setExternalJobs([])
+        if (cacheKey) setCache(cacheKey, { jobs: [], externalJobs: [] }, 35_000)
+        setLoading(false)
+        hasLoadedRef.current = true
+        lastLoadedAtRef.current = Date.now()
+        return
+      }
+
+      const ids = [
+        ...new Set(
+          jobRows.map((j) => j.company_id).filter((x): x is string => typeof x === 'string' && x.length > 0)
+        ),
+      ]
+
+      const companyById: Record<string, { name: string; avatar_url: string | null }> = {}
+      if (ids.length > 0) {
+        const { data: profiles } = await supabase.from('profiles').select('id, name, avatar_url').in('id', ids)
+        for (const p of profiles ?? []) {
+          const url = p.avatar_url?.trim()
+          companyById[p.id] = {
+            name: (p.name || 'Company').trim() || 'Company',
+            avatar_url: url && /^https?:\/\//i.test(url) ? url : null,
+          }
+        }
+      }
+
+      const list: Job[] = jobRows.map((j) => {
+        const cid = j.company_id as string | null
+        const c = cid ? companyById[cid] : undefined
+        return {
+          id: j.id as string,
+          title: String(j.title ?? ''),
+          category: String(j.category ?? ''),
+          budget_type: String(j.budget_type ?? ''),
+          budget_amount: typeof j.budget_amount === 'number' ? j.budget_amount : null,
+          budget_currency: typeof j.budget_currency === 'string' ? j.budget_currency : null,
+          location_type: String(j.location_type ?? ''),
+          company_id: cid,
+          company_name: c?.name ?? 'Company',
+          company_logo_url: c?.avatar_url ?? null,
+          status: String(j.status ?? ''),
+          is_solo_workspace: Boolean(j.is_solo_workspace),
+        }
+      })
+
+      setJobs(list)
+      setExternalJobs([])
+      if (cacheKey) setCache(cacheKey, { jobs: list, externalJobs: [] }, 35_000)
+      setLoading(false)
+      hasLoadedRef.current = true
+      lastLoadedAtRef.current = Date.now()
+    },
+    [feedTab]
+  )
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await loadJobs({ bypassCooldown: true })
+    } finally {
+      setRefreshing(false)
+    }
+  }, [loadJobs])
 
   useEffect(() => {
     hasLoadedRef.current = false
@@ -251,12 +322,56 @@ export default function JobsListScreen() {
   const showExternalFeed = !isCompanyUser && feedTab === 'external'
   const feedListData: (Job | ExternalJob)[] = showExternalFeed ? filteredExternalJobs : filteredCreaJobs
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
-    )
+  const showInitialSkeleton =
+    loading && !workspaceOnly && (showExternalFeed ? externalJobs.length === 0 : jobs.length === 0)
+
+  async function submitCeoExternalListing() {
+    const t = ceoTitle.trim()
+    const email = ceoContactEmail.trim()
+    if (!t) {
+      Alert.alert('Title required', 'Please enter a job title.')
+      return
+    }
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      Alert.alert('Email required', 'Please enter a valid contact email.')
+      return
+    }
+    setCeoExtSaving(true)
+    const result = await publishCeoExternalJob({
+      title: t,
+      company: ceoCompany.trim() || undefined,
+      location: ceoLocation.trim() || undefined,
+      role: ceoRoleLine.trim() || undefined,
+      rate: ceoRate.trim() || undefined,
+      needed_when: ceoNeededWhen.trim() || undefined,
+      intel_brief: ceoIntel.trim() || undefined,
+      contact_name: ceoContactName.trim() || undefined,
+      contact_email: email,
+      contact_linkedin: ceoLinkedIn.trim() || undefined,
+      contact_instagram: ceoInstagram.trim() || undefined,
+    })
+    setCeoExtSaving(false)
+    if (result.ok === false) {
+      Alert.alert('Could not publish', result.message)
+      return
+    }
+    setCeoTitle('')
+    setCeoLocation('')
+    setCeoRate('')
+    setCeoRoleLine('')
+    setCeoCompany('')
+    setCeoNeededWhen('')
+    setCeoIntel('')
+    setCeoContactName('')
+    setCeoContactEmail('')
+    setCeoLinkedIn('')
+    setCeoInstagram('')
+    setAddExternalOpen(false)
+    hasLoadedRef.current = false
+    lastLoadedAtRef.current = 0
+    setFeedTab('external')
+    void loadJobs()
+    Alert.alert('Published', 'The listing appears in External.')
   }
 
   return (
@@ -279,6 +394,19 @@ export default function JobsListScreen() {
         </TouchableOpacity>
       ) : null}
 
+      {isCeoUser && !workspaceOnly ? (
+        <TouchableOpacity
+          style={styles.ceoAddExternalBtn}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Add listing to external job pool"
+          onPress={() => setAddExternalOpen(true)}
+        >
+          <PlusCircle size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+          <Text style={styles.ceoAddExternalBtnText}>Add external job</Text>
+        </TouchableOpacity>
+      ) : null}
+
       {!isCompanyUser && !workspaceOnly ? (
         <View style={styles.feedTabs}>
           <TouchableOpacity
@@ -286,7 +414,7 @@ export default function JobsListScreen() {
             onPress={() => setFeedTab('crea')}
             activeOpacity={0.85}
           >
-            <Text style={[styles.feedTabText, feedTab === 'crea' && styles.feedTabTextActive]}>Crea Exclusive</Text>
+            <Text style={[styles.feedTabText, feedTab === 'crea' && styles.feedTabTextActive]}>Job pool</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.feedTabBtn, feedTab === 'external' && styles.feedTabBtnActive]}
@@ -319,7 +447,12 @@ export default function JobsListScreen() {
         maxToRenderPerBatch={6}
         windowSize={8}
         removeClippedSubviews
-        contentContainerStyle={[styles.list, jobs.length === 0 && styles.listEmpty]}
+        refreshControl={
+          workspaceOnly ? undefined : (
+            <RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor="#FFDC00" />
+          )
+        }
+        contentContainerStyle={[styles.list, feedListData.length === 0 && styles.listEmpty]}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => (
           <TouchableOpacity
@@ -379,16 +512,18 @@ export default function JobsListScreen() {
                   >
                     <Text style={styles.externalActionBtnText}>View contact</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.externalGhostBtn}
-                    activeOpacity={0.85}
-                    onPress={() => {
-                      const url = item.source_url
-                      if (url) void Linking.openURL(url)
-                    }}
-                  >
-                    <Text style={styles.externalGhostBtnText}>View source</Text>
-                  </TouchableOpacity>
+                  {item.source_url ? (
+                    <TouchableOpacity
+                      style={styles.externalGhostBtn}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        const url = item.source_url
+                        if (url) void Linking.openURL(url)
+                      }}
+                    >
+                      <Text style={styles.externalGhostBtnText}>View source</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               </>
             ) : isCreaJobItem(item) ? (
@@ -430,17 +565,21 @@ export default function JobsListScreen() {
           </TouchableOpacity>
         )}
         ListEmptyComponent={
-          <View style={styles.emptyWrap}>
-            <Text style={styles.emptyText}>
-              {workspaceOnly
-                ? 'Workspace plan: marketplace jobs are hidden.'
-                : isCompanyUser
-                  ? 'No projects yet. Post one above.'
-                  : feedTab === 'external'
-                    ? 'No external jobs found'
-                    : 'No jobs found'}
-            </Text>
-          </View>
+          showInitialSkeleton ? (
+            <ScreenListSkeleton rows={5} />
+          ) : (
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyText}>
+                {workspaceOnly
+                  ? 'Workspace plan: marketplace jobs are hidden.'
+                  : isCompanyUser
+                    ? 'No projects yet. Post one above.'
+                    : feedTab === 'external'
+                      ? 'No external jobs found'
+                      : 'No jobs found'}
+              </Text>
+            </View>
+          )
         }
       />
 
@@ -482,6 +621,149 @@ export default function JobsListScreen() {
             </View>
           </View>
         </View>
+      </Modal>
+
+      <Modal
+        visible={addExternalOpen}
+        animationType="slide"
+        presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+        onRequestClose={() => {
+          if (!ceoExtSaving) setAddExternalOpen(false)
+        }}
+      >
+        <SafeAreaView style={styles.ceoModalSafe} edges={['top', 'bottom']}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ flex: 1 }}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+          >
+            <View style={styles.ceoModalHeader}>
+              <Text style={styles.ceoModalTitle}>External job</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  if (!ceoExtSaving) setAddExternalOpen(false)
+                }}
+                hitSlop={12}
+                disabled={ceoExtSaving}
+              >
+                <Text style={styles.ceoModalClose}>Close</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.ceoModalHint}>Published to External — same visibility as freelancer pool.</Text>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.ceoFormScroll}
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.ceoLabel}>Title — required</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoTitle}
+                onChangeText={setCeoTitle}
+                placeholder="e.g. Logo design"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+              />
+              <Text style={styles.ceoLabel}>Contact email — required</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoContactEmail}
+                onChangeText={setCeoContactEmail}
+                placeholder="producer@agency.com"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Text style={styles.ceoLabel}>Company / client</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoCompany}
+                onChangeText={setCeoCompany}
+                placeholder="Optional"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+              />
+              <Text style={styles.ceoLabel}>Location</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoLocation}
+                onChangeText={setCeoLocation}
+                placeholder="Berlin · Remote…"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+              />
+              <Text style={styles.ceoLabel}>Budget / rate</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoRate}
+                onChangeText={setCeoRate}
+                placeholder="e.g. €450/day"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+              />
+              <Text style={styles.ceoLabel}>Role line</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoRoleLine}
+                onChangeText={setCeoRoleLine}
+                placeholder="Optional"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+              />
+              <Text style={styles.ceoLabel}>Timing</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoNeededWhen}
+                onChangeText={setCeoNeededWhen}
+                placeholder="ASAP, next month…"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+              />
+              <Text style={styles.ceoLabel}>Contact name</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoContactName}
+                onChangeText={setCeoContactName}
+                placeholder="Optional"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+              />
+              <Text style={styles.ceoLabel}>LinkedIn</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoLinkedIn}
+                onChangeText={setCeoLinkedIn}
+                placeholder="Optional URL"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                autoCapitalize="none"
+              />
+              <Text style={styles.ceoLabel}>Instagram</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoInstagram}
+                onChangeText={setCeoInstagram}
+                placeholder="Optional @handle"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                autoCapitalize="none"
+              />
+              <Text style={styles.ceoLabel}>Intel brief</Text>
+              <TextInput
+                style={[styles.ceoInput, styles.ceoTextArea]}
+                value={ceoIntel}
+                onChangeText={setCeoIntel}
+                placeholder="Details shown alongside contact info"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                multiline
+              />
+              <TouchableOpacity
+                style={[styles.ceoPublishBtn, ceoExtSaving && styles.ceoPublishBtnDisabled]}
+                activeOpacity={0.85}
+                disabled={ceoExtSaving}
+                onPress={() => void submitCeoExternalListing()}
+              >
+                {ceoExtSaving ? (
+                  <ActivityIndicator color="#0a0a0a" />
+                ) : (
+                  <Text style={styles.ceoPublishBtnText}>Publish to External</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   )
@@ -748,4 +1030,70 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 12,
   },
+  ceoAddExternalBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginHorizontal: 20,
+    marginBottom: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.35)',
+    backgroundColor: 'rgba(255,220,0,0.06)',
+  },
+  ceoAddExternalBtnText: { fontSize: 15, fontWeight: '800', color: '#FFDC00', letterSpacing: 0.2 },
+  ceoModalSafe: { flex: 1, backgroundColor: '#0a0a0a' },
+  ceoModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  ceoModalTitle: { fontSize: 20, fontWeight: '900', color: '#fff', letterSpacing: 0.3 },
+  ceoModalClose: { fontSize: 16, fontWeight: '700', color: '#FFDC00' },
+  ceoModalHint: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 13,
+    lineHeight: 18,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 6,
+  },
+  ceoFormScroll: { paddingHorizontal: 20, paddingBottom: 40, gap: 6 },
+  ceoLabel: {
+    marginTop: 10,
+    fontSize: 10,
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.38)',
+    fontWeight: '700',
+  },
+  ceoInput: {
+    marginTop: 4,
+    backgroundColor: '#111111',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#fff',
+  },
+  ceoTextArea: { minHeight: 110, textAlignVertical: 'top' },
+  ceoPublishBtn: {
+    marginTop: 22,
+    backgroundColor: '#FFDC00',
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  ceoPublishBtnDisabled: { opacity: 0.65 },
+  ceoPublishBtnText: { fontSize: 16, fontWeight: '800', color: '#0a0a0a' },
 })

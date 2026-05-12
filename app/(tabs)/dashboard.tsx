@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Image, Linking } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Image, Linking } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, type Href } from 'expo-router'
 import type { LucideIcon } from 'lucide-react-native'
@@ -35,6 +35,8 @@ import {
 } from '@/lib/freelancerPlan'
 import { getCache, setCache } from '@/lib/appCache'
 import { runTimed } from '@/lib/perfMarks'
+import { useAppBootstrapOverlay } from '@/contexts/AppBootstrapOverlayContext'
+import { DashboardSkeleton } from '@/components/ScreenSkeletons'
 
 type IncomeTotals = { paid: number; incoming: number; overdue: number; currency: string }
 
@@ -130,6 +132,15 @@ function quickActionsForRole(
       { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
     ]
   }
+  if (isCeoProfile(role ?? undefined)) {
+    return [
+      { label: 'Job pool', icon: Briefcase, href: '/(tabs)/jobs' },
+      { label: 'Workspace', icon: Layers, href: '/(tabs)/workspace-projects' },
+      { label: 'Messages', icon: MessageCircle, href: '/(tabs)/messages' },
+      { label: 'Invoices', icon: Receipt, href: '/(tabs)/invoices' },
+      { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
+    ]
+  }
   const base: QuickAction[] = [
     { label: 'Browse jobs', icon: Briefcase, href: '/(tabs)/jobs' },
     { label: 'Messages', icon: MessageCircle, href: '/(tabs)/messages' },
@@ -195,6 +206,7 @@ type DashboardCache = {
 
 export default function DashboardScreen() {
   const router = useRouter()
+  const { showBootstrapOverlay, hideBootstrapOverlay } = useAppBootstrapOverlay()
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
   const [role, setRole] = useState<string | null>(null)
@@ -213,6 +225,8 @@ export default function DashboardScreen() {
   )
 
   useEffect(() => {
+    let cancelled = false
+    showBootstrapOverlay()
     const load = async () => {
       const timed = await runTimed('dashboard.load', async () => {
       try {
@@ -389,6 +403,7 @@ export default function DashboardScreen() {
         }
       } finally {
         setLoading(false)
+        if (!cancelled) hideBootstrapOverlay()
       }
       return { ok: true }
       })
@@ -397,13 +412,17 @@ export default function DashboardScreen() {
       }
     }
     void load()
-  }, [router])
+    return () => {
+      cancelled = true
+      hideBootstrapOverlay()
+    }
+  }, [hideBootstrapOverlay, router, showBootstrapOverlay])
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <DashboardSkeleton />
+      </SafeAreaView>
     )
   }
 
@@ -413,7 +432,8 @@ export default function DashboardScreen() {
     { label: 'Companies', icon: Building2, onPress: () => router.push('/(tabs)/ceo-companies' as Href) },
     { label: 'Subscriptions', icon: CircleDollarSign, onPress: () => router.push('/(tabs)/ceo-revenue' as Href) },
     { label: 'Messages', icon: MessageCircle, onPress: () => router.navigate('/(tabs)/messages') },
-    { label: 'Projects', icon: Briefcase, onPress: () => router.navigate('/(tabs)/jobs') },
+    { label: 'Job pool', icon: Briefcase, onPress: () => router.navigate('/(tabs)/jobs') },
+    { label: 'Workspace', icon: Layers, onPress: () => router.navigate('/(tabs)/workspace-projects') },
     { label: 'Settings', icon: Settings2, onPress: () => router.push('/(tabs)/ceo-settings' as Href) },
     {
       label: 'Web admin',
@@ -490,13 +510,19 @@ export default function DashboardScreen() {
               <Text style={styles.greeting}>{first}</Text>
               <Text style={styles.roleLabel}>Platform CEO</Text>
             </View>
-            <View style={styles.avatarCircle}>
+            <TouchableOpacity
+              style={styles.avatarCircle}
+              activeOpacity={0.7}
+              onPress={() => router.push('/(tabs)/profile-preview' as Href)}
+              accessibilityRole="button"
+              accessibilityLabel="Public profile preview"
+            >
               {avatarUrl ? (
                 <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
               ) : (
                 <Text style={styles.avatarLetter}>{name.charAt(0).toUpperCase() || 'C'}</Text>
               )}
-            </View>
+            </TouchableOpacity>
           </View>
 
           {ceoRpcError ? (
@@ -632,13 +658,19 @@ export default function DashboardScreen() {
               {isCompanyProfile(role) ? 'Company account' : 'Freelancer account'}
             </Text>
           </View>
-          <View style={styles.avatarCircle}>
+          <TouchableOpacity
+            style={styles.avatarCircle}
+            activeOpacity={0.7}
+            onPress={() => router.push('/(tabs)/profile-preview' as Href)}
+            accessibilityRole="button"
+            accessibilityLabel="Public profile preview"
+          >
             {avatarUrl ? (
               <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
             ) : (
               <Text style={styles.avatarLetter}>{name.charAt(0).toUpperCase()}</Text>
             )}
-          </View>
+          </TouchableOpacity>
         </View>
 
         {!workspaceOnlyDashboard && income ? (
@@ -712,7 +744,6 @@ export default function DashboardScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
-  loadingContainer: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center' },
   scroll: { flex: 1 },
   /** Horizontal padding here so content + tab bar align; extra bottom so last row clears the tab bar. */
   scrollContent: { paddingHorizontal: 20, paddingBottom: 28 },

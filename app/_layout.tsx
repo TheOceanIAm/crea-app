@@ -8,6 +8,7 @@ import { PushNotificationRouter } from '@/components/PushNotificationRouter'
 import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
+import { AppBootstrapOverlayProvider } from '@/contexts/AppBootstrapOverlayContext'
 import { handleSupabaseAuthCallbackUrl } from '@/lib/authDeepLink'
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
@@ -41,43 +42,45 @@ export default function RootLayout() {
         merchantIdentifier="merchant.de.creaservices.app"
         urlScheme="crea"
       >
-        <AuthDeepLinkBridge />
-        {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
-        <StatusBar style="light" backgroundColor="#0a0a0a" />
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
-          {/* Same yellow as app.json splash so nothing flashes black behind the native splash */}
-          <Stack.Screen name="index" options={{ contentStyle: { backgroundColor: '#FFDC00' } }} />
-          <Stack.Screen
-            name="login"
-            options={{
-              animation: 'fade',
-              animationDuration: 220,
-            }}
-          />
-          <Stack.Screen name="register" />
-          <Stack.Screen name="auth/callback" />
-          <Stack.Screen name="auth/reset" />
-          <Stack.Screen name="auth/reset-password" />
-          <Stack.Screen name="forgot-password" />
-          <Stack.Screen
-            name="onboarding"
-            options={{
-              animation: 'fade',
-              animationDuration: 220,
-            }}
-          />
-          <Stack.Screen
-            name="(tabs)"
-            options={{
-              animation: 'fade',
-              animationDuration: 220,
-            }}
-          />
-          <Stack.Screen name="jobs/[id]" />
-          <Stack.Screen name="profile/[userId]" />
-          <Stack.Screen name="conversation/[id]" />
-          <Stack.Screen name="project" options={{ headerShown: false }} />
-        </Stack>
+        <AppBootstrapOverlayProvider>
+          <AuthDeepLinkBridge />
+          {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
+          <StatusBar style="light" backgroundColor="#0a0a0a" />
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
+            {/* Native splash is solid black until JS shows AppBootstrapLoading */}
+            <Stack.Screen name="index" options={{ contentStyle: { backgroundColor: '#0a0a0a' } }} />
+            <Stack.Screen
+              name="login"
+              options={{
+                animation: 'fade',
+                animationDuration: 220,
+              }}
+            />
+            <Stack.Screen name="register" />
+            <Stack.Screen name="auth/callback" />
+            <Stack.Screen name="auth/reset" />
+            <Stack.Screen name="auth/reset-password" />
+            <Stack.Screen name="forgot-password" />
+            <Stack.Screen
+              name="onboarding"
+              options={{
+                animation: 'fade',
+                animationDuration: 220,
+              }}
+            />
+            <Stack.Screen
+              name="(tabs)"
+              options={{
+                animation: 'fade',
+                animationDuration: 220,
+              }}
+            />
+            <Stack.Screen name="jobs/[id]" />
+            <Stack.Screen name="profile/[userId]" />
+            <Stack.Screen name="conversation/[id]" />
+            <Stack.Screen name="project" options={{ headerShown: false }} />
+          </Stack>
+        </AppBootstrapOverlayProvider>
       </StripeProvider>
     </GestureHandlerRootView>
   )

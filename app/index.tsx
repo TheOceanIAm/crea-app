@@ -1,13 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { View, StyleSheet } from 'react-native'
 import type { Session } from '@supabase/supabase-js'
 import { Redirect } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import * as SplashScreen from 'expo-splash-screen'
+import { useAppBootstrapOverlay } from '@/contexts/AppBootstrapOverlayContext'
 import { resolveSessionForAppBootstrap } from '@/lib/authSession'
 import { profileNeedsOnboarding } from '@/lib/onboardingGate'
-
-const SPLASH_BG = '#FFDC00'
 
 /** Avoid an endless native splash if Supabase/storage never resolves (offline, bad URL, etc.). */
 const SESSION_BOOTSTRAP_MS = 14_000
@@ -48,6 +47,22 @@ export default function Index() {
   const [loading, setLoading] = useState(true)
   const [session, setSession] = useState<Session | null>(null)
   const [onboardingDone, setOnboardingDone] = useState(true)
+  const { showBootstrapOverlay, hideBootstrapOverlay } = useAppBootstrapOverlay()
+
+  useLayoutEffect(() => {
+    void SplashScreen.hideAsync().catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    showBootstrapOverlay()
+  }, [showBootstrapOverlay])
+
+  useEffect(() => {
+    if (loading) return
+    if (!session || !onboardingDone) {
+      hideBootstrapOverlay()
+    }
+  }, [loading, session, onboardingDone, hideBootstrapOverlay])
 
   useEffect(() => {
     let cancelled = false
@@ -101,9 +116,6 @@ export default function Index() {
         if (!cancelled) setSession(null)
       } finally {
         if (cancelled) return
-        // One continuous native splash (large logo via app.json plugin imageWidth) until auth is ready.
-        // No second in-JS wordmark with a different scale.
-        await SplashScreen.hideAsync().catch(() => {})
         if (!cancelled) setLoading(false)
       }
     }
@@ -114,7 +126,6 @@ export default function Index() {
     }
   }, [])
 
-  // Under the native splash: same yellow so there is no black flash if the RN view peeks through.
   if (loading) {
     return <View style={styles.bridge} />
   }
@@ -131,8 +142,5 @@ export default function Index() {
 }
 
 const styles = StyleSheet.create({
-  bridge: {
-    flex: 1,
-    backgroundColor: SPLASH_BG,
-  },
+  bridge: { flex: 1, backgroundColor: '#0a0a0a' },
 })

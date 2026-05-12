@@ -1,14 +1,13 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   Alert,
-  ActivityIndicator,
-  FlatList,
   Image,
   Modal,
   SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
+  SectionList,
   TouchableOpacity,
   View,
 } from 'react-native'
@@ -23,7 +22,9 @@ import {
   resolveFreelancerPlanFromUserAndProfileTier,
 } from '@/lib/freelancerPlan'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
+import { getCache, setCache } from '@/lib/appCache'
 import { runTimed } from '@/lib/perfMarks'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 type ListingKind = 'private' | 'customer'
 
@@ -100,6 +101,19 @@ function mapJobStatusLabel(job: {
   return 'ACTIVE'
 }
 
+type ListingSection = {
+  title: string
+  subtitle: string
+  data: ProjectListing[]
+}
+
+type WorkspaceProjectsCache = {
+  listings: ProjectListing[]
+  archivedListings: ProjectListing[]
+  canCreatePrivate: boolean
+  viewerRole: 'freelancer' | 'company'
+}
+
 type JobRow = {
   id: string
   title: string
@@ -149,7 +163,6 @@ export default function WorkspaceProjectsScreen() {
       return
     }
     const timed = await runTimed('workspace-projects.load', async () => {
-    if (!hasLoadedRef.current) setLoading(true)
     setError(null)
     const {
       data: { user },
@@ -161,6 +174,8 @@ export default function WorkspaceProjectsScreen() {
       router.replace('/login')
       return
     }
+
+    const wsCacheKey = `workspace-projects:${user.id}`
 
     const { data: p } = await supabase
       .from('profiles')
@@ -179,7 +194,26 @@ export default function WorkspaceProjectsScreen() {
     }
     setDenyKind(null)
     setAllowed(true)
-    setViewerRole(companyView ? 'company' : 'freelancer')
+    const vr: 'freelancer' | 'company' = companyView ? 'company' : 'freelancer'
+    setViewerRole(vr)
+
+    let hydratedCache = false
+    if (!opts?.force) {
+      const wc = getCache<WorkspaceProjectsCache>(wsCacheKey)
+      if (
+        wc &&
+        wc.viewerRole === vr &&
+        Array.isArray(wc.listings) &&
+        Array.isArray(wc.archivedListings)
+      ) {
+        setListings(wc.listings)
+        setArchivedListings(wc.archivedListings)
+        setCanCreatePrivate(wc.canCreatePrivate)
+        setLoading(false)
+        hydratedCache = true
+      }
+    }
+    if (!hydratedCache && !hasLoadedRef.current) setLoading(true)
 
     if (companyView) {
       setCanCreatePrivate(true)
@@ -266,16 +300,29 @@ export default function WorkspaceProjectsScreen() {
         }
       })
       builtCompany.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
-      setListings(builtCompany.filter((x) => !x.isArchived))
-      setArchivedListings(builtCompany.filter((x) => x.isArchived))
+      const coActive = builtCompany.filter((x) => !x.isArchived)
+      const coArch = builtCompany.filter((x) => x.isArchived)
+      setListings(coActive)
+      setArchivedListings(coArch)
+      setCache(
+        wsCacheKey,
+        {
+          listings: coActive,
+          archivedListings: coArch,
+          canCreatePrivate: true,
+          viewerRole: 'company',
+        },
+        35_000
+      )
       setLoading(false)
       hasLoadedRef.current = true
       lastLoadedAtRef.current = Date.now()
-      return { active: builtCompany.filter((x) => !x.isArchived).length, archived: builtCompany.filter((x) => x.isArchived).length }
+      return { active: coActive.length, archived: coArch.length }
     }
 
     const plan = resolveFreelancerPlanFromUserAndProfileTier(user, p?.subscription_tier)
-    setCanCreatePrivate(canFreelancerCreatePrivateProjects(plan))
+    const nextCanPrivate = canFreelancerCreatePrivateProjects(plan)
+    setCanCreatePrivate(nextCanPrivate)
 
     const displayName = (p?.name && String(p.name).trim()) || 'You'
     const av =
@@ -443,6 +490,16 @@ export default function WorkspaceProjectsScreen() {
 
     setListings(active)
     setArchivedListings(arch)
+    setCache(
+      wsCacheKey,
+      {
+        listings: active,
+        archivedListings: arch,
+        canCreatePrivate: nextCanPrivate,
+        viewerRole: 'freelancer',
+      },
+      35_000
+    )
     setLoading(false)
     hasLoadedRef.current = true
     lastLoadedAtRef.current = Date.now()
@@ -460,6 +517,30 @@ export default function WorkspaceProjectsScreen() {
       void load()
     }, [load])
   )
+
+  const listingSections = useMemo<ListingSection[]>(() => {
+    if (viewerRole !== 'freelancer') {
+      return [{ title: '', subtitle: '', data: listings }]
+    }
+    const jobs = listings.filter((x) => x.kind === 'customer')
+    const priv = listings.filter((x) => x.kind === 'private')
+    const sections: ListingSection[] = []
+    if (jobs.length > 0) {
+      sections.push({
+        title: 'Customer jobs',
+        subtitle: 'Bookings with client companies — open the job workspace.',
+        data: jobs,
+      })
+    }
+    if (priv.length > 0) {
+      sections.push({
+        title: 'Private workspaces',
+        subtitle: 'Projects you created yourself — full edit, archive, and delete.',
+        data: priv,
+      })
+    }
+    return sections.length > 0 ? sections : [{ title: '', subtitle: '', data: [] }]
+  }, [viewerRole, listings])
 
   const onCreate = async () => {
     const t = title.trim()
@@ -658,7 +739,16 @@ export default function WorkspaceProjectsScreen() {
   }
 
   const renderCard = (item: ProjectListing) => (
-    <View style={styles.card}>
+    <View
+      style={[
+        styles.card,
+        viewerRole === 'freelancer'
+          ? item.kind === 'customer'
+            ? styles.cardAccentCustomer
+            : styles.cardAccentPrivate
+          : null,
+      ]}
+    >
       <TouchableOpacity style={styles.cardMain} onPress={() => openListing(item)} activeOpacity={0.85}>
         <View style={styles.cardTop}>
           <Image
@@ -670,6 +760,23 @@ export default function WorkspaceProjectsScreen() {
               <Text style={styles.cardTitle} numberOfLines={2}>
                 {item.title}
               </Text>
+              {viewerRole === 'freelancer' ? (
+                <View
+                  style={[
+                    styles.kindPill,
+                    item.kind === 'customer' ? styles.kindPillCustomer : styles.kindPillPrivate,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.kindPillText,
+                      item.kind === 'customer' ? styles.kindPillTextCustomer : styles.kindPillTextPrivate,
+                    ]}
+                  >
+                    {item.kind === 'customer' ? 'Client job' : 'Private'}
+                  </Text>
+                </View>
+              ) : null}
               <View
                 style={[
                   styles.badgeStatus,
@@ -729,9 +836,11 @@ export default function WorkspaceProjectsScreen() {
 
   if (loading || allowed === null) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.loadingShell}>
+          <ScreenListSkeleton rows={6} />
+        </View>
+      </SafeAreaView>
     )
   }
 
@@ -773,23 +882,33 @@ export default function WorkspaceProjectsScreen() {
       <Text style={styles.sub}>
         {viewerRole === 'company'
           ? 'Your company projects. You can open, edit, archive, or delete them here.'
-          : 'Private workspaces (your avatar) and customer jobs you&apos;re booked on — same overview as on the web. Budget comes from each project or job.'}
+          : "Private workspaces (your avatar) and customer jobs you're booked on — same overview as on the web. Budget comes from each project or job."}
       </Text>
       {!canCreatePrivate ? (
         <Text style={styles.planHint}>
-          Upgrade to Pro or Workspace on the web to create new private projects (Starter can still manage jobs you&apos;re
-          hired for).
+          Upgrade to Pro or Workspace on the web to create new private projects (Starter can still manage jobs you're hired
+          for).
         </Text>
       ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <FlatList
-        data={listings}
+      <SectionList
+        sections={listingSections}
         keyExtractor={(item) => item.id}
         initialNumToRender={8}
         maxToRenderPerBatch={6}
         windowSize={8}
         removeClippedSubviews
+        stickySectionHeadersEnabled={false}
+        renderSectionHeader={({ section }) =>
+          section.title ? (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              <Text style={styles.sectionSubtitle}>{section.subtitle}</Text>
+            </View>
+          ) : null
+        }
+        SectionSeparatorComponent={() => <View style={styles.sectionGap} />}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <View style={styles.emptyCard}>
@@ -804,7 +923,7 @@ export default function WorkspaceProjectsScreen() {
             ) : null}
           </View>
         }
-        renderItem={({ item }) => renderCard(item)}
+        renderItem={({ item }) => <View style={styles.cardWrap}>{renderCard(item)}</View>}
         ListFooterComponent={
           archivedListings.length ? (
             <View style={styles.archiveWrap}>
@@ -950,13 +1069,31 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   error: { fontSize: 12, color: '#ff9b9b', paddingHorizontal: 20, marginBottom: 8 },
-  list: { paddingHorizontal: 20, paddingBottom: 40, gap: 12, flexGrow: 1 },
+  list: { paddingHorizontal: 20, paddingBottom: 40, flexGrow: 1 },
+  sectionHeader: { paddingTop: 6, paddingBottom: 10 },
+  sectionTitle: { fontSize: 14, fontWeight: '900', color: '#fff', letterSpacing: 0.4, textTransform: 'uppercase' },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.38)',
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  sectionGap: { height: 14 },
+  cardWrap: { marginBottom: 12 },
   card: {
     backgroundColor: '#111',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',
+  },
+  cardAccentCustomer: {
+    borderLeftWidth: 3,
+    borderLeftColor: 'rgba(255,220,0,0.65)',
+  },
+  cardAccentPrivate: {
+    borderLeftWidth: 3,
+    borderLeftColor: 'rgba(255,255,255,0.22)',
   },
   cardMain: { padding: 14 },
   cardTop: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
@@ -966,6 +1103,24 @@ const styles = StyleSheet.create({
   cardHead: { flex: 1, minWidth: 0 },
   titleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 4 },
   cardTitle: { fontSize: 16, color: '#fff', fontWeight: '800', flex: 1, minWidth: 0 },
+  kindPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    flexShrink: 0,
+  },
+  kindPillCustomer: {
+    backgroundColor: 'rgba(255,220,0,0.1)',
+    borderColor: 'rgba(255,220,0,0.35)',
+  },
+  kindPillPrivate: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  kindPillText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
+  kindPillTextCustomer: { color: '#FFDC00' },
+  kindPillTextPrivate: { color: 'rgba(255,255,255,0.55)' },
   badgeStatus: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -1044,6 +1199,7 @@ const styles = StyleSheet.create({
   emptySub: { color: 'rgba(255,255,255,0.45)', fontSize: 13, textAlign: 'center', marginBottom: 14, lineHeight: 18 },
   emptyBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999, backgroundColor: '#FFDC00' },
   emptyBtnText: { color: '#0a0a0a', fontWeight: '800' },
+  loadingShell: { flex: 1, paddingHorizontal: 20, paddingTop: 24, justifyContent: 'flex-start' },
   archiveWrap: { marginTop: 14 },
   archiveHeader: {
     borderWidth: 1,

@@ -7,11 +7,11 @@
     "icon": "./assets/CREA_icon.jpg",
     "scheme": "crea",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#FFDC00",
+    "backgroundColor": "#0a0a0a",
     "splash": {
-      "image": "./assets/splash-wordmark.png",
+      "image": "./assets/splash-empty.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FFDC00"
+      "backgroundColor": "#0a0a0a"
     },
     "ios": {
       "supportsTablet": false,
@@ -39,10 +39,10 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FFDC00",
-          "image": "./assets/splash-wordmark.png",
+          "backgroundColor": "#0a0a0a",
+          "image": "./assets/splash-empty.png",
           "resizeMode": "contain",
-          "imageWidth": 320
+          "imageWidth": 1
         }
       ],
       "expo-router",

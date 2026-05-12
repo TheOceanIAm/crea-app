@@ -773,6 +773,19 @@ export function FreelancerPublicProfileContent({
           />
         ) : null}
 
+        {isFreelancer && previewMode && authUserId && authUserId === userId ? (
+          <TouchableOpacity
+            style={styles.availabilityPreviewLink}
+            onPress={() => router.push('/(tabs)/availability')}
+            activeOpacity={0.85}
+            accessibilityRole="link"
+            accessibilityLabel="Manage availability calendar"
+          >
+            <Text style={styles.availabilityPreviewLinkText}>Manage availability</Text>
+            <ChevronRight size={16} color="#FFDC00" strokeWidth={ICON_STROKE} />
+          </TouchableOpacity>
+        ) : null}
+
         {isFreelancer ? (
           <TouchableOpacity
             style={styles.browseLink}
@@ -1068,6 +1081,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#111',
   },
   moreProjectsBtnText: { fontSize: 12, fontWeight: '700', color: '#FFDC00' },
+  /** Under public availability calendar on own profile preview only */
+  availabilityPreviewLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    marginTop: 4,
+    marginBottom: 2,
+    paddingVertical: 6,
+  },
+  availabilityPreviewLinkText: { fontSize: 13, fontWeight: '700', color: '#FFDC00' },
   browseLink: { marginTop: 20, marginBottom: 8, paddingVertical: 8, alignItems: 'center' },
   browseLinkText: { fontSize: 14, fontWeight: '700', color: '#FFDC00' },
   companyDetailRow: {

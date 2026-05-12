@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ActivityIndicator,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -21,6 +20,7 @@ import {
 import { invalidateAlertsBadge } from '@/lib/invalidateAlerts'
 import { getCache, setCache } from '@/lib/appCache'
 import { runTimed } from '@/lib/perfMarks'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 function timeAgo(str: string) {
   const t = new Date(str).getTime()
@@ -41,43 +41,46 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
-  const firstAlertsFocus = useRef(true)
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadInFlight = useRef<Promise<void> | null>(null)
 
   const load = useCallback(async () => {
     if (loadInFlight.current) return loadInFlight.current
     loadInFlight.current = (async () => {
-    const timed = await runTimed('notifications.load', async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) {
-      setRows([])
-      setReadKeys(new Set())
-      setUserId(null)
-      return
-    }
-    setUserId(user.id)
-    const cacheKey = `notifications:${user.id}`
-    const cached = getCache<{ rows: NotificationRow[]; reads: string[] }>(cacheKey)
-    if (firstAlertsFocus.current && cached) {
-      setRows(cached.rows)
-      setReadKeys(new Set(cached.reads))
-      setLoading(false)
-    }
-    const [feed, reads] = await Promise.all([
-      loadNotificationFeed(user.id),
-      fetchAlertReadKeys(user.id),
-    ])
-    setRows(feed)
-    setReadKeys(reads)
-    setCache(cacheKey, { rows: feed, reads: Array.from(reads) }, 20_000)
-    return { feed: feed.length, reads: reads.size }
-    })
-    if (__DEV__ && timed.value) {
-      console.log(`[perf] notifications.rows: feed=${timed.value.feed} reads=${timed.value.reads}`)
-    }
+      try {
+        const timed = await runTimed('notifications.load', async () => {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser()
+          if (!user) {
+            setRows([])
+            setReadKeys(new Set())
+            setUserId(null)
+            return
+          }
+          setUserId(user.id)
+          const cacheKey = `notifications:${user.id}`
+          const cached = getCache<{ rows: NotificationRow[]; reads: string[] }>(cacheKey)
+          if (cached) {
+            setRows(cached.rows)
+            setReadKeys(new Set(cached.reads))
+            setLoading(false)
+          }
+          const [feed, reads] = await Promise.all([
+            loadNotificationFeed(user.id),
+            fetchAlertReadKeys(user.id),
+          ])
+          setRows(feed)
+          setReadKeys(reads)
+          setCache(cacheKey, { rows: feed, reads: Array.from(reads) }, 20_000)
+          return { feed: feed.length, reads: reads.size }
+        })
+        if (__DEV__ && timed.value) {
+          console.log(`[perf] notifications.rows: feed=${timed.value.feed} reads=${timed.value.reads}`)
+        }
+      } finally {
+        setLoading(false)
+      }
     })()
     try {
       await loadInFlight.current
@@ -101,24 +104,9 @@ export default function NotificationsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      let cancelled = false
-      const run = async () => {
-        const showFullScreen = firstAlertsFocus.current
-        if (showFullScreen) setLoading(true)
-        try {
-          await load()
-          if (!cancelled) invalidateAlertsBadge()
-        } finally {
-          if (showFullScreen && !cancelled) {
-            setLoading(false)
-            firstAlertsFocus.current = false
-          }
-        }
-      }
-      void run()
-      return () => {
-        cancelled = true
-      }
+      void load().finally(() => {
+        invalidateAlertsBadge()
+      })
     }, [load])
   )
 
@@ -186,13 +174,7 @@ export default function NotificationsScreen() {
     [router, userId]
   )
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
-    )
-  }
+  const showInitialSkeleton = loading && rows.length === 0
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -236,9 +218,13 @@ export default function NotificationsScreen() {
           )
         }}
         ListEmptyComponent={
-          <View style={styles.center}>
-            <Text style={styles.empty}>{emptyText}</Text>
-          </View>
+          showInitialSkeleton ? (
+            <ScreenListSkeleton rows={6} />
+          ) : (
+            <View style={styles.center}>
+              <Text style={styles.empty}>{emptyText}</Text>
+            </View>
+          )
         }
       />
     </SafeAreaView>
