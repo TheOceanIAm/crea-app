@@ -38,6 +38,40 @@ import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
 /** Matches StripeProvider urlScheme (`crea` in app.json); required on iOS for redirect-capable Payment Sheet methods / 3DS. */
 const STRIPE_IOS_RETURN_URL = 'crea://stripe-redirect'
 
+const CREA_API_FETCH_MS = 38_000
+const STRIPE_APPLE_PAY_CHECK_MS = 12_000
+const STRIPE_INIT_SHEET_MS = 45_000
+const STRIPE_PRESENT_SHEET_MS = 120_000
+const STRIPE_APPLE_PAY_CONFIRM_MS = 120_000
+
+/** Prevents a stuck Pay button when network / native Stripe calls never settle. */
+async function fetchWithTimeoutMs(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ac = new AbortController()
+  const tid = setTimeout(() => ac.abort(), ms)
+  try {
+    return await fetch(url, { ...init, signal: ac.signal })
+  } finally {
+    clearTimeout(tid)
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let tid: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<T>((_, reject) => {
+    tid = setTimeout(
+      () =>
+        reject(new Error(`${label} timed out (${Math.round(ms / 1000)}s). Try again or use browser checkout.`)),
+      ms
+    )
+  })
+  return Promise.race([
+    promise.finally(() => {
+      if (tid !== undefined) clearTimeout(tid)
+    }),
+    expired,
+  ])
+}
+
 type InvoiceRecord = Record<string, unknown> & { id: string; status?: string }
 
 function str(v: unknown) {
@@ -414,14 +448,30 @@ export default function InvoiceDetailScreen() {
           Alert.alert('Session expired', 'Please sign in again to continue payment.')
           return
         }
-        const createRes = await fetch(`${base}/api/stripe/crea-pay/mobile-intent`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ invoiceId: id }),
-        })
+        let createRes: Response
+        try {
+          createRes = await fetchWithTimeoutMs(
+            `${base}/api/stripe/crea-pay/mobile-intent`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ invoiceId: id }),
+            },
+            CREA_API_FETCH_MS
+          )
+        } catch (fe) {
+          const aborted = fe instanceof Error && /aborted|abort/i.test(fe.message + (fe as Error).name)
+          throw new Error(
+            aborted
+              ? 'Request to CREA Pay timed out — check your connection or try browser checkout.'
+              : fe instanceof Error
+                ? fe.message
+                : 'Network error'
+          )
+        }
         const createJson = (await createRes.json().catch(() => ({}))) as {
           clientSecret?: string
           customerName?: string
@@ -441,22 +491,35 @@ export default function InvoiceDetailScreen() {
           return
         }
 
-        const appleOk =
-          Platform.OS === 'ios' &&
-          (await isPlatformPaySupported({
-            applePay: { merchantCountryCode: 'DE' },
-          } as PlatformPaySupportArg))
-        const init = await initPaymentSheet({
-          merchantDisplayName: 'CREA',
-          paymentIntentClientSecret: createJson.clientSecret,
-          ...(Platform.OS === 'ios' ? { returnURL: STRIPE_IOS_RETURN_URL } : {}),
-          ...(appleOk ? { applePay: { merchantCountryCode: 'DE' } } : {}),
-          defaultBillingDetails: createJson.customerName
-            ? {
-                name: createJson.customerName,
-              }
-            : undefined,
-        })
+        let appleOk = false
+        if (Platform.OS === 'ios') {
+          try {
+            appleOk = await withTimeout(
+              isPlatformPaySupported({
+                applePay: { merchantCountryCode: 'DE' },
+              } as PlatformPaySupportArg),
+              STRIPE_APPLE_PAY_CHECK_MS,
+              'Apple Pay check'
+            )
+          } catch {
+            appleOk = false
+          }
+        }
+        const init = await withTimeout(
+          initPaymentSheet({
+            merchantDisplayName: 'CREA',
+            paymentIntentClientSecret: createJson.clientSecret,
+            ...(Platform.OS === 'ios' ? { returnURL: STRIPE_IOS_RETURN_URL } : {}),
+            ...(appleOk ? { applePay: { merchantCountryCode: 'DE' } } : {}),
+            defaultBillingDetails: createJson.customerName
+              ? {
+                  name: createJson.customerName,
+                }
+              : undefined,
+          }),
+          STRIPE_INIT_SHEET_MS,
+          'Stripe payment sheet'
+        )
         if (init.error) {
           Alert.alert(
             'Stripe Payment Sheet',
@@ -466,7 +529,7 @@ export default function InvoiceDetailScreen() {
           return
         }
 
-        const present = await presentPaymentSheet()
+        const present = await withTimeout(presentPaymentSheet(), STRIPE_PRESENT_SHEET_MS, 'Payment confirmation')
         if (present.error) {
           // User cancel should not throw a hard error.
           if (present.error.code && String(present.error.code).toLowerCase().includes('canceled')) return
@@ -524,14 +587,30 @@ export default function InvoiceDetailScreen() {
           Alert.alert('Session expired', 'Please sign in again to continue payment.')
           return
         }
-        const createRes = await fetch(`${base}/api/stripe/crea-pay/mobile-intent`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ invoiceId: id }),
-        })
+        let createRes: Response
+        try {
+          createRes = await fetchWithTimeoutMs(
+            `${base}/api/stripe/crea-pay/mobile-intent`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ invoiceId: id }),
+            },
+            CREA_API_FETCH_MS
+          )
+        } catch (fe) {
+          const aborted = fe instanceof Error && /aborted|abort/i.test(fe.message + (fe as Error).name)
+          throw new Error(
+            aborted
+              ? 'Request to CREA Pay timed out — check your connection or try browser checkout.'
+              : fe instanceof Error
+                ? fe.message
+                : 'Network error'
+          )
+        }
         const createJson = (await createRes.json().catch(() => ({}))) as {
           clientSecret?: string
           amountCents?: number
@@ -549,9 +628,18 @@ export default function InvoiceDetailScreen() {
           return
         }
 
-        const platformSupported = await isPlatformPaySupported({
-          applePay: { merchantCountryCode: 'DE' },
-        } as PlatformPaySupportArg)
+        let platformSupported = false
+        try {
+          platformSupported = await withTimeout(
+            isPlatformPaySupported({
+              applePay: { merchantCountryCode: 'DE' },
+            } as PlatformPaySupportArg),
+            STRIPE_APPLE_PAY_CHECK_MS,
+            'Apple Pay check'
+          )
+        } catch {
+          platformSupported = false
+        }
         if (!platformSupported) {
           const hint =
             Platform.OS === 'ios'
@@ -569,13 +657,17 @@ export default function InvoiceDetailScreen() {
         }
 
         const amount = ((createJson.amountCents ?? 0) / 100).toFixed(2)
-        const confirm = await confirmPlatformPayPayment(createJson.clientSecret, {
-          applePay: {
-            merchantCountryCode: 'DE',
-            currencyCode: (createJson.currency || 'EUR').toUpperCase(),
-            cartItems: [{ label: 'CREA invoice', amount, paymentType: PlatformPay.PaymentType.Immediate }],
-          },
-        })
+        const confirm = await withTimeout(
+          confirmPlatformPayPayment(createJson.clientSecret, {
+            applePay: {
+              merchantCountryCode: 'DE',
+              currencyCode: (createJson.currency || 'EUR').toUpperCase(),
+              cartItems: [{ label: 'CREA invoice', amount, paymentType: PlatformPay.PaymentType.Immediate }],
+            },
+          }),
+          STRIPE_APPLE_PAY_CONFIRM_MS,
+          'Apple Pay'
+        )
         if (confirm.error) {
           if (confirm.error.code && String(confirm.error.code).toLowerCase().includes('canceled')) return
           Alert.alert(
