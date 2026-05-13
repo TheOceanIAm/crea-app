@@ -46,7 +46,105 @@ export function parseBookingDm(raw: string): BookingDmPayloadV1 | null {
     }
     return null
   }
+  const webCal = parsePublicCalendarBookingDm(t)
+  if (webCal) return webCal
   return parseLegacyBookingDm(t)
+}
+
+/**
+ * Web public profile calendar booking (`crea-services` FreelancerPublicCalendar): plain-text body.
+ * Accept/decline sync resolves the job server-side from `Project:` line + message sender.
+ */
+function parsePublicCalendarBookingDm(t: string): BookingDmPayloadV1 | null {
+  const trimmed = t.trim()
+  const headerRe =
+    /^Booking request:\s*(.+?)\s*[–—-]\s*(.+?)\s*\(\s*\d+\s+days?\s*\)/im
+  const hm = trimmed.match(headerRe)
+  if (!hm) return null
+
+  const dLow = parseEnglishDayMonthYear(hm[1])
+  const dHigh = parseEnglishDayMonthYear(hm[2])
+  if (!dLow || !dHigh) return null
+
+  const pm = trimmed.match(/^Project:\s*(.+)$/m)
+  const title = pm?.[1]?.trim()
+  if (!title) return null
+
+  const start = dLow <= dHigh ? dLow : dHigh
+  const end = dLow <= dHigh ? dHigh : dLow
+  const isoStartDate = toIsoDateOnly(start)
+  const isoEndDate = toIsoDateOnly(end)
+
+  const selectedIsoDates: string[] = []
+  const cursor = new Date(`${isoStartDate}T12:00:00`)
+  const stop = new Date(`${isoEndDate}T12:00:00`)
+  while (cursor <= stop) {
+    selectedIsoDates.push(toIsoDateOnly(cursor))
+    cursor.setDate(cursor.getDate() + 1)
+  }
+
+  let userMessage: string | undefined
+  if (pm.index !== undefined) {
+    const after = trimmed.slice(pm.index + pm[0].length).trim()
+    if (after.length > 0) userMessage = after
+  }
+
+  return {
+    v: 1,
+    title,
+    isoStartDate,
+    isoEndDate,
+    selectedIsoDates,
+    userMessage,
+    openDeepLink: 'crea://',
+  }
+}
+
+const ENGLISH_MONTHS: Record<string, number> = {
+  january: 0,
+  jan: 0,
+  february: 1,
+  feb: 1,
+  march: 2,
+  mar: 2,
+  april: 3,
+  apr: 3,
+  may: 4,
+  june: 5,
+  jun: 5,
+  july: 6,
+  jul: 6,
+  august: 7,
+  aug: 7,
+  september: 8,
+  sept: 8,
+  sep: 8,
+  october: 9,
+  oct: 9,
+  november: 10,
+  nov: 10,
+  december: 11,
+  dec: 11,
+}
+
+function parseEnglishDayMonthYear(part: string): Date | null {
+  const s = part.trim().replace(/\s+/g, ' ')
+  const m = s.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/)
+  if (!m) {
+    const d = new Date(s)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  const day = parseInt(m[1], 10)
+  const monWord = m[2].toLowerCase()
+  const year = parseInt(m[3], 10)
+  let month = ENGLISH_MONTHS[monWord]
+  if (month === undefined) {
+    month = ENGLISH_MONTHS[monWord.slice(0, 3)] as number | undefined
+  }
+  if (month === undefined || Number.isNaN(day) || Number.isNaN(year)) return null
+  const d = new Date(year, month, day)
+  if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) return null
+  return d
 }
 
 /** Older plain-text booking DMs (pre structured wire format). */

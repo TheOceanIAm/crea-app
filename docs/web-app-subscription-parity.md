@@ -36,7 +36,9 @@ Diese Datei ist die **Single Source of Truth** für Marketing, Website und App-K
 - **Starter:** **`canFreelancerCreatePrivateProjects`** = falsch → keine neuen privaten Lead-Projekte (Liste/Erstellung gesperrt; Hinweis **Pro oder Workspace**).
 - **Workspace / Pro / Premium:** anlegen erlaubt.
 
-**App-Orientierung:** `canFreelancerCreatePrivateProjects`, `app/(tabs)/workspace-projects.tsx`, `app/(tabs)/dashboard.tsx`, `BookFreelancerModal`.
+**App-Orientierung:** `canFreelancerCreatePrivateProjects`, `app/(tabs)/workspace-projects.tsx`, `app/(tabs)/dashboard.tsx`.
+
+**Öffentliches Profil — Availability-Buchung (Company → Freelancer):** Hier wird **kein** privates Projekt angelegt. Es ist nur die Auswahl eines **bestehenden, aktiven Firmen-Jobs** (`jobs.status = 'active'`) möglich — **App** (`BookFreelancerModal`) und **Web** (`crea-services` → `FreelancerPublicCalendar` BookingModal) sind dabei abgestimmt. Die App verschickt strukturierte Booking-DMs (`sendAvailabilityProjectInvite`); das Web schickt Klartext — die Datenbank löst beim Accept den Job zu (Deep-Link bzw. `Project:`-Zeile).
 
 ---
 
@@ -113,7 +115,7 @@ EN spiegeln: „Available from Pro“, „Pro or Workspace plan“, „14-day tr
 | Production Sun/Weather | `app/components/project/[projectId]/ProductionTab.tsx` |
 | Crew + Pro | `components/project/ProjectCrewTab.tsx` |
 | Talent Pool | `app/(tabs)/talent-pool.tsx` |
-| Buchung + privates Projekt | `components/profile/BookFreelancerModal.tsx`, `FreelancerPublicProfileContent.tsx` |
+| Availability-Buchung (nur aktive Jobs; Web↔App gleiche Regel) | App: `components/profile/BookFreelancerModal.tsx`, `FreelancerPublicProfileContent.tsx` · Web: `crea-services/app/components/FreelancerPublicCalendar.tsx` |
 | Feed Alerts | `lib/notificationsFeed.ts` |
 | RLS Pool (DB) | `supabase/sql/talent_pool_select_policies.sql` |
 

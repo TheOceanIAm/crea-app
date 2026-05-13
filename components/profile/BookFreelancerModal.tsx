@@ -20,7 +20,7 @@ import { sendAvailabilityProjectInvite } from '@/lib/sendAvailabilityProjectInvi
 import { money, toMoneyNumber } from '@/lib/invoiceFormatting'
 import { sortIsoDates } from '@/lib/availabilityBookingSelection'
 
-type InviteTarget = { id: string; title: string; kind: 'project' | 'job' }
+type InviteTarget = { id: string; title: string }
 
 function formatBookingCaps(iso: string): string {
   const d = new Date(`${iso}T12:00:00`)
@@ -42,8 +42,6 @@ type Props = {
   ratesCurrency: string | null
   selectedIsos: ReadonlySet<string>
   onInviteSent: (conversationId: string) => void
-  /** Company accounts always true; freelancer leads need Pro or Workspace to create a private project row. */
-  canCreatePrivateProject?: boolean
 }
 
 export function BookFreelancerModal({
@@ -58,7 +56,6 @@ export function BookFreelancerModal({
   ratesCurrency,
   selectedIsos,
   onInviteSent,
-  canCreatePrivateProject = true,
 }: Props) {
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
@@ -84,55 +81,29 @@ export function BookFreelancerModal({
   const loadTargets = useCallback(async () => {
     setLoadError(null)
     setLoading(true)
-    const [{ data: projectRows, error: projectErr }, { data: jobRows, error: jobsErr }] = await Promise.all([
-      supabase
-      .from('projects')
+    const { data: jobRows, error: jobsErr } = await supabase
+      .from('jobs')
       .select('id, title')
       .eq('company_id', companyUserId)
-      .eq('freelancer_id', freelancerId)
-      .order('updated_at', { ascending: false }),
-      supabase
-        .from('jobs')
-        .select('id, title')
-        .eq('company_id', companyUserId)
-        .order('created_at', { ascending: false }),
-    ])
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
 
-    if (projectErr) {
-      setLoadError(projectErr.message)
-    }
-
-    if (jobsErr && !projectErr) {
+    if (jobsErr) {
       setLoadError(jobsErr.message)
     }
 
-    const mappedProjects: InviteTarget[] = (projectRows ?? []).map((r) => ({
-      id: String(r.id),
-      title: String(r.title ?? '').trim() || 'Untitled project',
-      kind: 'project',
-    }))
-    const mappedJobs: InviteTarget[] = (jobRows ?? []).map((r) => ({
+    const mapped: InviteTarget[] = (jobRows ?? []).map((r) => ({
       id: String(r.id),
       title: String(r.title ?? '').trim() || 'Untitled job',
-      kind: 'job',
     }))
-    const merged = [...mappedProjects, ...mappedJobs]
-    const deduped: InviteTarget[] = []
-    const seen = new Set<string>()
-    for (const row of merged) {
-      const key = `${row.kind}:${row.id}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      deduped.push(row)
-    }
 
-    setTargets(deduped)
+    setTargets(mapped)
     setSelectedTarget((prev) => {
-      if (prev && deduped.some((x) => x.id === prev.id && x.kind === prev.kind)) return prev
-      return deduped[0] ?? null
+      if (prev && mapped.some((x) => x.id === prev.id)) return prev
+      return mapped[0] ?? null
     })
     setLoading(false)
-  }, [companyUserId, freelancerId])
+  }, [companyUserId])
 
   useEffect(() => {
     if (!visible) {
@@ -148,10 +119,7 @@ export function BookFreelancerModal({
     setSending(true)
     setLoadError(null)
     const userMsg = message.trim()
-    const openDeepLink =
-      selectedTarget.kind === 'job'
-        ? `crea://jobs/${selectedTarget.id}`
-        : `crea://project/${selectedTarget.id}`
+    const openDeepLink = `crea://jobs/${selectedTarget.id}`
     const r = await sendAvailabilityProjectInvite({
       freelancerId,
       projectId: selectedTarget.id,
@@ -235,7 +203,7 @@ export function BookFreelancerModal({
           ) : targets.length === 0 ? (
             <View style={styles.emptyProj}>
               <Text style={styles.emptyProjText}>
-                No project found on your company account yet. Create one first, then invite this freelancer here.
+                No active job postings yet. Publish a listing under Jobs first, then book here — same as on the web.
               </Text>
             </View>
           ) : (
@@ -246,9 +214,7 @@ export function BookFreelancerModal({
                 activeOpacity={0.85}
               >
                 <Text style={styles.selectText} numberOfLines={1}>
-                  {selectedTarget
-                    ? `${selectedTarget.kind === 'job' ? 'Project (Job Pool)' : 'Project'} · ${selectedTarget.title}`
-                    : 'Select a project...'}
+                  {selectedTarget ? selectedTarget.title : 'Select a project…'}
                 </Text>
                 <ChevronDown size={20} color="rgba(255,255,255,0.45)" strokeWidth={ICON_STROKE} />
               </TouchableOpacity>
@@ -256,10 +222,10 @@ export function BookFreelancerModal({
                 <View style={styles.pickerList}>
                   <ScrollView style={styles.pickerScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                     {targets.map((p) => {
-                      const active = selectedTarget?.id === p.id && selectedTarget.kind === p.kind
+                      const active = selectedTarget?.id === p.id
                       return (
                         <TouchableOpacity
-                          key={`${p.kind}:${p.id}`}
+                          key={p.id}
                           style={[styles.pickerRow, active && styles.pickerRowActive]}
                           onPress={() => {
                             setSelectedTarget(p)
@@ -267,7 +233,7 @@ export function BookFreelancerModal({
                           }}
                         >
                           <Text style={styles.pickerRowText} numberOfLines={2}>
-                            {p.kind === 'job' ? 'Project (Job Pool)' : 'Project'} · {p.title}
+                            {p.title}
                           </Text>
                         </TouchableOpacity>
                       )

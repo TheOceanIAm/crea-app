@@ -119,7 +119,6 @@ export function FreelancerPublicProfileContent({
   const [portfolioFilter, setPortfolioFilter] = useState<string>('All')
   const [viewerIsCompany, setViewerIsCompany] = useState(false)
   const [viewerIsCeo, setViewerIsCeo] = useState(false)
-  const [viewerCanCreatePrivateProject, setViewerCanCreatePrivateProject] = useState(true)
   const [viewerCanUseAvailabilityInvite, setViewerCanUseAvailabilityInvite] = useState(false)
   const [bookingSelection, setBookingSelection] = useState<Set<string> | null>(null)
   const [companyJobs, setCompanyJobs] = useState<
@@ -166,7 +165,6 @@ export function FreelancerPublicProfileContent({
     if (!authUserId) {
       setViewerIsCompany(false)
       setViewerIsCeo(false)
-      setViewerCanCreatePrivateProject(true)
       setViewerCanUseAvailabilityInvite(false)
       return
     }
@@ -183,10 +181,6 @@ export function FreelancerPublicProfileContent({
       setViewerIsCeo(isCeoProfile(role))
       const plan = resolveFreelancerPlanFromUser(user)
       const freelancerCanCreatePrivate = canFreelancerCreatePrivateProjects(plan)
-      const canPrivate =
-        isCompanyProfile(role) ||
-        (Boolean(user) && isFreelancerProfile(role) && freelancerCanCreatePrivate)
-      setViewerCanCreatePrivateProject(canPrivate)
       setViewerCanUseAvailabilityInvite(
         Boolean(user) &&
           (isCompanyProfile(role) || (isFreelancerProfile(role) && freelancerCanCreatePrivate)) &&
@@ -821,7 +815,6 @@ export function FreelancerPublicProfileContent({
           dayRateAmount={dayRate}
           ratesCurrency={cur}
           selectedIsos={bookingSelection}
-          canCreatePrivateProject={viewerCanCreatePrivateProject}
           onInviteSent={(conversationId) => {
             setBookingSelection(null)
             router.push(`/conversation/${conversationId}`)
