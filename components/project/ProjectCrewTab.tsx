@@ -30,7 +30,12 @@ type Member = {
   contact_email?: string | null
   contact_phone?: string | null
   contact_label?: string | null
-  profiles: { name: string | null; avatar_url: string | null; headline?: string | null } | null
+  profiles: {
+    name: string | null
+    avatar_url: string | null
+    headline?: string | null
+    email?: string | null
+  } | null
 }
 
 type ManualCrew = {
@@ -143,7 +148,7 @@ export function ProjectCrewTab({
       supabase
         .from('project_members')
         .select(
-          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, contact_email, contact_phone, contact_label, profiles(name, avatar_url, headline)'
+          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, contact_email, contact_phone, contact_label, profiles(name, avatar_url, headline, email)'
         )
         .eq('project_id', projectId)
         .order('member_role', { ascending: true }),
@@ -169,10 +174,20 @@ export function ProjectCrewTab({
 
     const registered = ((registeredRes.data as unknown as Member[]) ?? []).map((m) => {
       const prof = m.profiles as
-        | { name: string | null; avatar_url: string | null; headline?: string | null }
-        | { name: string | null; avatar_url: string | null; headline?: string | null }[]
+        | {
+            name: string | null
+            avatar_url: string | null
+            headline?: string | null
+            email?: string | null
+          }
         | null
         | undefined
+        | Array<{
+            name: string | null
+            avatar_url: string | null
+            headline?: string | null
+            email?: string | null
+          }>
       const p = Array.isArray(prof) ? prof[0] : prof
       const sStart = m.scheduling_start_date
       const sEnd = m.scheduling_end_date
@@ -187,6 +202,8 @@ export function ProjectCrewTab({
         rawContactNote.length > 0
           ? `${roleDisplay} · ${rawContactNote.length > 38 ? `${rawContactNote.slice(0, 38)}…` : rawContactNote}`
           : roleDisplay
+      const profileEmail =
+        typeof p?.email === 'string' && p.email.trim().length > 0 ? p.email.trim() : null
       return {
         source: 'registered' as const,
         id: m.id,
@@ -195,7 +212,7 @@ export function ProjectCrewTab({
         role_display: roleDisplay,
         name: p?.name || 'Member',
         subtitle,
-        email: null,
+        email: profileEmail,
         phone: null,
         contact_email: typeof m.contact_email === 'string' ? m.contact_email : null,
         contact_phone: typeof m.contact_phone === 'string' ? m.contact_phone : null,
@@ -377,7 +394,9 @@ export function ProjectCrewTab({
     if (m.source === 'registered') {
       setMemberSchedStart((m.scheduling_start_date ?? '').trim())
       setMemberSchedEnd((m.scheduling_end_date ?? '').trim())
-      setProjectContactEmail((m.contact_email ?? '').trim())
+      setProjectContactEmail(
+        (m.contact_email ?? '').trim() || (m.email ?? '').trim()
+      )
       setProjectContactPhone((m.contact_phone ?? '').trim())
       setProjectContactLabel((m.contact_label ?? '').trim())
     } else {
