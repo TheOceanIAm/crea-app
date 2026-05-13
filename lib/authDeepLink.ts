@@ -8,6 +8,25 @@ export type AuthDeepLinkResult =
   | { handled: true; ok: true; destination: AuthDeepLinkDestination }
   | { handled: true; ok: false; message: string }
 
+/** Single flight: cold-start magic link / email confirm must finish before session bootstrap (avoids racing `getSession()`). */
+export type InitialSupabaseAuthBootstrap =
+  | { didHandle: false }
+  | { didHandle: true; result: AuthDeepLinkResult }
+
+let initialBootstrapPromise: Promise<InitialSupabaseAuthBootstrap> | null = null
+
+export function consumeInitialSupabaseAuthUrlForBootstrap(): Promise<InitialSupabaseAuthBootstrap> {
+  if (!initialBootstrapPromise) {
+    initialBootstrapPromise = (async (): Promise<InitialSupabaseAuthBootstrap> => {
+      const url = await Linking.getInitialURL()
+      if (!url) return { didHandle: false }
+      const result = await handleSupabaseAuthCallbackUrl(url)
+      return { didHandle: true, result }
+    })()
+  }
+  return initialBootstrapPromise
+}
+
 export function getAuthRedirectUrl(kind: 'callback' | 'reset'): string {
   // Force the app scheme so auth links generated in native builds stay stable.
   return Linking.createURL(`auth/${kind}`, { scheme: 'crea' })

@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler'
 import '@/lib/pushNotifications'
-import { useEffect } from 'react'
-import { Linking, Alert, Platform, StyleSheet } from 'react-native'
+import { type PropsWithChildren, useEffect, useState } from 'react'
+import { Linking, Alert, Platform, StyleSheet, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { StripeProvider } from '@stripe/stripe-react-native'
 import { PushNotificationRouter } from '@/components/PushNotificationRouter'
@@ -9,9 +9,22 @@ import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
 import { AppBootstrapOverlayProvider } from '@/contexts/AppBootstrapOverlayContext'
-import { handleSupabaseAuthCallbackUrl } from '@/lib/authDeepLink'
+import {
+  consumeInitialSupabaseAuthUrlForBootstrap,
+  handleSupabaseAuthCallbackUrl,
+} from '@/lib/authDeepLink'
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
+
+/** Finish cold-start Supabase redirect before any route reads `getSession()` (avoids bouncing to login). */
+function BootstrapAuthGate({ children }: PropsWithChildren) {
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    void consumeInitialSupabaseAuthUrlForBootstrap().finally(() => setReady(true))
+  }, [])
+  if (!ready) return <View style={styles.authGate} />
+  return <>{children}</>
+}
 
 function AuthDeepLinkBridge() {
   const router = useRouter()
@@ -25,7 +38,6 @@ function AuthDeepLinkBridge() {
         Alert.alert('Sign-in link', r.message)
       }
     }
-    void Linking.getInitialURL().then(consume)
     const sub = Linking.addEventListener('url', (e) => void consume(e.url))
     return () => sub.remove()
   }, [router])
@@ -43,10 +55,11 @@ export default function RootLayout() {
         urlScheme="crea"
       >
         <AppBootstrapOverlayProvider>
-          <AuthDeepLinkBridge />
-          {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
-          <StatusBar style="light" backgroundColor="#0a0a0a" />
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
+          <BootstrapAuthGate>
+            <AuthDeepLinkBridge />
+            {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
+            <StatusBar style="light" backgroundColor="#0a0a0a" />
+            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
             {/* Native splash is solid black until JS shows AppBootstrapLoading */}
             <Stack.Screen name="index" options={{ contentStyle: { backgroundColor: '#0a0a0a' } }} />
             <Stack.Screen
@@ -80,6 +93,7 @@ export default function RootLayout() {
             <Stack.Screen name="conversation/[id]" />
             <Stack.Screen name="project" options={{ headerShown: false }} />
           </Stack>
+          </BootstrapAuthGate>
         </AppBootstrapOverlayProvider>
       </StripeProvider>
     </GestureHandlerRootView>
@@ -89,4 +103,5 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   /** CREA black — prevents white flash behind Stack/Tabs before screens paint */
   root: { flex: 1, backgroundColor: '#0a0a0a' },
+  authGate: { flex: 1, backgroundColor: '#0a0a0a' },
 })

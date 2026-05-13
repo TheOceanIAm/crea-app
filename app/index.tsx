@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
-import { View, StyleSheet } from 'react-native'
+import { View, StyleSheet, Alert } from 'react-native'
 import type { Session } from '@supabase/supabase-js'
-import { Redirect } from 'expo-router'
+import { Redirect, useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import * as SplashScreen from 'expo-splash-screen'
 import { useAppBootstrapOverlay } from '@/contexts/AppBootstrapOverlayContext'
 import { resolveSessionForAppBootstrap } from '@/lib/authSession'
+import { consumeInitialSupabaseAuthUrlForBootstrap } from '@/lib/authDeepLink'
 import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 
 /** Avoid an endless native splash if Supabase/storage never resolves (offline, bad URL, etc.). */
@@ -44,6 +45,7 @@ async function getSessionOrTimeout(): Promise<SessionRace> {
 }
 
 export default function Index() {
+  const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [session, setSession] = useState<Session | null>(null)
   const [onboardingDone, setOnboardingDone] = useState(true)
@@ -69,6 +71,24 @@ export default function Index() {
 
     const run = async () => {
       try {
+        const initial = await consumeInitialSupabaseAuthUrlForBootstrap()
+        if (cancelled) return
+
+        if (
+          initial.didHandle &&
+          initial.result.handled &&
+          initial.result.ok &&
+          initial.result.destination === 'reset-password'
+        ) {
+          router.replace('/auth/reset-password')
+          setLoading(false)
+          return
+        }
+
+        if (initial.didHandle && initial.result.handled && initial.result.ok === false) {
+          Alert.alert('Sign-in link', initial.result.message)
+        }
+
         const raced = await getSessionOrTimeout()
         if (cancelled) return
 
@@ -124,7 +144,7 @@ export default function Index() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [router])
 
   if (loading) {
     return <View style={styles.bridge} />

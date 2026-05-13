@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native'
-import * as Linking from 'expo-linking'
 import { useRouter } from 'expo-router'
-import { handleSupabaseAuthCallbackUrl } from '@/lib/authDeepLink'
+import { consumeInitialSupabaseAuthUrlForBootstrap } from '@/lib/authDeepLink'
 import { supabase } from '@/lib/supabase'
 
 /** Cold-start target for `crea://auth/reset` (password reset from email). */
@@ -13,23 +12,24 @@ export default function AuthResetEntryScreen() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const url = await Linking.getInitialURL()
+      const initial = await consumeInitialSupabaseAuthUrlForBootstrap()
       if (cancelled) return
-      if (url) {
-        const r = await handleSupabaseAuthCallbackUrl(url)
-        if (r.handled && r.ok) {
-          router.replace(r.destination === 'reset-password' ? '/auth/reset-password' : '/')
-          return
-        }
-        if (r.handled && r.ok === false) {
-          setStatus(r.message)
-          setTimeout(() => {
-            if (!cancelled) router.replace('/login')
-          }, 2800)
-          return
-        }
+
+      if (initial.didHandle && initial.result.handled && initial.result.ok) {
+        router.replace(initial.result.destination === 'reset-password' ? '/auth/reset-password' : '/')
+        return
       }
-      const { data: { session } } = await supabase.auth.getSession()
+      if (initial.didHandle && initial.result.handled && initial.result.ok === false) {
+        setStatus(initial.result.message)
+        setTimeout(() => {
+          if (!cancelled) router.replace('/login')
+        }, 2800)
+        return
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
       if (!cancelled && session) {
         router.replace('/auth/reset-password')
         return
