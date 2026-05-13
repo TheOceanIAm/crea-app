@@ -18,8 +18,13 @@ import { Trash2 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
-import { parseIsoDateInput } from '@/lib/isoDateInput'
-import { formatProductionWindowSummary } from '@/lib/projectProductionWindow'
+import {
+  clampDatesToWindow,
+  formatBookedDaysSummary,
+  memberBookedDatesFromRow,
+  syncSchedulingRangeFromDates,
+} from '@/lib/memberBookedDates'
+import { CrewMemberBookedDaysCalendar } from '@/components/project/CrewMemberBookedDaysCalendar'
 
 type Member = {
   id: string
@@ -27,6 +32,7 @@ type Member = {
   member_role: string
   scheduling_start_date?: string | null
   scheduling_end_date?: string | null
+  booked_dates?: unknown
   contact_email?: string | null
   contact_phone?: string | null
   contact_label?: string | null
@@ -63,6 +69,8 @@ type CrewRow =
       contact_email?: string | null
       contact_phone?: string | null
       contact_label?: string | null
+      /** Resolved shoot days (booked_dates or legacy scheduling range). */
+      bookingDates: string[]
     }
   | {
       source: 'manual'
@@ -80,6 +88,9 @@ type Props = {
   canManage: boolean
   workspaceOnly?: boolean
   proFeaturesEnabled?: boolean
+  /** Job production window (Overview); required to pick shoot days per freelancer. */
+  productionWindowStart: string
+  productionWindowEnd: string
 }
 
 const roleLabel = (r: string) => {
@@ -103,6 +114,8 @@ export function ProjectCrewTab({
   canManage,
   workspaceOnly = false,
   proFeaturesEnabled = true,
+  productionWindowStart,
+  productionWindowEnd,
 }: Props) {
   const { height: windowHeight } = useWindowDimensions()
   const [rows, setRows] = useState<CrewRow[]>([])
@@ -126,8 +139,7 @@ export function ProjectCrewTab({
   const [personRole, setPersonRole] = useState('crew')
   const [personEmail, setPersonEmail] = useState('')
   const [personPhone, setPersonPhone] = useState('')
-  const [memberSchedStart, setMemberSchedStart] = useState('')
-  const [memberSchedEnd, setMemberSchedEnd] = useState('')
+  const [memberBookedDraftDates, setMemberBookedDraftDates] = useState<string[]>([])
   const [savingMemberSchedule, setSavingMemberSchedule] = useState(false)
   const [viewerUserId, setViewerUserId] = useState<string | null>(null)
   const [projectContactEmail, setProjectContactEmail] = useState('')
@@ -148,7 +160,7 @@ export function ProjectCrewTab({
       supabase
         .from('project_members')
         .select(
-          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, contact_email, contact_phone, contact_label, profiles(name, avatar_url, headline, email)'
+          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, booked_dates, contact_email, contact_phone, contact_label, profiles(name, avatar_url, headline, email)'
         )
         .eq('project_id', projectId)
         .order('member_role', { ascending: true }),
@@ -204,6 +216,7 @@ export function ProjectCrewTab({
           : roleDisplay
       const profileEmail =
         typeof p?.email === 'string' && p.email.trim().length > 0 ? p.email.trim() : null
+      const bookingDates = memberBookedDatesFromRow(m)
       return {
         source: 'registered' as const,
         id: m.id,
@@ -221,6 +234,7 @@ export function ProjectCrewTab({
           typeof sStart === 'string' ? sStart.slice(0, 10) : sStart != null ? String(sStart).slice(0, 10) : null,
         scheduling_end_date:
           typeof sEnd === 'string' ? sEnd.slice(0, 10) : sEnd != null ? String(sEnd).slice(0, 10) : null,
+        bookingDates,
       }
     })
 
@@ -392,16 +406,12 @@ export function ProjectCrewTab({
     setPersonEmail((m.email ?? '').trim())
     setPersonPhone((m.phone ?? '').trim())
     if (m.source === 'registered') {
-      setMemberSchedStart((m.scheduling_start_date ?? '').trim())
-      setMemberSchedEnd((m.scheduling_end_date ?? '').trim())
-      setProjectContactEmail(
-        (m.contact_email ?? '').trim() || (m.email ?? '').trim()
-      )
+      setMemberBookedDraftDates([...m.bookingDates])
+      setProjectContactEmail((m.contact_email ?? '').trim() || (m.email ?? '').trim())
       setProjectContactPhone((m.contact_phone ?? '').trim())
       setProjectContactLabel((m.contact_label ?? '').trim())
     } else {
-      setMemberSchedStart('')
-      setMemberSchedEnd('')
+      setMemberBookedDraftDates([])
       setProjectContactEmail('')
       setProjectContactPhone('')
       setProjectContactLabel('')
@@ -433,30 +443,25 @@ export function ProjectCrewTab({
 
   const saveMemberProductionDates = async () => {
     if (!selectedCrew || selectedCrew.source !== 'registered' || selectedCrew.member_role === 'company') return
-    const a = memberSchedStart.trim() ? parseIsoDateInput(memberSchedStart) : null
-    const b = memberSchedEnd.trim() ? parseIsoDateInput(memberSchedEnd) : null
-    if (memberSchedStart.trim() && !a) {
-      Alert.alert('Dates', 'Start must be YYYY-MM-DD.')
+    const ws = productionWindowStart.trim().slice(0, 10)
+    const we = productionWindowEnd.trim().slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ws) || !/^\d{4}-\d{2}-\d{2}$/.test(we)) {
+      Alert.alert('Production window', 'Set the project production window on Overview first (start and end).')
       return
     }
-    if (memberSchedEnd.trim() && !b) {
-      Alert.alert('Dates', 'End must be YYYY-MM-DD.')
+    if (we < ws) {
+      Alert.alert('Production window', 'End date must be on or after start.')
       return
     }
-    if ((a && !b) || (!a && b)) {
-      Alert.alert('Dates', 'Set both start and end, or clear both.')
-      return
-    }
-    if (a && b && b < a) {
-      Alert.alert('Dates', 'End must be on or after start.')
-      return
-    }
+    const dates = clampDatesToWindow(memberBookedDraftDates, ws, we)
+    const { start, end } = syncSchedulingRangeFromDates(dates)
     setSavingMemberSchedule(true)
     const { error } = await supabase
       .from('project_members')
       .update({
-        scheduling_start_date: a,
-        scheduling_end_date: b,
+        booked_dates: dates.length > 0 ? dates : null,
+        scheduling_start_date: start,
+        scheduling_end_date: end,
       })
       .eq('id', selectedCrew.id)
     setSavingMemberSchedule(false)
@@ -465,7 +470,7 @@ export function ProjectCrewTab({
       return
     }
     load()
-    Alert.alert('Saved', 'Their public calendar will show busy on those days when the project is active.')
+    Alert.alert('Saved', 'Their public calendar shows busy only on these days when the project is active.')
   }
 
   const clearMemberProductionDates = async () => {
@@ -474,6 +479,7 @@ export function ProjectCrewTab({
     const { error } = await supabase
       .from('project_members')
       .update({
+        booked_dates: null,
         scheduling_start_date: null,
         scheduling_end_date: null,
       })
@@ -483,10 +489,9 @@ export function ProjectCrewTab({
       Alert.alert('Clear failed', error.message)
       return
     }
-    setMemberSchedStart('')
-    setMemberSchedEnd('')
+    setMemberBookedDraftDates([])
     load()
-    Alert.alert('Cleared', 'Production dates removed for this crew member.')
+    Alert.alert('Cleared', 'Shoot days removed for this crew member.')
   }
 
   const savePersonInfo = async () => {
@@ -723,10 +728,9 @@ export function ProjectCrewTab({
             <TouchableOpacity style={styles.rowText} onPress={() => openPersonCard(m)}>
               <Text style={styles.name}>{m.name}</Text>
               <Text style={styles.role}>{m.subtitle}</Text>
-              {m.source === 'registered' &&
-              formatProductionWindowSummary(m.scheduling_start_date, m.scheduling_end_date) ? (
+              {m.source === 'registered' && formatBookedDaysSummary(m.bookingDates) ? (
                 <Text style={styles.scheduleLine} numberOfLines={2}>
-                  {formatProductionWindowSummary(m.scheduling_start_date, m.scheduling_end_date)}
+                  {formatBookedDaysSummary(m.bookingDates)}
                 </Text>
               ) : null}
             </TouchableOpacity>
@@ -841,51 +845,54 @@ export function ProjectCrewTab({
                     : 'Project contact details are set by the client or lead. Names come from each person’s Crea profile.'}
             </Text>
             {selectedCrew?.source === 'registered' &&
-            canManage &&
             selectedCrew.member_role !== 'company' &&
             !workspaceOnly ? (
               <View style={styles.memberSchedBox}>
-                <Text style={styles.modalSectionKicker}>Their production window</Text>
-                <Text style={styles.modalHintSmall}>
-                  Inclusive YYYY-MM-DD. When the project is active, these days block on this person&apos;s public
-                  calendar.
-                </Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="Start YYYY-MM-DD"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  value={memberSchedStart}
-                  onChangeText={setMemberSchedStart}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="End YYYY-MM-DD"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  value={memberSchedEnd}
-                  onChangeText={setMemberSchedEnd}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <View style={styles.modalSchedActions}>
-                  <TouchableOpacity
-                    style={[styles.modalSave, (savingMemberSchedule || busy) && styles.dim]}
-                    onPress={() => void saveMemberProductionDates()}
-                    disabled={savingMemberSchedule || busy}
-                  >
-                    <Text style={styles.modalSaveText}>
-                      {savingMemberSchedule ? 'Saving…' : 'Save production dates'}
+                <Text style={styles.modalSectionKicker}>Shoot days on this job</Text>
+                {canManage ? (
+                  <>
+                    <Text style={styles.modalHintSmall}>
+                      Tap days within the overall production window (Overview). Only selected days block this person&apos;s
+                      public calendar when the project is active.
                     </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.modalGhost}
-                    onPress={() => void clearMemberProductionDates()}
-                    disabled={savingMemberSchedule || busy}
-                  >
-                    <Text style={styles.modalGhostText}>Clear</Text>
-                  </TouchableOpacity>
-                </View>
+                    <CrewMemberBookedDaysCalendar
+                      productionWindowStart={productionWindowStart}
+                      productionWindowEnd={productionWindowEnd}
+                      selectedDates={memberBookedDraftDates}
+                      disabled={savingMemberSchedule || busy}
+                      onToggleIso={(iso) => {
+                        setMemberBookedDraftDates((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(iso)) next.delete(iso)
+                          else next.add(iso)
+                          return [...next].sort()
+                        })
+                      }}
+                    />
+                    <View style={styles.modalSchedActions}>
+                      <TouchableOpacity
+                        style={[styles.modalSave, (savingMemberSchedule || busy) && styles.dim]}
+                        onPress={() => void saveMemberProductionDates()}
+                        disabled={savingMemberSchedule || busy}
+                      >
+                        <Text style={styles.modalSaveText}>
+                          {savingMemberSchedule ? 'Saving…' : 'Save shoot days'}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.modalGhost}
+                        onPress={() => void clearMemberProductionDates()}
+                        disabled={savingMemberSchedule || busy}
+                      >
+                        <Text style={styles.modalGhostText}>Clear</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  <Text style={styles.modalReadonlyValue}>
+                    {formatBookedDaysSummary(selectedCrew.bookingDates) ?? 'No shoot days booked yet.'}
+                  </Text>
+                )}
               </View>
             ) : null}
             <TextInput

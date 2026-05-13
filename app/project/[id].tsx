@@ -1023,6 +1023,8 @@ export default function ProjectWorkspaceScreen() {
                     canManage={canManageCrew}
                     workspaceOnly={workspaceOnlyPlan}
                     proFeaturesEnabled={!starterFreelancerPlan}
+                    productionWindowStart={scheduleStart}
+                    productionWindowEnd={scheduleEnd}
                   />
                 )}
                 {tab === 'files' && <ProjectFilesTab projectId={project.id} />}
