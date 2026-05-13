@@ -28,6 +28,7 @@ import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWork
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProjectMilestonesTab } from '@/components/project/ProjectMilestonesTab'
 import { ProjectMessagesTab } from '@/components/project/ProjectMessagesTab'
+import { ProjectBudgetTab } from '@/components/project/ProjectBudgetTab'
 import { ProjectCrewTab } from '@/components/project/ProjectCrewTab'
 import { ProjectFilesTab } from '@/components/project/ProjectFilesTab'
 import { ProjectReviewTab } from '@/components/project/ProjectReviewTab'
@@ -59,6 +60,7 @@ type TabId =
   | 'milestones'
   | 'production'
   | 'crew'
+  | 'budget'
   | 'messages'
   | 'files'
   | 'review'
@@ -439,14 +441,25 @@ export default function ProjectWorkspaceScreen() {
     setProductionApplyDate(todayLocalISODate())
   }, [project?.id])
 
-  const tabs = useMemo(
-    () => (workspaceOnlyPlan ? BASE_TABS.filter((t) => t.id !== 'messages') : BASE_TABS),
-    [workspaceOnlyPlan]
-  )
+  const viewerIsCompanyOnProject = Boolean(project && userId && project.company_id === userId)
+
+  const tabs = useMemo(() => {
+    let list = [...BASE_TABS]
+    if (viewerIsCompanyOnProject) {
+      const ix = list.findIndex((t) => t.id === 'crew')
+      const insertAt = ix >= 0 ? ix + 1 : list.length
+      list = [...list.slice(0, insertAt), { id: 'budget' as const, label: 'Budget' }, ...list.slice(insertAt)]
+    }
+    return workspaceOnlyPlan ? list.filter((t) => t.id !== 'messages') : list
+  }, [workspaceOnlyPlan, viewerIsCompanyOnProject])
 
   useEffect(() => {
     if (workspaceOnlyPlan && tab === 'messages') setTab('overview')
   }, [workspaceOnlyPlan, tab])
+
+  useEffect(() => {
+    if (tab === 'budget' && !viewerIsCompanyOnProject) setTab('overview')
+  }, [tab, viewerIsCompanyOnProject])
 
   const canManageCrew = useMemo(() => {
     if (!project || !userId) return false
@@ -946,6 +959,7 @@ export default function ProjectWorkspaceScreen() {
     tab === 'milestones' ||
     tab === 'production' ||
     tab === 'crew' ||
+    tab === 'budget' ||
     tab === 'files'
 
   return (
@@ -978,7 +992,11 @@ export default function ProjectWorkspaceScreen() {
                 >
                   {isBrief ? (
                     <View style={styles.tabInner}>
-                      <Sparkles size={12} color={active ? '#0a0a0a' : '#FFDC00'} strokeWidth={ICON_STROKE} />
+                      <Sparkles
+                        size={12}
+                        color={active ? '#FFDC00' : 'rgba(255,220,0,0.45)'}
+                        strokeWidth={ICON_STROKE}
+                      />
                       <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
                     </View>
                   ) : (
@@ -1021,12 +1039,16 @@ export default function ProjectWorkspaceScreen() {
                   <ProjectCrewTab
                     projectId={project.id}
                     canManage={canManageCrew}
+                    viewerIsCompany={canEditProductionSchedule}
                     workspaceOnly={workspaceOnlyPlan}
                     proFeaturesEnabled={!starterFreelancerPlan}
                     productionWindowStart={scheduleStart}
                     productionWindowEnd={scheduleEnd}
                   />
                 )}
+                {tab === 'budget' && viewerIsCompanyOnProject ? (
+                  <ProjectBudgetTab projectId={project.id} />
+                ) : null}
                 {tab === 'files' && <ProjectFilesTab projectId={project.id} />}
               </View>
             </View>
@@ -1325,20 +1347,29 @@ const styles = StyleSheet.create({
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 12 },
   backLabel: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },
   headerTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: 'rgba(255,255,255,0.85)' },
-  tabScroll: { maxHeight: 48, marginBottom: 8 },
-  tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 8 },
-  tab: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 100,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: '#141414',
+  tabScroll: { flexGrow: 0, marginBottom: 12 },
+  tabRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
-  tabActive: { backgroundColor: '#FFDC00', borderColor: '#FFDC00' },
+  tab: {
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+  },
+  tabActive: {
+    backgroundColor: 'transparent',
+  },
   tabInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  tabText: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.55)' },
-  tabTextActive: { color: '#0a0a0a' },
+  tabText: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.4)' },
+  tabTextActive: { color: '#FFDC00', fontWeight: '700' },
   body: { flex: 1 },
   bodyContent: { paddingBottom: 40 },
   jobPhaseCard: {

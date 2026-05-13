@@ -11,6 +11,8 @@ type Props = {
   selectedDates: string[]
   onToggleIso: (iso: string) => void
   disabled?: boolean
+  /** Parent shows summary — omit long instructional copy above the grid */
+  hideInstructions?: boolean
 }
 
 const WEEK = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const
@@ -21,6 +23,7 @@ export function CrewMemberBookedDaysCalendar({
   selectedDates,
   onToggleIso,
   disabled = false,
+  hideInstructions = false,
 }: Props) {
   const todayIso = useMemo(() => toISODateLocal(new Date()), [])
 
@@ -62,15 +65,17 @@ export function CrewMemberBookedDaysCalendar({
 
   return (
     <View style={styles.wrap}>
-      {!windowOk ? (
-        <Text style={styles.warn}>
-          Set the overall production window on Overview first — then tap shoot days here (within that range).
-        </Text>
-      ) : (
-        <Text style={styles.hint}>
-          Tap days this person is booked (inside the job production window). Saves with “Save production dates”.
-        </Text>
-      )}
+      {!hideInstructions ? (
+        !windowOk ? (
+          <Text style={styles.warn}>
+            Set the overall production window on Overview first — then tap shoot days here (within that range).
+          </Text>
+        ) : (
+          <Text style={styles.hint}>
+            Tap days within the job production window, then save.
+          </Text>
+        )
+      ) : null}
       <View style={styles.monthNav}>
         <TouchableOpacity onPress={() => shiftMonth(-1)} hitSlop={12} accessibilityLabel="Previous month">
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />

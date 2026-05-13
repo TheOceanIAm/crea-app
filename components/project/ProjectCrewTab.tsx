@@ -14,7 +14,7 @@ import {
   useWindowDimensions,
 } from 'react-native'
 import { Swipeable } from 'react-native-gesture-handler'
-import { Trash2 } from 'lucide-react-native'
+import { Trash2, ChevronDown } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -86,6 +86,8 @@ type CrewRow =
 type Props = {
   projectId: string
   canManage: boolean
+  /** True when the signed-in user is the hiring company (`projects.company_id`). Used for shoot days + job contact fields. */
+  viewerIsCompany: boolean
   workspaceOnly?: boolean
   proFeaturesEnabled?: boolean
   /** Job production window (Overview); required to pick shoot days per freelancer. */
@@ -112,6 +114,7 @@ function crewAvatarUri(raw: string | null | undefined): string | null {
 export function ProjectCrewTab({
   projectId,
   canManage,
+  viewerIsCompany,
   workspaceOnly = false,
   proFeaturesEnabled = true,
   productionWindowStart,
@@ -140,6 +143,7 @@ export function ProjectCrewTab({
   const [personEmail, setPersonEmail] = useState('')
   const [personPhone, setPersonPhone] = useState('')
   const [memberBookedDraftDates, setMemberBookedDraftDates] = useState<string[]>([])
+  const [shootDatesEditorOpen, setShootDatesEditorOpen] = useState(false)
   const [savingMemberSchedule, setSavingMemberSchedule] = useState(false)
   const [viewerUserId, setViewerUserId] = useState<string | null>(null)
   const [projectContactEmail, setProjectContactEmail] = useState('')
@@ -417,6 +421,7 @@ export function ProjectCrewTab({
       setProjectContactLabel('')
     }
     setPersonModalOpen(true)
+    setShootDatesEditorOpen(false)
   }
 
   const canRemoveMember = (m: CrewRow | null) => {
@@ -433,16 +438,26 @@ export function ProjectCrewTab({
     )
   const canEditPersonFields = selectedCrew?.source === 'manual' || canEditOwnRegisteredRow
 
-  /** Company / lead: project-specific email, phone, contact line on project_members. */
-  const canEditProjectContact = Boolean(selectedCrew?.source === 'registered' && canManage)
+  /** Hiring company only: shoot days + project_members contact fields for freelancers (not leads). */
+  const companyCanEditMemberJobFields = Boolean(
+    viewerIsCompany &&
+      selectedCrew?.source === 'registered' &&
+      selectedCrew.member_role !== 'company'
+  )
 
   const canSavePersonModal =
     selectedCrew?.source === 'manual'
       ? canEditPersonFields
-      : Boolean(canEditProjectContact || canEditOwnRegisteredRow)
+      : Boolean(companyCanEditMemberJobFields || canEditOwnRegisteredRow)
 
   const saveMemberProductionDates = async () => {
-    if (!selectedCrew || selectedCrew.source !== 'registered' || selectedCrew.member_role === 'company') return
+    if (
+      !viewerIsCompany ||
+      !selectedCrew ||
+      selectedCrew.source !== 'registered' ||
+      selectedCrew.member_role === 'company'
+    )
+      return
     const ws = productionWindowStart.trim().slice(0, 10)
     const we = productionWindowEnd.trim().slice(0, 10)
     if (!/^\d{4}-\d{2}-\d{2}$/.test(ws) || !/^\d{4}-\d{2}-\d{2}$/.test(we)) {
@@ -470,11 +485,18 @@ export function ProjectCrewTab({
       return
     }
     load()
+    setShootDatesEditorOpen(false)
     Alert.alert('Saved', 'Their public calendar shows busy only on these days when the project is active.')
   }
 
   const clearMemberProductionDates = async () => {
-    if (!selectedCrew || selectedCrew.source !== 'registered' || selectedCrew.member_role === 'company') return
+    if (
+      !viewerIsCompany ||
+      !selectedCrew ||
+      selectedCrew.source !== 'registered' ||
+      selectedCrew.member_role === 'company'
+    )
+      return
     setSavingMemberSchedule(true)
     const { error } = await supabase
       .from('project_members')
@@ -528,7 +550,7 @@ export function ProjectCrewTab({
       return
     }
 
-    if (!canEditOwnRegisteredRow && !canEditProjectContact) {
+    if (!canEditOwnRegisteredRow && !companyCanEditMemberJobFields) {
       Alert.alert('Person info', 'You cannot edit this entry.')
       return
     }
@@ -548,7 +570,7 @@ export function ProjectCrewTab({
       }
     }
 
-    if (canEditProjectContact) {
+    if (companyCanEditMemberJobFields) {
       setBusy(true)
       const { error: pmErr } = await supabase
         .from('project_members')
@@ -838,59 +860,82 @@ export function ProjectCrewTab({
             <Text style={styles.modalHint}>
               {selectedCrew?.source === 'manual'
                 ? 'Edit contact details for this crew member.'
-                : canEditProjectContact
-                  ? '“On this project” is only for this job (call sheet / crew). Your own display name still updates your Crea profile when this card is you.'
+                : companyCanEditMemberJobFields
+                  ? 'Shoot days and “On this project” are for this job only (hiring company). Your display name still updates your Crea profile when this card is you.'
                   : canEditOwnRegisteredRow
-                    ? 'Your display name updates your Crea profile.'
-                    : 'Project contact details are set by the client or lead. Names come from each person’s Crea profile.'}
+                    ? 'Your display name updates your Crea profile. Shoot days and job contact are set by the hiring company.'
+                    : 'Shoot days and job contact can only be changed by the hiring company. Names come from each person’s Crea profile.'}
             </Text>
             {selectedCrew?.source === 'registered' &&
             selectedCrew.member_role !== 'company' &&
             !workspaceOnly ? (
               <View style={styles.memberSchedBox}>
-                <Text style={styles.modalSectionKicker}>Shoot days on this job</Text>
-                {canManage ? (
+                <Text style={styles.modalSectionKicker}>Booked for</Text>
+                {companyCanEditMemberJobFields ? (
                   <>
-                    <Text style={styles.modalHintSmall}>
-                      Tap days within the overall production window (Overview). Only selected days block this person&apos;s
-                      public calendar when the project is active.
-                    </Text>
-                    <CrewMemberBookedDaysCalendar
-                      productionWindowStart={productionWindowStart}
-                      productionWindowEnd={productionWindowEnd}
-                      selectedDates={memberBookedDraftDates}
-                      disabled={savingMemberSchedule || busy}
-                      onToggleIso={(iso) => {
-                        setMemberBookedDraftDates((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(iso)) next.delete(iso)
-                          else next.add(iso)
-                          return [...next].sort()
-                        })
-                      }}
-                    />
-                    <View style={styles.modalSchedActions}>
-                      <TouchableOpacity
-                        style={[styles.modalSave, (savingMemberSchedule || busy) && styles.dim]}
-                        onPress={() => void saveMemberProductionDates()}
-                        disabled={savingMemberSchedule || busy}
-                      >
-                        <Text style={styles.modalSaveText}>
-                          {savingMemberSchedule ? 'Saving…' : 'Save shoot days'}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.modalGhost}
-                        onPress={() => void clearMemberProductionDates()}
-                        disabled={savingMemberSchedule || busy}
-                      >
-                        <Text style={styles.modalGhostText}>Clear</Text>
-                      </TouchableOpacity>
-                    </View>
+                    <TouchableOpacity
+                      style={styles.bookedForExpandHeader}
+                      onPress={() => setShootDatesEditorOpen((o) => !o)}
+                      accessibilityRole="button"
+                      accessibilityLabel={shootDatesEditorOpen ? 'Hide calendar' : 'Change shoot days'}
+                    >
+                      <Text style={styles.bookedForSummaryText}>
+                        {formatBookedDaysSummary(memberBookedDraftDates) ?? 'Not set yet'}
+                      </Text>
+                      <ChevronDown
+                        size={20}
+                        color="rgba(255,255,255,0.55)"
+                        strokeWidth={ICON_STROKE}
+                        style={{
+                          transform: [{ rotate: shootDatesEditorOpen ? '180deg' : '0deg' }],
+                        }}
+                      />
+                    </TouchableOpacity>
+                    {!shootDatesEditorOpen ? (
+                      <Text style={styles.modalHintSmall}>
+                        Tap to pick days inside the production window (Overview). Only the hiring company can change this.
+                      </Text>
+                    ) : (
+                      <>
+                        <CrewMemberBookedDaysCalendar
+                          productionWindowStart={productionWindowStart}
+                          productionWindowEnd={productionWindowEnd}
+                          selectedDates={memberBookedDraftDates}
+                          disabled={savingMemberSchedule || busy}
+                          hideInstructions
+                          onToggleIso={(iso) => {
+                            setMemberBookedDraftDates((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(iso)) next.delete(iso)
+                              else next.add(iso)
+                              return [...next].sort()
+                            })
+                          }}
+                        />
+                        <View style={styles.modalSchedActions}>
+                          <TouchableOpacity
+                            style={[styles.modalSave, (savingMemberSchedule || busy) && styles.dim]}
+                            onPress={() => void saveMemberProductionDates()}
+                            disabled={savingMemberSchedule || busy}
+                          >
+                            <Text style={styles.modalSaveText}>
+                              {savingMemberSchedule ? 'Saving…' : 'Save shoot days'}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.modalGhost}
+                            onPress={() => void clearMemberProductionDates()}
+                            disabled={savingMemberSchedule || busy}
+                          >
+                            <Text style={styles.modalGhostText}>Clear</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </>
+                    )}
                   </>
                 ) : (
                   <Text style={styles.modalReadonlyValue}>
-                    {formatBookedDaysSummary(selectedCrew.bookingDates) ?? 'No shoot days booked yet.'}
+                    {formatBookedDaysSummary(selectedCrew.bookingDates) ?? 'Not set yet'}
                   </Text>
                 )}
               </View>
@@ -946,33 +991,37 @@ export function ProjectCrewTab({
                   Who is the contact for this job (e.g. producer on set)? Optional — only stored for this listing.
                 </Text>
                 <TextInput
-                  style={[styles.modalInput, styles.modalInputMultiline]}
+                  style={[
+                    styles.modalInput,
+                    styles.modalInputMultiline,
+                    !companyCanEditMemberJobFields && styles.modalInputLocked,
+                  ]}
                   placeholder="Contact person / note for crew…"
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   value={projectContactLabel}
                   onChangeText={setProjectContactLabel}
                   multiline
                   textAlignVertical="top"
-                  editable={canEditProjectContact}
+                  editable={companyCanEditMemberJobFields}
                 />
                 <TextInput
-                  style={[styles.modalInput, !canEditProjectContact && styles.modalInputLocked]}
+                  style={[styles.modalInput, !companyCanEditMemberJobFields && styles.modalInputLocked]}
                   placeholder="Email for this job"
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   value={projectContactEmail}
                   onChangeText={setProjectContactEmail}
                   autoCapitalize="none"
                   keyboardType="email-address"
-                  editable={canEditProjectContact}
+                  editable={companyCanEditMemberJobFields}
                 />
                 <TextInput
-                  style={[styles.modalInput, !canEditProjectContact && styles.modalInputLocked]}
+                  style={[styles.modalInput, !companyCanEditMemberJobFields && styles.modalInputLocked]}
                   placeholder="Phone for this job"
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   value={projectContactPhone}
                   onChangeText={setProjectContactPhone}
                   keyboardType="phone-pad"
-                  editable={canEditProjectContact}
+                  editable={companyCanEditMemberJobFields}
                 />
               </View>
             ) : null}
@@ -1182,6 +1231,21 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.45)',
     textTransform: 'uppercase',
     marginBottom: 6,
+  },
+  bookedForExpandHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingVertical: 6,
+    marginBottom: 4,
+  },
+  bookedForSummaryText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFDC00',
+    lineHeight: 20,
   },
   modalHintSmall: { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginBottom: 10, lineHeight: 16 },
   modalSchedActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginTop: 4 },
