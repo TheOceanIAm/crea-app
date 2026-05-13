@@ -40,6 +40,8 @@ type ProjectListing = {
   updatedAt: string | null
   categoryLabel: string
   isArchived: boolean
+  /** Customer jobs: native workspace (`/project/:id`); set when `projects.job_id` exists */
+  workspaceProjectId?: string | null
 }
 
 type WorkspaceProject = {
@@ -386,6 +388,17 @@ export default function WorkspaceProjectsScreen() {
       jobsById = Object.fromEntries(((jobRows ?? []) as JobRow[]).map((j) => [j.id, j]))
     }
 
+    const workspaceProjectIdByJobId: Record<string, string> = {}
+    if (allJobIds.length > 0) {
+      const { data: linkRows } = await supabase.from('projects').select('id, job_id').in('job_id', allJobIds)
+      for (const row of linkRows ?? []) {
+        const jid = String((row as { job_id?: string | null }).job_id ?? '').trim()
+        const pid = String((row as { id?: string | null }).id ?? '').trim()
+        if (!jid || !pid) continue
+        if (!workspaceProjectIdByJobId[jid]) workspaceProjectIdByJobId[jid] = pid
+      }
+    }
+
     const companyIds = [...new Set(Object.values(jobsById).map((j) => j.company_id).filter(Boolean))] as string[]
     const [{ data: companyProfiles }, { data: companyNames }] = await Promise.all([
       companyIds.length
@@ -454,6 +467,7 @@ export default function WorkspaceProjectsScreen() {
           updatedAt: typeof updatedRaw === 'string' ? updatedRaw : null,
           categoryLabel: String(job.category ?? '').trim() || 'Job',
           isArchived: false,
+          workspaceProjectId: workspaceProjectIdByJobId[job.id] ?? null,
         })
       }
     }
@@ -598,6 +612,8 @@ export default function WorkspaceProjectsScreen() {
   const openListing = (item: ProjectListing) => {
     if (item.kind === 'private') {
       router.push(`/project/${item.id}` as Href)
+    } else if (item.workspaceProjectId) {
+      router.push(`/project/${item.workspaceProjectId}` as Href)
     } else {
       router.push(`/(tabs)/jobs/${item.id}` as Href)
     }
