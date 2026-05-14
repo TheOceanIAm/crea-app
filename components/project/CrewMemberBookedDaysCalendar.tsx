@@ -4,12 +4,14 @@ import { ChevronLeft, ChevronRight } from 'lucide-react-native'
 import { buildMonthSlotMatrix } from '@/lib/calendarMonth'
 import { toISODateLocal } from '@/lib/availabilityCalendar'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import type { BookedDateEntry } from '@/lib/memberBookedDates'
 
 type Props = {
   productionWindowStart: string
   productionWindowEnd: string
-  selectedDates: string[]
-  onToggleIso: (iso: string) => void
+  bookedSlots: BookedDateEntry[]
+  /** Cycles each cell: off → full day → half day → off */
+  onCycleIso: (iso: string) => void
   disabled?: boolean
   /** Parent shows summary — omit long instructional copy above the grid */
   hideInstructions?: boolean
@@ -20,8 +22,8 @@ const WEEK = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const
 export function CrewMemberBookedDaysCalendar({
   productionWindowStart,
   productionWindowEnd,
-  selectedDates,
-  onToggleIso,
+  bookedSlots,
+  onCycleIso,
   disabled = false,
   hideInstructions = false,
 }: Props) {
@@ -49,7 +51,13 @@ export function CrewMemberBookedDaysCalendar({
     [viewDate],
   )
 
-  const selectedSet = useMemo(() => new Set(selectedDates), [selectedDates])
+  const unitsByIso = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const s of bookedSlots) {
+      if (s.units > 0) m.set(s.date, s.units)
+    }
+    return m
+  }, [bookedSlots])
 
   const monthLabel = viewDate.toLocaleString('en-US', { month: 'long', year: 'numeric' }).toUpperCase()
 
@@ -72,7 +80,7 @@ export function CrewMemberBookedDaysCalendar({
           </Text>
         ) : (
           <Text style={styles.hint}>
-            Tap days within the job production window, then save.
+            Tap a day to cycle: off → full day → half day → off. Then save.
           </Text>
         )
       ) : null}
@@ -100,7 +108,9 @@ export function CrewMemberBookedDaysCalendar({
               const dayNum = Number(iso.slice(8, 10))
               const tap = canTapCell(iso)
               const isPast = iso < todayIso
-              const isSel = selectedSet.has(iso)
+              const u = unitsByIso.get(iso) ?? 0
+              const isFull = u >= 1
+              const isHalf = u > 0 && u < 1
               const isToday = iso === todayIso
               const outside = windowOk && (iso < ws || iso > we)
 
@@ -111,9 +121,9 @@ export function CrewMemberBookedDaysCalendar({
                     disabled={!tap}
                     onPress={() => {
                       if (!tap) return
-                      onToggleIso(iso)
+                      onCycleIso(iso)
                     }}
-                    accessibilityLabel={`Toggle shoot day ${iso}`}
+                    accessibilityLabel={`Cycle shoot day ${iso}`}
                   >
                     {isToday ? <View style={styles.todayDot} /> : null}
                     <View
@@ -121,14 +131,24 @@ export function CrewMemberBookedDaysCalendar({
                         styles.dayBox,
                         tap && styles.daySelectable,
                         (!tap || isPast || outside) && styles.dayMuted,
-                        isSel && styles.daySelected,
+                        isFull && styles.daySelected,
+                        isHalf && styles.dayHalf,
                       ]}
                     >
                       <Text
-                        style={[styles.cellNum, (!tap || outside) && styles.cellNumMuted, isSel && styles.cellNumSel]}
+                        style={[
+                          styles.cellNum,
+                          (!tap || outside) && styles.cellNumMuted,
+                          (isFull || isHalf) && styles.cellNumSel,
+                        ]}
                       >
                         {dayNum}
                       </Text>
+                      {isHalf ? (
+                        <Text style={styles.halfBadge} accessibilityLabel="Half day">
+                          ½
+                        </Text>
+                      ) : null}
                     </View>
                   </Pressable>
                 </View>
@@ -177,6 +197,7 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   dayBox: {
+    position: 'relative',
     width: '100%',
     minHeight: 32,
     maxWidth: 44,
@@ -198,6 +219,19 @@ const styles = StyleSheet.create({
     borderColor: '#FFDC00',
     borderWidth: 2,
     backgroundColor: 'rgba(255,220,0,0.14)',
+  },
+  dayHalf: {
+    borderColor: 'rgba(255,220,0,0.65)',
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    backgroundColor: 'rgba(255,220,0,0.07)',
+  },
+  halfBadge: {
+    position: 'absolute',
+    bottom: 1,
+    fontSize: 8,
+    fontWeight: '800',
+    color: '#FFDC00',
   },
   cellNum: { fontSize: 11, color: 'rgba(134,239,172,0.95)', fontWeight: '600' },
   cellNumMuted: { color: 'rgba(255,255,255,0.22)' },

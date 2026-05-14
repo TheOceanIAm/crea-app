@@ -216,13 +216,14 @@ export default function ProjectWorkspaceScreen() {
 
   const refreshProjectCounts = useCallback(async () => {
     if (!project?.id) return
+    const companyOwnsProject = Boolean(userId && project.company_id === userId)
     const [{ data: next }, applicantsRes] = await Promise.all([
       supabase
         .from('projects')
         .select('milestones_completed, milestones_total')
         .eq('id', project.id)
         .maybeSingle(),
-      project.job_id
+      companyOwnsProject && project.job_id
         ? supabase
             .from('job_applications')
             .select('*', { count: 'exact', head: true })
@@ -246,8 +247,8 @@ export default function ProjectWorkspaceScreen() {
           : prev
       )
     }
-    setApplicants(applicantsRes.count ?? 0)
-  }, [project?.id, project?.job_id])
+    setApplicants(companyOwnsProject ? (applicantsRes.count ?? 0) : 0)
+  }, [project?.id, project?.job_id, project?.company_id, userId])
 
   const load = useCallback(async () => {
     const timed = await runTimed('project-workspace.load', async () => {
@@ -351,11 +352,13 @@ export default function ProjectWorkspaceScreen() {
 
     const p = row as ProjectRow
 
+    const viewerIsCompanyOnProject = p.company_id === user.id
+
     const [{ data: jobPhase }, applicantsRes] = await Promise.all([
       p.job_id
         ? supabase.from('jobs').select('project_status, description').eq('id', p.job_id).maybeSingle()
         : Promise.resolve({ data: null }),
-      p.job_id
+      viewerIsCompanyOnProject && p.job_id
         ? supabase
             .from('job_applications')
             .select('*', { count: 'exact', head: true })
@@ -421,7 +424,7 @@ export default function ProjectWorkspaceScreen() {
     setScheduleEnd(typeof p.scheduling_end_date === 'string' ? p.scheduling_end_date.slice(0, 10) : '')
     setForbidden(false)
 
-    setApplicants(applicantsRes.count ?? 0)
+    setApplicants(viewerIsCompanyOnProject ? (applicantsRes.count ?? 0) : 0)
 
     setLoading(false)
     return { hasJob: Boolean(p.job_id) }
@@ -914,7 +917,7 @@ export default function ProjectWorkspaceScreen() {
 
   const statsRow = (
     <View style={styles.statsRow}>
-      {!workspaceOnlyPlan ? (
+      {viewerIsCompanyOnProject && project.job_id ? (
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>Applicants</Text>
           <Text style={styles.statValue}>{applicants}</Text>

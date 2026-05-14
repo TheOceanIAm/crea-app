@@ -19,10 +19,14 @@ import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import {
-  clampDatesToWindow,
-  formatBookedDaysSummary,
-  memberBookedDatesFromRow,
+  clampBookedEntriesToWindow,
+  calendarDatesFromSlots,
+  cycleBookedDaySlot,
+  formatBookedSlotsSummary,
+  memberBookedSlotsFromRow,
+  serializeBookedDateEntries,
   syncSchedulingRangeFromDates,
+  type BookedDateEntry,
 } from '@/lib/memberBookedDates'
 import { CrewMemberBookedDaysCalendar } from '@/components/project/CrewMemberBookedDaysCalendar'
 
@@ -71,6 +75,7 @@ type CrewRow =
       contact_label?: string | null
       /** Resolved shoot days (booked_dates or legacy scheduling range). */
       bookingDates: string[]
+      bookingSlots: BookedDateEntry[]
     }
   | {
       source: 'manual'
@@ -142,7 +147,7 @@ export function ProjectCrewTab({
   const [personRole, setPersonRole] = useState('crew')
   const [personEmail, setPersonEmail] = useState('')
   const [personPhone, setPersonPhone] = useState('')
-  const [memberBookedDraftDates, setMemberBookedDraftDates] = useState<string[]>([])
+  const [memberBookedDraftSlots, setMemberBookedDraftSlots] = useState<BookedDateEntry[]>([])
   const [shootDatesEditorOpen, setShootDatesEditorOpen] = useState(false)
   const [savingMemberSchedule, setSavingMemberSchedule] = useState(false)
   const [viewerUserId, setViewerUserId] = useState<string | null>(null)
@@ -220,7 +225,8 @@ export function ProjectCrewTab({
           : roleDisplay
       const profileEmail =
         typeof p?.email === 'string' && p.email.trim().length > 0 ? p.email.trim() : null
-      const bookingDates = memberBookedDatesFromRow(m)
+      const bookingSlots = memberBookedSlotsFromRow(m)
+      const bookingDates = calendarDatesFromSlots(bookingSlots)
       return {
         source: 'registered' as const,
         id: m.id,
@@ -239,6 +245,7 @@ export function ProjectCrewTab({
         scheduling_end_date:
           typeof sEnd === 'string' ? sEnd.slice(0, 10) : sEnd != null ? String(sEnd).slice(0, 10) : null,
         bookingDates,
+        bookingSlots,
       }
     })
 
@@ -410,12 +417,12 @@ export function ProjectCrewTab({
     setPersonEmail((m.email ?? '').trim())
     setPersonPhone((m.phone ?? '').trim())
     if (m.source === 'registered') {
-      setMemberBookedDraftDates([...m.bookingDates])
+      setMemberBookedDraftSlots([...m.bookingSlots])
       setProjectContactEmail((m.contact_email ?? '').trim() || (m.email ?? '').trim())
       setProjectContactPhone((m.contact_phone ?? '').trim())
       setProjectContactLabel((m.contact_label ?? '').trim())
     } else {
-      setMemberBookedDraftDates([])
+      setMemberBookedDraftSlots([])
       setProjectContactEmail('')
       setProjectContactPhone('')
       setProjectContactLabel('')
@@ -468,13 +475,15 @@ export function ProjectCrewTab({
       Alert.alert('Production window', 'End date must be on or after start.')
       return
     }
-    const dates = clampDatesToWindow(memberBookedDraftDates, ws, we)
-    const { start, end } = syncSchedulingRangeFromDates(dates)
+    const clamped = clampBookedEntriesToWindow(memberBookedDraftSlots, ws, we)
+    const payload = serializeBookedDateEntries(clamped)
+    const dateKeys = calendarDatesFromSlots(clamped)
+    const { start, end } = syncSchedulingRangeFromDates(dateKeys)
     setSavingMemberSchedule(true)
     const { error } = await supabase
       .from('project_members')
       .update({
-        booked_dates: dates.length > 0 ? dates : null,
+        booked_dates: payload.length > 0 ? payload : null,
         scheduling_start_date: start,
         scheduling_end_date: end,
       })
@@ -511,7 +520,7 @@ export function ProjectCrewTab({
       Alert.alert('Clear failed', error.message)
       return
     }
-    setMemberBookedDraftDates([])
+    setMemberBookedDraftSlots([])
     load()
     Alert.alert('Cleared', 'Shoot days removed for this crew member.')
   }
@@ -750,9 +759,9 @@ export function ProjectCrewTab({
             <TouchableOpacity style={styles.rowText} onPress={() => openPersonCard(m)}>
               <Text style={styles.name}>{m.name}</Text>
               <Text style={styles.role}>{m.subtitle}</Text>
-              {m.source === 'registered' && formatBookedDaysSummary(m.bookingDates) ? (
+              {m.source === 'registered' && formatBookedSlotsSummary(m.bookingSlots) ? (
                 <Text style={styles.scheduleLine} numberOfLines={2}>
-                  {formatBookedDaysSummary(m.bookingDates)}
+                  {formatBookedSlotsSummary(m.bookingSlots)}
                 </Text>
               ) : null}
             </TouchableOpacity>
@@ -880,7 +889,7 @@ export function ProjectCrewTab({
                       accessibilityLabel={shootDatesEditorOpen ? 'Hide calendar' : 'Change shoot days'}
                     >
                       <Text style={styles.bookedForSummaryText}>
-                        {formatBookedDaysSummary(memberBookedDraftDates) ?? 'Not set yet'}
+                        {formatBookedSlotsSummary(memberBookedDraftSlots) ?? 'Not set yet'}
                       </Text>
                       <ChevronDown
                         size={20}
@@ -893,23 +902,18 @@ export function ProjectCrewTab({
                     </TouchableOpacity>
                     {!shootDatesEditorOpen ? (
                       <Text style={styles.modalHintSmall}>
-                        Tap to pick days inside the production window (Overview). Only the hiring company can change this.
+                        Tap to cycle days: off → full → half (within the production window). Only the hiring company can change this.
                       </Text>
                     ) : (
                       <>
                         <CrewMemberBookedDaysCalendar
                           productionWindowStart={productionWindowStart}
                           productionWindowEnd={productionWindowEnd}
-                          selectedDates={memberBookedDraftDates}
+                          bookedSlots={memberBookedDraftSlots}
                           disabled={savingMemberSchedule || busy}
                           hideInstructions
-                          onToggleIso={(iso) => {
-                            setMemberBookedDraftDates((prev) => {
-                              const next = new Set(prev)
-                              if (next.has(iso)) next.delete(iso)
-                              else next.add(iso)
-                              return [...next].sort()
-                            })
+                          onCycleIso={(iso) => {
+                            setMemberBookedDraftSlots((prev) => cycleBookedDaySlot(prev, iso))
                           }}
                         />
                         <View style={styles.modalSchedActions}>
@@ -935,7 +939,7 @@ export function ProjectCrewTab({
                   </>
                 ) : (
                   <Text style={styles.modalReadonlyValue}>
-                    {formatBookedDaysSummary(selectedCrew.bookingDates) ?? 'Not set yet'}
+                    {formatBookedSlotsSummary(selectedCrew.bookingSlots) ?? 'Not set yet'}
                   </Text>
                 )}
               </View>

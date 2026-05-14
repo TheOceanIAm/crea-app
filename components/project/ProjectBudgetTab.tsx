@@ -80,7 +80,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
       supabase
         .from('project_members')
         .select(
-          'profile_id, member_role, booked_dates, scheduling_start_date, scheduling_end_date, profiles(name, day_rate_amount, rates_currency)'
+          'profile_id, member_role, booked_dates, scheduling_start_date, scheduling_end_date, profiles(name, day_rate_amount, half_day_rate_amount, rates_currency)'
         )
         .eq('project_id', projectId),
     ])
@@ -255,8 +255,8 @@ export function ProjectBudgetTab({ projectId }: Props) {
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lead}>
-        Internal planning only — freelancers never see this. Crew cost uses shoot days × each person&apos;s public day
-        rate.
+        Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each
+        person&apos;s public day / half-day rate when set.
       </Text>
 
       <View style={styles.card}>
@@ -299,7 +299,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
           <Text style={styles.warn}>Some day rates use a different currency than the plan — totals may be misleading.</Text>
         ) : null}
         <Text style={styles.summaryBig}>{formatMoneyAmount(crew.total, currency)}</Text>
-        <Text style={styles.muted}>Booked shoot days × profile day rate (excludes client row).</Text>
+        <Text style={styles.muted}>Booked day-equivalents × profile rates (excludes client row). Half-days use half-day rate when set.</Text>
         {crew.lines.length === 0 ? (
           <Text style={styles.muted}>No booked days or rates yet.</Text>
         ) : (
@@ -309,7 +309,10 @@ export function ProjectBudgetTab({ projectId }: Props) {
                 {ln.displayName}
               </Text>
               <Text style={styles.crewMeta}>
-                {ln.days}d × {formatMoneyAmount(ln.dayRate, currency)}
+                {(ln.dayUnits % 1 === 0 ? String(ln.dayUnits) : ln.dayUnits.toFixed(1)) + 'd equiv'}
+                {ln.halfDayRate != null && ln.halfDayRate > 0
+                  ? ` · day ${formatMoneyAmount(ln.dayRate, currency)} / half ${formatMoneyAmount(ln.halfDayRate, currency)}`
+                  : ` · ${formatMoneyAmount(ln.dayRate, currency)} day`}
               </Text>
               <Text style={styles.crewAmt}>{formatMoneyAmount(ln.subtotal, currency)}</Text>
             </View>

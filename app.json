@@ -4,7 +4,7 @@
     "slug": "crea-app",
     "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./assets/CREA_icon.jpg",
+    "icon": "./assets/crea-icon.png",
     "scheme": "crea",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0a0a0a",
@@ -58,7 +58,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/icon.png",
+          "icon": "./assets/crea-icon.png",
           "color": "#FFDC00",
           "enableBackgroundRemoteNotifications": true
         }

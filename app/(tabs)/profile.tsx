@@ -148,7 +148,12 @@ function PlanRow({
   onPress: () => void
 }) {
   return (
-    <View style={[styles.planRowCard, current && styles.planRowCardCurrent]}>
+    <TouchableOpacity
+      style={[styles.planRowCard, current && styles.planRowCardCurrent]}
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.75}
+    >
       <View style={styles.planRowTop}>
         <View style={styles.planRowTitleCol}>
           <View style={styles.planRowTitleRow}>
@@ -162,15 +167,11 @@ function PlanRow({
           <Text style={styles.planRowPrice}>{price}</Text>
           <Text style={styles.planRowDesc}>{desc}</Text>
         </View>
-        <TouchableOpacity
-          style={[styles.planRowCta, disabled && styles.planRowCtaDisabled]}
-          onPress={onPress}
-          disabled={disabled}
-        >
+        <View style={[styles.planRowCta, disabled && styles.planRowCtaDisabled]}>
           <Text style={[styles.planRowCtaText, disabled && styles.planRowCtaTextDisabled]}>{cta}</Text>
-        </TouchableOpacity>
+        </View>
       </View>
-    </View>
+    </TouchableOpacity>
   )
 }
 
@@ -1690,50 +1691,6 @@ export default function ProfileScreen() {
                         </Text>
                       </TouchableOpacity>
                     ) : null}
-                    {freelancer && !stripeCustomerId ? (
-                      <View style={styles.inAppPayRow}>
-                        <TouchableOpacity
-                          style={[styles.secondaryBtn, stripeCheckoutBusy && styles.btnDisabled]}
-                          disabled={stripeCheckoutBusy}
-                          onPress={() => void startFreelancerPaidCheckout('starter')}
-                        >
-                          <Text style={styles.secondaryBtnText}>
-                            {stripeCheckoutBusy ? 'Please wait…' : 'Subscribe — Starter €9/mo'}
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.secondaryBtn, stripeCheckoutBusy && styles.btnDisabled]}
-                          disabled={stripeCheckoutBusy}
-                          onPress={() => void startFreelancerPaidCheckout('pro')}
-                        >
-                          <Text style={styles.secondaryBtnText}>
-                            {stripeCheckoutBusy ? 'Please wait…' : 'Subscribe — Pro €19/mo'}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : null}
-                    {company && !stripeCustomerId ? (
-                      <View style={styles.inAppPayRow}>
-                        <TouchableOpacity
-                          style={[styles.secondaryBtn, stripeCheckoutBusy && styles.btnDisabled]}
-                          disabled={stripeCheckoutBusy}
-                          onPress={() => void startCompanyPaidCheckout('studio')}
-                        >
-                          <Text style={styles.secondaryBtnText}>
-                            {stripeCheckoutBusy ? 'Please wait…' : 'Subscribe — Studio €89/mo'}
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.secondaryBtn, stripeCheckoutBusy && styles.btnDisabled]}
-                          disabled={stripeCheckoutBusy}
-                          onPress={() => void startCompanyPaidCheckout('agency')}
-                        >
-                          <Text style={styles.secondaryBtnText}>
-                            {stripeCheckoutBusy ? 'Please wait…' : 'Subscribe — Agency €129/mo'}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : null}
                   </View>
                 ) : null}
 
@@ -1743,19 +1700,41 @@ export default function ProfileScreen() {
                       title="Studio"
                       price="€89 / month"
                       desc="Up to 5 active project listings, crew pool up to 20, contract generator, standard support."
-                      cta={companyPlanTier === 'studio' ? 'Active' : switchingTrialPlan ? 'Switching…' : 'Use in trial'}
+                      cta={
+                        companyPlanTier === 'studio'
+                          ? 'Active'
+                          : switchingTrialPlan || stripeCheckoutBusy
+                            ? 'Please wait…'
+                            : stripeCustomerId
+                              ? 'Use in trial'
+                              : 'Subscribe'
+                      }
                       current={companyPlanTier === 'studio'}
-                      disabled={companyPlanTier === 'studio' || switchingTrialPlan}
-                      onPress={() => void switchTrialTier('studio')}
+                      disabled={companyPlanTier === 'studio' || switchingTrialPlan || stripeCheckoutBusy}
+                      onPress={() =>
+                        void (stripeCustomerId
+                          ? switchTrialTier('studio')
+                          : startCompanyPaidCheckout('studio'))
+                      }
                     />
                     <PlanRow
                       title="Agency"
                       price="€129 / month"
                       desc="Up to 15 listings, crew pool up to 50, team access (up to 3 users), integrations + priority support."
-                      cta={companyPlanTier === 'agency' ? 'Active' : switchingTrialPlan ? 'Switching…' : 'Use in trial'}
+                      cta={
+                        companyPlanTier === 'agency'
+                          ? 'Active'
+                          : switchingTrialPlan || stripeCheckoutBusy
+                            ? 'Please wait…'
+                            : stripeCustomerId
+                              ? 'Use in trial'
+                              : 'Subscribe'
+                      }
                       current={companyPlanTier === 'agency'}
-                      disabled={companyPlanTier === 'agency' || switchingTrialPlan}
-                      onPress={() => void switchTrialTier('agency')}
+                      disabled={companyPlanTier === 'agency' || switchingTrialPlan || stripeCheckoutBusy}
+                      onPress={() =>
+                        void (stripeCustomerId ? switchTrialTier('agency') : startCompanyPaidCheckout('agency'))
+                      }
                     />
                     <PlanRow
                       title="Business"
@@ -1798,19 +1777,41 @@ export default function ProfileScreen() {
                       title="Starter"
                       price="€9 / month"
                       desc="Basic profile, basic project feed, 2 active bookings/month, standard support."
-                      cta={subscriptionTier === 'starter' ? 'Active' : switchingTrialPlan ? 'Switching…' : 'Use in trial'}
+                      cta={
+                        subscriptionTier === 'starter'
+                          ? 'Active'
+                          : switchingTrialPlan || stripeCheckoutBusy
+                            ? 'Please wait…'
+                            : stripeCustomerId
+                              ? 'Use in trial'
+                              : 'Subscribe'
+                      }
                       current={subscriptionTier === 'starter'}
-                      disabled={subscriptionTier === 'starter' || switchingTrialPlan}
-                      onPress={() => void switchTrialTier('starter')}
+                      disabled={subscriptionTier === 'starter' || switchingTrialPlan || stripeCheckoutBusy}
+                      onPress={() =>
+                        void (stripeCustomerId
+                          ? switchTrialTier('starter')
+                          : startFreelancerPaidCheckout('starter'))
+                      }
                     />
                     <PlanRow
                       title="Pro"
                       price="€19 / month"
                       desc="Everything in Starter + post project listings, 5 active bookings/month, Project feed+."
-                      cta={subscriptionTier === 'pro' ? 'Active' : switchingTrialPlan ? 'Switching…' : 'Use in trial'}
+                      cta={
+                        subscriptionTier === 'pro'
+                          ? 'Active'
+                          : switchingTrialPlan || stripeCheckoutBusy
+                            ? 'Please wait…'
+                            : stripeCustomerId
+                              ? 'Use in trial'
+                              : 'Subscribe'
+                      }
                       current={subscriptionTier === 'pro'}
-                      disabled={subscriptionTier === 'pro' || switchingTrialPlan}
-                      onPress={() => void switchTrialTier('pro')}
+                      disabled={subscriptionTier === 'pro' || switchingTrialPlan || stripeCheckoutBusy}
+                      onPress={() =>
+                        void (stripeCustomerId ? switchTrialTier('pro') : startFreelancerPaidCheckout('pro'))
+                      }
                     />
                     <PlanRow
                       title="Premium"
@@ -2365,7 +2366,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     lineHeight: 18,
   },
-  inAppPayRow: { marginTop: 4, gap: 0 },
   primaryBtnText: { fontSize: 16, fontWeight: '800', color: '#0a0a0a' },
   placeholderBox: {
     marginTop: 20,

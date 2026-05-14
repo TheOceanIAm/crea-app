@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { parseIsoDateInput } from '@/lib/isoDateInput'
+import { formatJobCategoryRoles } from '@/lib/jobCategoryRoles'
 
 const CATEGORIES = ['Film / Video', 'Photo', 'Post / Edit', 'Motion', 'Design', 'Other'] as const
 const BUDGET_TYPES = [
@@ -35,7 +36,7 @@ export default function CompanyPostJobScreen() {
   const [allowed, setAllowed] = useState(false)
   const [saving, setSaving] = useState(false)
   const [title, setTitle] = useState('')
-  const [category, setCategory] = useState<string>(CATEGORIES[0])
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([CATEGORIES[0]])
   const [budgetType, setBudgetType] = useState<(typeof BUDGET_TYPES)[number]['id']>('negotiable')
   const [budgetAmount, setBudgetAmount] = useState('')
   const [budgetCurrency, setBudgetCurrency] = useState('EUR')
@@ -75,7 +76,11 @@ export default function CompanyPostJobScreen() {
     if (!user || !allowed) return
     const t = title.trim()
     if (!t) {
-      Alert.alert('Title', 'Please enter a project title.')
+      Alert.alert('Project title', 'Please enter a project title.')
+      return
+    }
+    if (selectedCategories.length === 0) {
+      Alert.alert('Roles', 'Pick at least one category.')
       return
     }
     let amount: number | null = null
@@ -118,7 +123,7 @@ export default function CompanyPostJobScreen() {
       .from('jobs')
       .insert({
         title: t,
-        category,
+        category: formatJobCategoryRoles(selectedCategories),
         budget_type: budgetType,
         budget_amount: amount,
         budget_currency,
@@ -198,24 +203,32 @@ export default function CompanyPostJobScreen() {
         <Text style={styles.title}>Post a project</Text>
         <Text style={styles.sub}>Freelancers can apply from the Jobs tab. You manage applicants on the project page.</Text>
 
-        <Text style={styles.label}>Title</Text>
+        <Text style={styles.label}>Project title</Text>
+        <Text style={styles.hintInline}>
+          Shown on the listing; freelancers see it prefilled in the invoice flow and can adjust it.
+        </Text>
         <TextInput
           style={styles.input}
           value={title}
           onChangeText={setTitle}
-          placeholder="e.g. Director of Photography — 3 day commercial"
+          placeholder="e.g. Spring campaign — hero film"
           placeholderTextColor="rgba(255,255,255,0.28)"
         />
 
-        <Text style={styles.label}>Category</Text>
+        <Text style={styles.label}>Roles</Text>
+        <Text style={styles.hintInline}>Pick one or more — they are stored together on the listing.</Text>
         <View style={styles.chipRow}>
           {CATEGORIES.map((c) => {
-            const sel = category === c
+            const sel = selectedCategories.includes(c)
             return (
               <TouchableOpacity
                 key={c}
                 style={[styles.chip, sel && styles.chipSelected]}
-                onPress={() => setCategory(c)}
+                onPress={() =>
+                  setSelectedCategories((prev) =>
+                    prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]
+                  )
+                }
               >
                 <Text style={[styles.chipText, sel && styles.chipTextSelected]}>{c}</Text>
               </TouchableOpacity>

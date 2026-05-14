@@ -1,9 +1,19 @@
-/** Inclusive calendar days from YYYY-MM-DD to YYYY-MM-DD (local date arithmetic). */
+/** Inclusive calendar days from YYYY-MM-DD to YYYY-MM-DD (local calendar; DST-safe). */
 export function inclusiveProductionDays(startYmd: string, endYmd: string): number {
-  const a = parseLocalYmd(startYmd)
-  const b = parseLocalYmd(endYmd)
-  if (!a || !b || b < a) return 0
-  return Math.round((b.getTime() - a.getTime()) / 86400000) + 1
+  const a = startYmd.trim().slice(0, 10)
+  const b = endYmd.trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return 0
+  const da = new Date(`${a}T12:00:00`)
+  const db = new Date(`${b}T12:00:00`)
+  if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return 0
+  const [from, to] = da <= db ? [da, db] : [db, da]
+  let n = 0
+  const cur = new Date(from)
+  while (cur <= to) {
+    n += 1
+    cur.setDate(cur.getDate() + 1)
+  }
+  return n
 }
 
 export function parseLocalYmd(s: string): Date | null {

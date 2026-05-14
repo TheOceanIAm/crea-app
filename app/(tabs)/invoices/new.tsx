@@ -107,7 +107,16 @@ export default function NewInvoiceScreen() {
         if (completed && (soloOk || crewOk)) {
           setLinkedJobId(job.id)
           setSelectedCompany(job.company_id)
-          setTitle((job.title || '').trim() || 'Invoice')
+          const { data: projectTitleRows } = await supabase
+            .from('projects')
+            .select('title, updated_at')
+            .eq('job_id', job.id)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+          const projectTitleOverride =
+            typeof projectTitleRows?.[0]?.title === 'string' ? projectTitleRows[0].title.trim() : ''
+          const effectiveTitle = projectTitleOverride || (job.title || '').trim()
+          setTitle(effectiveTitle || 'Invoice')
           const { data: clientProf } = await supabase
             .from('profiles')
             .select('id, name')
@@ -138,7 +147,7 @@ export default function NewInvoiceScreen() {
     }
     const t = title.trim()
     if (!t) {
-      Alert.alert('Title', 'Please enter an invoice title.')
+      Alert.alert('Project title', 'Please enter the project title shown on the invoice.')
       return
     }
     const amt = parseFloat(amount.replace(',', '.'))
@@ -276,12 +285,17 @@ export default function NewInvoiceScreen() {
           </View>
         )}
 
-        <Text style={styles.label}>Title</Text>
+        <Text style={styles.label}>Project title (on invoice)</Text>
+        {linkedJobId ? (
+          <Text style={styles.hintInline}>
+            Prefilled from the project / listing; edit if the client expects a different wording.
+          </Text>
+        ) : null}
         <TextInput
           style={styles.input}
           value={title}
           onChangeText={setTitle}
-          placeholder="e.g. Director fee — March shoot"
+          placeholder="e.g. Spring campaign — director fee"
           placeholderTextColor="rgba(255,255,255,0.28)"
         />
 
@@ -367,6 +381,13 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     marginBottom: 8,
     textTransform: 'uppercase',
+  },
+  hintInline: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.28)',
+    marginTop: -4,
+    marginBottom: 10,
+    lineHeight: 17,
   },
   chip: {
     paddingVertical: 12,

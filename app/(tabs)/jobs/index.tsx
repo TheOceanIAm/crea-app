@@ -329,7 +329,7 @@ export default function JobsListScreen() {
     const t = ceoTitle.trim()
     const email = ceoContactEmail.trim()
     if (!t) {
-      Alert.alert('Title required', 'Please enter a job title.')
+      Alert.alert('Title required', 'Please enter a project title.')
       return
     }
     if (!email || !/\S+@\S+\.\S+/.test(email)) {
