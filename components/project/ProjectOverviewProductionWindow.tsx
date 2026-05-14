@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native'
-import { ChevronLeft, ChevronRight } from 'lucide-react-native'
+import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react-native'
 import { formatProductionWindowSummary } from '@/lib/projectProductionWindow'
 import { buildMonthSlotMatrix } from '@/lib/calendarMonth'
 import { toISODateLocal } from '@/lib/availabilityCalendar'
@@ -72,6 +72,7 @@ export function ProjectOverviewProductionWindow({
 
   const todayIso = useMemo(() => toISODateLocal(new Date()), [])
 
+  const [calendarExpanded, setCalendarExpanded] = useState(false)
   const [viewDate, setViewDate] = useState(() => startOfMonth(new Date()))
   const [selectionMode, setSelectionMode] = useState<'tap' | 'range'>('range')
   const [rangeAnchorIso, setRangeAnchorIso] = useState<string | null>(null)
@@ -164,14 +165,34 @@ export function ProjectOverviewProductionWindow({
       {lockedByPlan ? (
         <Text style={styles.lockedHint}>Upgrade to Pro to sync busy dates to the freelancer&apos;s public profile.</Text>
       ) : null}
-      {summary ? (
+      {canEdit ? (
+        <Pressable
+          onPress={() => setCalendarExpanded((v) => !v)}
+          accessibilityRole="button"
+          accessibilityLabel={calendarExpanded ? 'Close production calendar' : 'Open production calendar'}
+          accessibilityState={{ expanded: calendarExpanded }}
+          style={({ pressed }) => [styles.dropdownTrigger, pressed && styles.dropdownTriggerPressed]}
+        >
+          <View style={[styles.summaryPill, styles.summaryPillInTrigger]}>
+            <Text style={summary ? styles.summaryText : styles.summaryTextMuted}>
+              {summary || 'No dates set yet — tap to choose'}
+            </Text>
+          </View>
+          <ChevronDown
+            size={22}
+            color="#FFDC00"
+            strokeWidth={ICON_STROKE}
+            style={{ transform: [{ rotate: calendarExpanded ? '180deg' : '0deg' }] }}
+          />
+        </Pressable>
+      ) : summary ? (
         <View style={styles.summaryPill}>
           <Text style={styles.summaryText}>{summary}</Text>
         </View>
       ) : (
         <Text style={styles.placeholder}>No dates set yet.</Text>
       )}
-      {canEdit ? (
+      {canEdit && calendarExpanded ? (
         <>
           <Text style={styles.calHint}>
             Same idea as the freelancer public calendar: use Range for a contiguous block (tap start, then end) or Tap to add /
@@ -276,7 +297,8 @@ export function ProjectOverviewProductionWindow({
             ) : null}
           </View>
         </>
-      ) : readOnly ? (
+      ) : null}
+      {canEdit ? null : readOnly ? (
         <Text style={styles.readOnlyHint}>Only the hiring company can edit these dates.</Text>
       ) : null}
     </View>
@@ -324,7 +346,24 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 10,
   },
+  summaryPillInTrigger: {
+    flex: 1,
+    minWidth: 0,
+    alignSelf: 'stretch',
+    marginBottom: 0,
+  },
+  dropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+    paddingVertical: 2,
+  },
+  dropdownTriggerPressed: {
+    opacity: 0.88,
+  },
   summaryText: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
+  summaryTextMuted: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.45)' },
   placeholder: { fontSize: 12, color: 'rgba(255,255,255,0.32)', marginBottom: 8 },
   calHint: {
     fontSize: 11,
