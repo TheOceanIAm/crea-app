@@ -23,6 +23,10 @@ function openFromData(router: ReturnType<typeof useRouter>, data: Record<string,
   if (type === 'workspace_ready' || type === 'project_message') {
     const pid = data.projectId
     if (typeof pid === 'string' && pid.length > 0) router.push(`/project/${pid}`)
+    return
+  }
+  if (type === 'profile_completion') {
+    router.push('/(tabs)/profile')
   }
 }
 

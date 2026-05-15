@@ -58,6 +58,13 @@ import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFrom
 import { resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { postTrialPlan } from '@/lib/trialPlanApi'
 import { openCreaServicesStripeUrl } from '@/lib/stripeWebCheckout'
+import {
+  computeCompanyProfileCompletion,
+  computeFreelancerProfileCompletion,
+  computeFreelancerBillingReadiness,
+  computeCompanyBillingReadiness,
+  type CompanyProfileCompletionRow,
+} from '@/lib/profile-completion'
 
 const SUPPORT_MAIL = 'mailto:support@crea.app?subject=CREA%20App%20Support'
 const TRIAL_END_LABEL = 'June 1, 2026'
@@ -237,6 +244,8 @@ export default function ProfileScreen() {
 
   const [authUserId, setAuthUserId] = useState<string | null>(null)
   const [shareProfileOpen, setShareProfileOpen] = useState(false)
+  /** Extra company_profiles columns for completion (industry, size, YouTube, etc.). */
+  const [companyCpExtras, setCompanyCpExtras] = useState<CompanyProfileCompletionRow | null>(null)
 
   const freelancer = isFreelancerProfile(role)
   const ceo = isCeoProfile(role)
@@ -254,6 +263,97 @@ export default function ProfileScreen() {
     if (t === 'studio' || t === 'agency' || t === 'business' || t === 'enterprise') return t
     return 'studio'
   }, [company, subscriptionTier])
+
+  const profileStrengthPct = useMemo(() => {
+    if (ceo) return null
+    if (freelancer) {
+      const dr = dayRate.trim() === '' ? null : Number.parseFloat(dayRate.replace(',', '.'))
+      const rate = dr != null && Number.isFinite(dr) && dr > 0 ? dr : null
+      return computeFreelancerProfileCompletion({
+        avatar_url: avatarUrl,
+        headline,
+        location,
+        bio,
+        skills: skillsList,
+        day_rate_amount: rate,
+        portfolio_website: portfolioWebsite,
+        portfolio_projects: portfolioProjects,
+      }).pct
+    }
+    if (company) {
+      const webPrimary = portfolioWebsite.trim()
+      const cpMerged: CompanyProfileCompletionRow = {
+        company_name: editName,
+        logo_url: companyCpExtras?.logo_url ?? avatarUrl ?? undefined,
+        website: webPrimary || companyCpExtras?.website?.trim() || undefined,
+        industry: companyCpExtras?.industry,
+        size: companyCpExtras?.size,
+        location,
+        bio,
+        instagram: portfolioInstagram.trim() || companyCpExtras?.instagram,
+        linkedin: portfolioLinkedin.trim() || companyCpExtras?.linkedin,
+        vimeo: portfolioVimeo.trim() || companyCpExtras?.vimeo,
+        behance: portfolioBehance.trim() || companyCpExtras?.behance,
+        youtube: companyCpExtras?.youtube,
+        twitter_x: companyCpExtras?.twitter_x,
+      }
+      return computeCompanyProfileCompletion(editName, avatarUrl, cpMerged).pct
+    }
+    return null
+  }, [
+    ceo,
+    freelancer,
+    company,
+    dayRate,
+    avatarUrl,
+    headline,
+    location,
+    bio,
+    skillsList,
+    portfolioWebsite,
+    portfolioProjects,
+    editName,
+    portfolioInstagram,
+    portfolioLinkedin,
+    portfolioVimeo,
+    portfolioBehance,
+    companyCpExtras,
+  ])
+
+  const billingReadinessPct = useMemo(() => {
+    if (ceo) return null
+    if (freelancer) {
+      return computeFreelancerBillingReadiness({
+        invoice_address: invoiceAddress,
+        bank_iban: bankIban,
+        bank_account_holder: bankHolder,
+        paypal_email: paypalEmail,
+        bank_bic: bankBic,
+        tax_number: taxNumber,
+      }).pct
+    }
+    if (company) {
+      return computeCompanyBillingReadiness({
+        billing_address: companyCpExtras?.billing_address ?? null,
+        billing_email: companyCpExtras?.billing_email ?? null,
+        account_email: email,
+        vat_id: companyCpExtras?.vat_id ?? null,
+      }).pct
+    }
+    return null
+  }, [
+    ceo,
+    freelancer,
+    company,
+    invoiceAddress,
+    bankIban,
+    bankHolder,
+    paypalEmail,
+    bankBic,
+    taxNumber,
+    companyCpExtras,
+    email,
+  ])
 
   const visibleMenuItems = useMemo(() => {
     if (ceo) return MENU_ITEMS.filter((item) => !CEO_HIDDEN_MENU_IDS.includes(item.id))
@@ -330,6 +430,7 @@ export default function ProfileScreen() {
       setHalfDayRate('')
       setRatesCurrency('EUR')
       setRatesNotes('')
+      setCompanyCpExtras(null)
     } else {
       setEditName(data?.name ?? '')
       setRole(resolveAppRole(data?.role, user))
@@ -361,19 +462,18 @@ export default function ProfileScreen() {
       // Freelancers: JWT `freelancer_plan` (same as web). Companies: JWT `company_plan` → company_profiles → profiles (crea-services webhook order).
       let effectiveTier: string
       if (appRole === 'freelancer') {
+        setCompanyCpExtras(null)
         effectiveTier = authTier
       } else if (appRole === 'company') {
-        const { data: cp } = await supabase
-          .from('company_profiles')
-          .select('subscription_plan')
-          .eq('id', user.id)
-          .maybeSingle()
+        const { data: cp } = await supabase.from('company_profiles').select('*').eq('id', user.id).maybeSingle()
+        setCompanyCpExtras(cp && typeof cp === 'object' ? (cp as CompanyProfileCompletionRow) : null)
         effectiveTier = resolveCompanySubscriptionPlanFromSources(
           user,
           data?.subscription_tier,
           (cp as { subscription_plan?: string } | null)?.subscription_plan
         )
       } else {
+        setCompanyCpExtras(null)
         effectiveTier =
           dbTier === 'pro' || dbTier === 'premium'
             ? dbTier
@@ -1004,6 +1104,56 @@ export default function ProfileScreen() {
                 <Text style={styles.errorMono}>extend_profile_settings_pages.sql</Text>, and{' '}
                 <Text style={styles.errorMono}>extend_profile_rates.sql</Text> (adds day rates). For jobs,
                 applications, and projects, also run <Text style={styles.errorMono}>crea_app_features.sql</Text>.
+              </Text>
+            </View>
+          ) : null}
+
+          {profileStrengthPct !== null ? (
+            <View style={styles.profileStrengthCard}>
+              <View style={styles.profileStrengthTop}>
+                <Text style={styles.profileStrengthTitle}>
+                  {company ? 'Company profile strength' : 'Profile strength'}
+                </Text>
+                <Text
+                  style={[
+                    styles.profileStrengthPct,
+                    profileStrengthPct >= 100 && styles.profileStrengthPctDone,
+                  ]}
+                >
+                  {profileStrengthPct}%
+                </Text>
+              </View>
+              <View style={styles.profileStrengthTrack}>
+                <View style={[styles.profileStrengthFill, { width: `${profileStrengthPct}%` }]} />
+              </View>
+              {profileStrengthPct < 100 ? (
+                <Text style={styles.profileStrengthHint}>
+                  Fill missing sections to reach 100%. Push reminders use the same checklist (optional under
+                  Notifications).
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          {billingReadinessPct !== null ? (
+            <View style={styles.billingReadinessCard}>
+              <View style={styles.profileStrengthTop}>
+                <Text style={styles.profileStrengthTitle}>Billing &amp; invoices</Text>
+                <Text
+                  style={[
+                    styles.profileStrengthPct,
+                    billingReadinessPct >= 100 && styles.profileStrengthPctDone,
+                  ]}
+                >
+                  {billingReadinessPct}%
+                </Text>
+              </View>
+              <View style={styles.profileStrengthTrack}>
+                <View style={[styles.billingReadinessFill, { width: `${billingReadinessPct}%` }]} />
+              </View>
+              <Text style={styles.billingReadinessPrivacy}>
+                For PDF invoices and payouts — not shown on your public profile. Complete details under Invoice
+                &amp; bank / Billing.
               </Text>
             </View>
           ) : null}
@@ -1925,6 +2075,20 @@ export default function ProfileScreen() {
                               thumbColor={notif.pushInvoiceReceiptConfirmed ? '#FFDC00' : '#888'}
                             />
                           </View>
+                          <View style={styles.notifyBlock}>
+                            <View style={styles.notifyBlockText}>
+                              <Text style={styles.notifyBlockTitle}>Profile reminders</Text>
+                              <Text style={styles.notifyBlockSub}>
+                                If your profile is still incomplete after a few days, we send one gentle nudge.
+                              </Text>
+                            </View>
+                            <Switch
+                              value={notif.pushProfileCompletion}
+                              onValueChange={(v) => setNotif((n) => ({ ...n, pushProfileCompletion: v }))}
+                              trackColor={{ false: '#333', true: 'rgba(255,220,0,0.35)' }}
+                              thumbColor={notif.pushProfileCompletion ? '#FFDC00' : '#888'}
+                            />
+                          </View>
                         </>
                       ) : null}
                       {company ? (
@@ -1963,6 +2127,20 @@ export default function ProfileScreen() {
                               onValueChange={(v) => setNotif((n) => ({ ...n, pushInvoiceReceived: v }))}
                               trackColor={{ false: '#333', true: 'rgba(255,220,0,0.35)' }}
                               thumbColor={notif.pushInvoiceReceived ? '#FFDC00' : '#888'}
+                            />
+                          </View>
+                          <View style={styles.notifyBlock}>
+                            <View style={styles.notifyBlockText}>
+                              <Text style={styles.notifyBlockTitle}>Profile reminders</Text>
+                              <Text style={styles.notifyBlockSub}>
+                                If your company profile is still incomplete after a few days, we send one gentle nudge.
+                              </Text>
+                            </View>
+                            <Switch
+                              value={notif.pushProfileCompletion}
+                              onValueChange={(v) => setNotif((n) => ({ ...n, pushProfileCompletion: v }))}
+                              trackColor={{ false: '#333', true: 'rgba(255,220,0,0.35)' }}
+                              thumbColor={notif.pushProfileCompletion ? '#FFDC00' : '#888'}
                             />
                           </View>
                         </>
@@ -2251,6 +2429,59 @@ const styles = StyleSheet.create({
   errorText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, marginBottom: 8 },
   errorHint: { color: 'rgba(255,255,255,0.35)', fontSize: 11, lineHeight: 16 },
   errorMono: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 10 },
+  profileStrengthCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  profileStrengthTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  profileStrengthTitle: { fontSize: 14, fontWeight: '700', color: '#ffffff' },
+  profileStrengthPct: { fontSize: 14, fontWeight: '900', color: 'rgba(255,255,255,0.55)', fontVariant: ['tabular-nums'] },
+  profileStrengthPctDone: { color: '#FFDC00' },
+  profileStrengthTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  profileStrengthFill: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#FFDC00',
+  },
+  profileStrengthHint: {
+    marginTop: 10,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.32)',
+    lineHeight: 15,
+  },
+  billingReadinessCard: {
+    backgroundColor: 'rgba(255,220,0,0.06)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.18)',
+  },
+  billingReadinessFill: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,220,0,0.92)',
+  },
+  billingReadinessPrivacy: {
+    marginTop: 10,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.38)',
+    lineHeight: 15,
+  },
   sectionCard: {
     backgroundColor: '#141414',
     borderRadius: 14,

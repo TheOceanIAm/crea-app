@@ -29,6 +29,8 @@ export type NotificationSettings = {
   pushInvoiceReceived: boolean
   /** Project crew chat (project_messages), not DMs */
   pushProjectChat: boolean
+  /** Reminder if profile stays below 100% after onboarding grace period (server cron). */
+  pushProfileCompletion: boolean
   expoPushToken: string | null
 }
 
@@ -47,6 +49,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   pushNewApplication: true,
   pushInvoiceReceived: true,
   pushProjectChat: true,
+  pushProfileCompletion: true,
   expoPushToken: null,
 }
 
@@ -84,6 +87,9 @@ export function parseNotificationSettings(raw: unknown): NotificationSettings {
       o.pushInvoiceReceived ?? DEFAULT_NOTIFICATION_SETTINGS.pushInvoiceReceived
     ),
     pushProjectChat: Boolean(o.pushProjectChat ?? DEFAULT_NOTIFICATION_SETTINGS.pushProjectChat),
+    pushProfileCompletion: Boolean(
+      o.pushProfileCompletion ?? DEFAULT_NOTIFICATION_SETTINGS.pushProfileCompletion
+    ),
     expoPushToken,
   }
 }
