@@ -31,8 +31,7 @@ begin
       'all_users', 0,
       'new_users', 0,
       'active_jobs', 0,
-      'completed_jobs', 0,
-      'recent_users', '[]'::jsonb
+      'completed_jobs', 0
     );
   end if;
 
@@ -55,26 +54,6 @@ begin
       select count(*)::int
       from public.jobs
       where lower(coalesce(status, '')) in ('completed', 'closed', 'filled', 'archived')
-    ),
-    'recent_users', coalesce(
-      (
-        select jsonb_agg(x.obj order by x.sort_ts desc)
-        from (
-          select
-            jsonb_build_object(
-              'id', pr.id,
-              'name', coalesce(pr.name, ''),
-              'role', coalesce(pr.role, ''),
-              'avatar_url', pr.avatar_url
-            ) as obj,
-            u.created_at as sort_ts
-          from public.profiles pr
-          inner join auth.users u on u.id = pr.id
-          order by u.created_at desc
-          limit 8
-        ) x
-      ),
-      '[]'::jsonb
     )
   );
 end;

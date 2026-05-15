@@ -83,7 +83,6 @@ type CeoSnapshot = {
   new_users: number
   active_jobs: number
   completed_jobs: number
-  recent_users: { id: string; name: string; role: string; avatar_url: string | null }[]
 }
 
 function parseCeoSnapshot(raw: unknown): CeoSnapshot {
@@ -93,27 +92,15 @@ function parseCeoSnapshot(raw: unknown): CeoSnapshot {
     new_users: 0,
     active_jobs: 0,
     completed_jobs: 0,
-    recent_users: [],
   }
   if (!raw || typeof raw !== 'object') return empty
   const o = raw as Record<string, unknown>
-  const recent = Array.isArray(o.recent_users) ? o.recent_users : []
   return {
     ok: o.ok === true,
     all_users: Number(o.all_users) || 0,
     new_users: Number(o.new_users) || 0,
     active_jobs: Number(o.active_jobs) || 0,
     completed_jobs: Number(o.completed_jobs) || 0,
-    recent_users: recent.map((r) => {
-      const row = r as Record<string, unknown>
-      const av = row.avatar_url
-      return {
-        id: String(row.id ?? ''),
-        name: String(row.name ?? ''),
-        role: String(row.role ?? ''),
-        avatar_url: typeof av === 'string' ? av : null,
-      }
-    }),
   }
 }
 
@@ -135,7 +122,6 @@ function quickActionsForRole(
   if (isCeoProfile(role ?? undefined)) {
     return [
       { label: 'Job pool', icon: Briefcase, href: '/(tabs)/jobs' },
-      { label: 'Workspace', icon: Layers, href: '/(tabs)/workspace-projects' },
       { label: 'Messages', icon: MessageCircle, href: '/(tabs)/messages' },
       { label: 'Invoices', icon: Receipt, href: '/(tabs)/invoices' },
       { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
@@ -433,7 +419,6 @@ export default function DashboardScreen() {
     { label: 'Subscriptions', icon: CircleDollarSign, onPress: () => router.push('/(tabs)/ceo-revenue' as Href) },
     { label: 'Messages', icon: MessageCircle, onPress: () => router.navigate('/(tabs)/messages') },
     { label: 'Job pool', icon: Briefcase, onPress: () => router.navigate('/(tabs)/jobs') },
-    { label: 'Workspace', icon: Layers, onPress: () => router.navigate('/(tabs)/workspace-projects') },
     { label: 'Settings', icon: Settings2, onPress: () => router.push('/(tabs)/ceo-settings' as Href) },
     {
       label: 'Web admin',
@@ -501,7 +486,7 @@ export default function DashboardScreen() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, styles.ceoScrollContent]}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
@@ -545,67 +530,30 @@ export default function DashboardScreen() {
             </View>
           ) : null}
 
-          <Text style={styles.sectionTitle}>Platform overview</Text>
-          <View style={styles.ceoStatsGrid}>
-            {statDefs.map((s) => {
-              const Icon = s.Icon
-              return (
-                <TouchableOpacity
-                  key={s.label}
-                  style={styles.ceoStatTile}
-                  activeOpacity={0.75}
-                  onPress={s.onPress}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${s.label}: ${s.value}. ${s.sub}. Tap to open.`}
-                >
-                  <View style={styles.ceoStatIconWrap}>
-                    <Icon size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-                  </View>
-                  <Text style={styles.ceoStatLabel}>{s.label}</Text>
-                  <Text style={styles.ceoStatValue}>{s.value}</Text>
-                  <Text style={styles.ceoStatSub}>{s.sub}</Text>
-                </TouchableOpacity>
-              )
-            })}
-          </View>
-
-          <Text style={styles.sectionTitle}>Recent users</Text>
-          <View style={styles.ceoRecentCard}>
-            {snap.recent_users.length === 0 ? (
-              <Text style={styles.ceoRecentEmpty}>No profiles yet</Text>
-            ) : (
-              snap.recent_users.map((u) => {
-                const uri = u.avatar_url?.trim() ?? ''
-                const show = /^https?:\/\//i.test(uri)
-                const initial = (u.name || '?').trim().charAt(0).toUpperCase() || '?'
+          <View style={styles.ceoOverviewShell}>
+            <Text style={styles.ceoOverviewHeading}>Platform overview</Text>
+            <View style={styles.ceoStatsGrid}>
+              {statDefs.map((s) => {
+                const Icon = s.Icon
                 return (
                   <TouchableOpacity
-                    key={u.id}
-                    style={styles.ceoRecentRow}
-                    activeOpacity={0.7}
-                    onPress={() => router.push(`/profile/${u.id}` as Href)}
+                    key={s.label}
+                    style={styles.ceoStatTile}
+                    activeOpacity={0.75}
+                    onPress={s.onPress}
                     accessibilityRole="button"
-                    accessibilityLabel={`Open public profile for ${u.name.trim() || 'user'}`}
+                    accessibilityLabel={`${s.label}: ${s.value}. ${s.sub}. Tap to open.`}
                   >
-                    {show ? (
-                      <Image source={{ uri }} style={styles.ceoRecentAvatar} />
-                    ) : (
-                      <View style={styles.ceoRecentAvatarPh}>
-                        <Text style={styles.ceoRecentAvatarLetter}>{initial}</Text>
-                      </View>
-                    )}
-                    <View style={styles.ceoRecentMeta}>
-                      <Text style={styles.ceoRecentName} numberOfLines={1}>
-                        {u.name.trim() || 'Unnamed'}
-                      </Text>
-                      <Text style={styles.ceoRecentRole} numberOfLines={1}>
-                        {(u.role || '—').trim()}
-                      </Text>
+                    <View style={styles.ceoStatIconWrap}>
+                      <Icon size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
                     </View>
+                    <Text style={styles.ceoStatLabel}>{s.label}</Text>
+                    <Text style={styles.ceoStatValue}>{s.value}</Text>
+                    <Text style={styles.ceoStatSub}>{s.sub}</Text>
                   </TouchableOpacity>
                 )
-              })
-            )}
+              })}
+            </View>
           </View>
 
           <Text style={styles.sectionTitle}>Quick actions</Text>
@@ -747,6 +695,7 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   /** Horizontal padding here so content + tab bar align; extra bottom so last row clears the tab bar. */
   scrollContent: { paddingHorizontal: 20, paddingBottom: 28 },
+  ceoScrollContent: { paddingBottom: 100 },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingTop: 20, paddingBottom: 28,
@@ -810,6 +759,21 @@ const styles = StyleSheet.create({
   },
   actionLabel: { fontSize: 13, color: 'rgba(255,255,255,0.7)', fontWeight: '600' },
   ceoHeaderText: { flex: 1, paddingRight: 12 },
+  ceoOverviewShell: {
+    backgroundColor: '#111111',
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  ceoOverviewHeading: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.45)',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    marginBottom: 14,
+  },
   ceoKicker: {
     fontSize: 10,
     fontWeight: '800',
@@ -817,14 +781,14 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     marginBottom: 6,
   },
-  ceoStatsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 28 },
+  ceoStatsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   ceoStatTile: {
     width: '47%',
-    backgroundColor: '#111111',
-    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   ceoStatIconWrap: {
     width: 36,
@@ -858,29 +822,6 @@ const styles = StyleSheet.create({
   ceoBannerText: { fontSize: 13, color: 'rgba(255,255,255,0.75)', lineHeight: 19 },
   ceoBannerHint: { fontSize: 11, color: 'rgba(255,255,255,0.45)', marginTop: 8, lineHeight: 16 },
   ceoMono: { fontFamily: 'monospace', fontSize: 12, color: '#FFDC00' },
-  ceoRecentCard: {
-    backgroundColor: '#111111',
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  ceoRecentEmpty: { fontSize: 13, color: 'rgba(255,255,255,0.35)', paddingVertical: 8 },
-  ceoRecentRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
-  ceoRecentAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#222' },
-  ceoRecentAvatarPh: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,220,0,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ceoRecentAvatarLetter: { fontSize: 16, fontWeight: '800', color: '#FFDC00' },
-  ceoRecentMeta: { flex: 1 },
-  ceoRecentName: { fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
-  ceoRecentRole: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 2, textTransform: 'capitalize' },
   actionCardDisabled: { opacity: 0.45 },
   ceoHint: { fontSize: 10, color: 'rgba(255,255,255,0.35)', marginTop: 4 },
   companyKicker: {

@@ -1,3 +1,4 @@
+import { ClimateCrisis_400Regular, useFonts } from '@expo-google-fonts/climate-crisis'
 import { BlurView } from 'expo-blur'
 import { useEffect, useRef } from 'react'
 import { Animated, Easing, Platform, StyleSheet, View } from 'react-native'
@@ -10,6 +11,7 @@ const REVEAL_MS = 1500
 
 /** Full-screen bootstrap: native Gaussian-ish blur (BlurView) fades off over {@link REVEAL_MS}, then wordmark pulses. */
 export function AppBootstrapLoading() {
+  const [fontsLoaded] = useFonts({ ClimateCrisis_400Regular })
   const softReveal = useRef(new Animated.Value(0)).current
   const smearReveal = useRef(new Animated.Value(0)).current
   const pulseScale = useRef(new Animated.Value(1)).current
@@ -92,6 +94,10 @@ export function AppBootstrapLoading() {
     }
   }, [pulseOpacity, pulseScale, smearReveal, softReveal])
 
+  if (!fontsLoaded) {
+    return <View style={styles.root} accessibilityRole="progressbar" accessibilityLabel="CREA wird geladen" />
+  }
+
   return (
     <View style={styles.root} accessibilityRole="progressbar" accessibilityLabel="CREA wird geladen">
       <View style={styles.centerPlate} pointerEvents="none">
@@ -154,10 +160,12 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   logo: {
-    fontSize: 58,
-    fontWeight: '900',
-    letterSpacing: 8,
+    fontFamily: 'ClimateCrisis_400Regular',
+    fontSize: 56,
+    fontWeight: '400',
+    letterSpacing: 2,
     color: CREA_YELLOW,
+    textTransform: 'uppercase',
   },
   /** Web: no expo-blur – light scrim only (dev / edge). */
   webFallbackScrim: {

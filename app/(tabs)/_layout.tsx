@@ -5,7 +5,7 @@ import { Tabs } from 'expo-router'
 import { Bell, Briefcase, House, MessageCircle, UserRound } from 'lucide-react-native'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
-import { isCeoProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
+import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import { countUnreadAlerts } from '@/lib/notificationsFeed'
 import { subscribeAlertsInvalidate } from '@/lib/invalidateAlerts'
@@ -25,7 +25,7 @@ export default function TabLayout() {
   const [goodNewsPopup, setGoodNewsPopup] = useState<{ body: string; source?: string } | null>(null)
   const [unreadDmCount, setUnreadDmCount] = useState(0)
   const [unreadAlertsCount, setUnreadAlertsCount] = useState(0)
-  /** Company accounts: only workspace project list in tab bar. CEO: marketplace Jobs + workspace Projects. */
+  /** Company accounts: workspace project list in tab bar. CEO: no workspace Projects tab (Jobs + Home etc. only). */
   const [showWorkspaceProjectsTab, setShowWorkspaceProjectsTab] = useState(false)
   const [showMarketplaceJobsTab, setShowMarketplaceJobsTab] = useState(false)
   const unreadDmInFlight = useRef<Promise<void> | null>(null)
@@ -113,8 +113,7 @@ export default function TabLayout() {
       const workspaceOnly = isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(plan)
       setWorkspaceOnlyTabs(workspaceOnly)
       const isCompanyAccount = role === 'company'
-      const isCeoAccount = isCeoProfile(role)
-      setShowWorkspaceProjectsTab(isCompanyAccount || isCeoAccount)
+      setShowWorkspaceProjectsTab(isCompanyAccount)
       setShowMarketplaceJobsTab(!workspaceOnly && !isCompanyAccount)
       if (!workspaceOnly) {
         await Promise.all([loadUnreadDmCount(user.id), loadUnreadAlertsCount(user.id)])
