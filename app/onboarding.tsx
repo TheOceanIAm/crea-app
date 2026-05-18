@@ -189,6 +189,17 @@ export default function OnboardingScreen() {
       return
     }
 
+    // Supabase Dashboard → Authentication → Users shows "Display name" from JWT user_metadata, not profiles.name.
+    const { error: metaErr } = await supabase.auth.updateUser({
+      data: {
+        name,
+        full_name: name,
+      },
+    })
+    if (metaErr) {
+      console.warn('[onboarding] auth.updateUser metadata:', metaErr.message)
+    }
+
     router.replace('/(tabs)/dashboard')
   }
 
