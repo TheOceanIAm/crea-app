@@ -28,6 +28,7 @@
     "deploy:notify-push": "bash scripts/deploy-notify-push.sh",
     "splash:transparent-bg": "node scripts/splash-make-transparent-bg.mjs",
     "splash:fix": "node scripts/splash-flatten-brand-yellow.mjs",
+    "icon:flatten-yellow": "node scripts/icon-flatten-brand-yellow.mjs",
     "postinstall": "patch-package"
   },
   "dependencies": {

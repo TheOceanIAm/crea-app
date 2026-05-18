@@ -22,6 +22,7 @@ import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 import { pickAndUploadAvatarOnly } from '@/lib/uploadProfileAvatar'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { postTrialPlan } from '@/lib/trialPlanApi'
+import { IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY } from '@/lib/iosAppStoreCompliance'
 
 type RoleChoice = 'freelancer' | 'company'
 
@@ -106,7 +107,7 @@ export default function OnboardingScreen() {
 
   const goNext = () => {
     if (step === 0 && roleChoice) {
-      setStep(1)
+      setStep(IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY ? 2 : 1)
       return
     }
     if (step === 1) {
@@ -152,13 +153,15 @@ export default function OnboardingScreen() {
 
     setSaving(true)
 
-    const trialRes = await postTrialPlan(
-      roleChoice === 'freelancer'
-        ? { freelancer_plan: trialFreelancerPlan }
-        : { company_plan: trialCompanyPlan }
-    )
-    if (!trialRes.ok && trialRes.error && trialRes.error !== 'missing_web_url') {
-      console.warn('[onboarding] trial plan:', trialRes.error)
+    if (!IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY) {
+      const trialRes = await postTrialPlan(
+        roleChoice === 'freelancer'
+          ? { freelancer_plan: trialFreelancerPlan }
+          : { company_plan: trialCompanyPlan }
+      )
+      if (!trialRes.ok && trialRes.error && trialRes.error !== 'missing_web_url') {
+        console.warn('[onboarding] trial plan:', trialRes.error)
+      }
     }
 
     const { error } = await supabase.from('profiles').upsert(
@@ -192,6 +195,11 @@ export default function OnboardingScreen() {
   }
 
   const goBack = () => {
+    if (IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY) {
+      if (step === 2) setStep(0)
+      else if (step === 3) setStep(2)
+      return
+    }
     if (step === 1) setStep(0)
     else if (step === 2) setStep(1)
     else if (step === 3) setStep(2)
@@ -272,7 +280,7 @@ export default function OnboardingScreen() {
             </View>
           ) : null}
 
-          {step === 1 && roleChoice ? (
+          {step === 1 && roleChoice && !IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY ? (
             <>
               <TouchableOpacity style={styles.backRow} onPress={goBack} hitSlop={12}>
                 <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
@@ -430,13 +438,19 @@ export default function OnboardingScreen() {
           </TouchableOpacity>
 
           <Text style={styles.stepHint}>
-            {step === 0
-              ? 'Step 1 of 4'
-              : step === 1
-                ? 'Step 2 of 4'
+            {IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY
+              ? step === 0
+                ? 'Schritt 1 von 3'
                 : step === 2
-                  ? 'Step 3 of 4'
-                  : 'Step 4 of 4'}
+                  ? 'Schritt 2 von 3'
+                  : 'Schritt 3 von 3'
+              : step === 0
+                ? 'Step 1 of 4'
+                : step === 1
+                  ? 'Step 2 of 4'
+                  : step === 2
+                    ? 'Step 3 of 4'
+                    : 'Step 4 of 4'}
           </Text>
 
           <TouchableOpacity

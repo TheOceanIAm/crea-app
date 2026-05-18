@@ -2,9 +2,11 @@ import { useState } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
+  Linking,
 } from 'react-native'
 import { router } from 'expo-router'
 import { supabase } from '@/lib/supabase'
+import { IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY, CREA_WEBSITE_URL } from '@/lib/iosAppStoreCompliance'
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('')
@@ -68,10 +70,24 @@ export default function LoginScreen() {
         </View>
 
         <Text style={styles.footer}>
-          No account yet?{' '}
-          <Text style={styles.link} onPress={() => router.push('/register')}>
-            Sign up
-          </Text>
+          {IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY ? (
+            <>
+              Neu bei CREA?{' '}
+              <Text
+                style={styles.link}
+                onPress={() => Linking.openURL(CREA_WEBSITE_URL).catch(() => {})}
+              >
+                Account auf creaservices.de erstellen
+              </Text>
+            </>
+          ) : (
+            <>
+              No account yet?{' '}
+              <Text style={styles.link} onPress={() => router.push('/register')}>
+                Sign up
+              </Text>
+            </>
+          )}
         </Text>
       </View>
     </KeyboardAvoidingView>

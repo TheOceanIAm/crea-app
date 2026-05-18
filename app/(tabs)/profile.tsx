@@ -40,6 +40,8 @@ import {
 import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { LocationAutocompleteInput } from '@/components/LocationAutocompleteInput'
 import { supabase } from '@/lib/supabase'
+import { deleteAccountViaApi } from '@/lib/deleteAccountApi'
+import { IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY, openCreaWebsiteInBrowser } from '@/lib/iosAppStoreCompliance'
 import { ICON_STROKE, ICON_STROKE_LARGE } from '@/lib/iconTheme'
 import { pickAndUploadProfileAvatar } from '@/lib/uploadProfileAvatar'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
@@ -238,6 +240,7 @@ export default function ProfileScreen() {
   const [connectStatusError, setConnectStatusError] = useState<string | null>(null)
   const [connectStatus, setConnectStatus] = useState<FreelancerStripeConnectStatus | null>(null)
   const [connectBusy, setConnectBusy] = useState(false)
+  const [deleteAccountBusy, setDeleteAccountBusy] = useState(false)
 
   const [notif, setNotif] = useState<NotificationSettings>({ ...DEFAULT_NOTIFICATION_SETTINGS })
   const [savingNotif, setSavingNotif] = useState(false)
@@ -1046,6 +1049,36 @@ export default function ProfileScreen() {
         },
       },
     ])
+  }
+
+  const runDeleteAccount = async () => {
+    setDeleteAccountBusy(true)
+    try {
+      const r = await deleteAccountViaApi()
+      if (r.ok) {
+        await supabase.auth.signOut({ scope: 'local' })
+        router.replace('/login')
+      } else {
+        Alert.alert('Löschen fehlgeschlagen', 'error' in r ? r.error : 'Unbekannter Fehler')
+      }
+    } finally {
+      setDeleteAccountBusy(false)
+    }
+  }
+
+  const confirmDeleteAccount = () => {
+    Alert.alert(
+      'Account löschen',
+      'Dein Account und alle damit verbundenen Daten werden permanent gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Permanent löschen',
+          style: 'destructive',
+          onPress: () => void runDeleteAccount(),
+        },
+      ]
+    )
   }
 
   const onMenuPress = (item: MenuItem) => {
@@ -1858,7 +1891,22 @@ export default function ProfileScreen() {
             </View>
           )}
 
-          {activeMenu === 'plan' && (
+          {activeMenu === 'plan' ? (
+            IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY ? (
+              <View style={styles.sectionCard}>
+                <Text style={styles.cardTitle}>Abonnement</Text>
+                <Text style={[styles.cardSubtitle, { marginBottom: 8 }]}>
+                  Verwalte dein Abonnement auf creaservices.de
+                </Text>
+                <TouchableOpacity
+                  style={styles.primaryBtn}
+                  onPress={() => void openCreaWebsiteInBrowser()}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryBtnText}>creaservices.de öffnen</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
             <>
               <View style={styles.trialBanner}>
                 <Text style={styles.trialBannerText}>
@@ -2081,7 +2129,8 @@ export default function ProfileScreen() {
                 </Text>
               </View>
             </>
-          )}
+            )
+          ) : null}
 
           {activeMenu === 'notifications' && (
             <>
@@ -2452,6 +2501,19 @@ export default function ProfileScreen() {
                 <ChevronRight size={18} color="rgba(255,255,255,0.2)" strokeWidth={ICON_STROKE} />
               </TouchableOpacity>
 
+              <TouchableOpacity
+                style={[styles.deleteAccountBtn, deleteAccountBusy && styles.btnDisabled]}
+                onPress={confirmDeleteAccount}
+                disabled={deleteAccountBusy}
+                activeOpacity={0.75}
+              >
+                {deleteAccountBusy ? (
+                  <ActivityIndicator color="#ff8888" />
+                ) : (
+                  <Text style={styles.deleteAccountText}>Account löschen</Text>
+                )}
+              </TouchableOpacity>
+
               <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
                 <Text style={styles.logoutText}>Sign out</Text>
               </TouchableOpacity>
@@ -2736,6 +2798,18 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   linkRowLabel: { flex: 1, fontSize: 15, color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
+  deleteAccountBtn: {
+    alignSelf: 'stretch',
+    marginTop: 24,
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,80,80,0.55)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,60,60,0.08)',
+  },
+  deleteAccountText: { color: '#ff6b6b', fontSize: 15, fontWeight: '700' },
   logoutBtn: {
     alignSelf: 'center',
     marginTop: 16,

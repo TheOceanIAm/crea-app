@@ -9,13 +9,44 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native'
 import { router } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { getAuthRedirectUrl } from '@/lib/authDeepLink'
+import { IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY, CREA_WEBSITE_URL } from '@/lib/iosAppStoreCompliance'
 
-export default function RegisterScreen() {
+function RegisterIosWebOnly() {
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <View style={styles.inner}>
+        <Text style={styles.logo}>CREA</Text>
+        <Text style={[styles.subtitle, { marginBottom: 32 }]}>
+          Erstelle deinen Account auf creaservices.de
+        </Text>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => Linking.openURL(CREA_WEBSITE_URL).catch(() => {})}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.buttonText}>creaservices.de öffnen</Text>
+        </TouchableOpacity>
+        <Text style={styles.footer}>
+          Schon ein Account?{' '}
+          <Text style={styles.link} onPress={() => router.back()}>
+            Anmelden
+          </Text>
+        </Text>
+      </View>
+    </KeyboardAvoidingView>
+  )
+}
+
+function RegisterForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -111,6 +142,13 @@ export default function RegisterScreen() {
       </View>
     </KeyboardAvoidingView>
   )
+}
+
+export default function RegisterScreen() {
+  if (IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY) {
+    return <RegisterIosWebOnly />
+  }
+  return <RegisterForm />
 }
 
 const styles = StyleSheet.create({
