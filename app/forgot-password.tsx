@@ -15,7 +15,7 @@ import { router } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
-import { getAuthRedirectUrl } from '@/lib/authDeepLink'
+import { getWebAuthConfirmRedirectUrl } from '@/lib/creaWeb'
 
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('')
@@ -28,7 +28,15 @@ export default function ForgotPasswordScreen() {
       return
     }
     setLoading(true)
-    const redirectTo = getAuthRedirectUrl('reset')
+    const redirectTo = getWebAuthConfirmRedirectUrl()
+    if (!redirectTo) {
+      setLoading(false)
+      Alert.alert(
+        'Configuration',
+        'Set EXPO_PUBLIC_CREA_WEB_URL so the reset link can open in your browser.'
+      )
+      return
+    }
     const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo })
     setLoading(false)
     if (error) {
@@ -37,7 +45,7 @@ export default function ForgotPasswordScreen() {
     }
     Alert.alert(
       'Check your inbox',
-      'We sent a reset link. Open it on this device — it will return you to the app to choose a new password.',
+      'We sent a reset link. Open it in your browser (creaservices.de), then update your password there.',
       [{ text: 'OK', onPress: () => router.back() }]
     )
   }
@@ -57,7 +65,8 @@ export default function ForgotPasswordScreen() {
           <Text style={styles.logo}>CREA</Text>
         <Text style={styles.title}>Reset password</Text>
         <Text style={styles.sub}>
-          Enter your account email. You’ll get a link that opens this app so you can set a new password.
+          Enter your account email. You’ll get a link that opens creaservices.de in the browser to finish signing in —
+          then set a new password on the website (Account / settings), or log in from the app with that password.
         </Text>
 
         <TextInput

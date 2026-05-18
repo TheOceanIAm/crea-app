@@ -9,6 +9,17 @@ export function getCreaWebBaseUrl(): string {
   return raw
 }
 
+/**
+ * HTTPS URL for Supabase email actions (signup confirm, magic link, password recovery).
+ * Email apps open links in the browser — never use `crea://` here or Safari shows a blank page.
+ * Must match a route allowed in Supabase → Authentication → Redirect URLs (e.g. https://www.creaservices.de/auth/confirm).
+ */
+export function getWebAuthConfirmRedirectUrl(): string | null {
+  const base = getCreaWebBaseUrl().trim()
+  if (!base) return null
+  return `${base.replace(/\/$/, '')}/auth/confirm`
+}
+
 export function openProjectOnWeb(projectId: string, path = ''): void {
   const base = getCreaWebBaseUrl()
   if (!base) {

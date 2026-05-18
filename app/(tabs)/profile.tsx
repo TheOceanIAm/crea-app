@@ -41,7 +41,11 @@ import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { LocationAutocompleteInput } from '@/components/LocationAutocompleteInput'
 import { supabase } from '@/lib/supabase'
 import { deleteAccountViaApi } from '@/lib/deleteAccountApi'
-import { IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY, openCreaWebsiteInBrowser } from '@/lib/iosAppStoreCompliance'
+import {
+  IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY,
+  openCreaWebsiteInBrowser,
+  getCreaMarketingSiteUrl,
+} from '@/lib/iosAppStoreCompliance'
 import { ICON_STROKE, ICON_STROKE_LARGE } from '@/lib/iconTheme'
 import { pickAndUploadProfileAvatar } from '@/lib/uploadProfileAvatar'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
@@ -74,9 +78,12 @@ import {
   computeCompanyBillingReadiness,
   type CompanyProfileCompletionRow,
 } from '@/lib/profile-completion'
+import {
+  formatPlatformTrialEndDate,
+  isWithinPlatformTrialPeriod,
+} from '@/lib/platformTrial'
 
 const SUPPORT_MAIL = 'mailto:support@crea.app?subject=CREA%20App%20Support'
-const TRIAL_END_LABEL = 'June 1, 2026'
 const TAB_BAR_HEIGHT = 80
 
 type MenuId =
@@ -191,6 +198,56 @@ function PlanRow({
   )
 }
 
+function CurrentPlanSummary({
+  company,
+  companyPlanTier,
+  subscriptionTier,
+}: {
+  company: boolean
+  companyPlanTier: string
+  subscriptionTier: string
+}) {
+  return (
+    <View style={styles.currentPlanBox}>
+      <Text style={styles.currentPlanLabel}>Current plan</Text>
+      <Text style={styles.currentPlanName}>
+        {company
+          ? companyPlanTier === 'enterprise'
+            ? 'Enterprise'
+            : companyPlanTier === 'business'
+              ? 'Business'
+              : companyPlanTier === 'agency'
+                ? 'Agency'
+                : 'Studio'
+          : subscriptionTier === 'workspace'
+            ? 'Workspace'
+            : subscriptionTier === 'pro'
+              ? 'Pro'
+              : subscriptionTier === 'premium'
+                ? 'Premium'
+                : 'Starter'}
+      </Text>
+      <Text style={styles.currentPlanDesc}>
+        {company
+          ? companyPlanTier === 'enterprise'
+            ? 'Custom package for large companies with dedicated account support.'
+            : companyPlanTier === 'business'
+              ? 'Scale plan with unlimited listings/pool and legal + insurance features.'
+              : companyPlanTier === 'agency'
+                ? 'Growth plan for agencies with more listings, larger crew pool and integrations.'
+                : 'Core plan for studios with essential hiring workflow and contract generator.'
+          : subscriptionTier === 'workspace'
+            ? 'Solo workspace for your own projects - not visible in the talent pool or marketplace.'
+            : subscriptionTier === 'pro'
+              ? 'Everything in Starter + post project listings, 5 active bookings/month, Project feed+.'
+              : subscriptionTier === 'premium'
+                ? 'Everything in Pro including verified badge, liability insurance, legal docs, and tax/accounting tools.'
+                : 'Basic profile, basic project feed, 2 active bookings/month, standard support.'}
+      </Text>
+    </View>
+  )
+}
+
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets()
 
@@ -247,6 +304,9 @@ export default function ProfileScreen() {
   const [registeringPush, setRegisteringPush] = useState(false)
 
   const [subscriptionTier, setSubscriptionTier] = useState('starter')
+  /** ISO from `profiles.trial_ends_at` — platform exploration end (same as web). */
+  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null)
+  const [accountCreatedAt, setAccountCreatedAt] = useState<string | null>(null)
   const [switchingTrialPlan, setSwitchingTrialPlan] = useState(false)
   const [stripeCheckoutBusy, setStripeCheckoutBusy] = useState(false)
   const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null)
@@ -266,6 +326,15 @@ export default function ProfileScreen() {
   const ceo = isCeoProfile(role)
   const company = isCompanyProfile(role)
   const workspacePlan = freelancer && subscriptionTier === 'workspace'
+  const trialEndLabel = useMemo(
+    () => formatPlatformTrialEndDate(trialEndsAt, accountCreatedAt),
+    [trialEndsAt, accountCreatedAt]
+  )
+  const inPlatformTrial = useMemo(
+    () => isWithinPlatformTrialPeriod(trialEndsAt, accountCreatedAt),
+    [trialEndsAt, accountCreatedAt]
+  )
+
   const companyPlanTier = useMemo(() => {
     if (!company) return ''
     const t = String(subscriptionTier || '')
@@ -413,19 +482,22 @@ export default function ProfileScreen() {
     if (!user) {
       setAuthUserId(null)
       setStripeCustomerId(null)
+      setTrialEndsAt(null)
+      setAccountCreatedAt(null)
       setLoading(false)
       router.replace('/login')
       return
     }
     setEmail(user.email ?? '')
     setAuthUserId(user.id)
+    setAccountCreatedAt(typeof user.created_at === 'string' ? user.created_at : null)
     const cid = user.user_metadata?.stripe_customer_id
     setStripeCustomerId(typeof cid === 'string' && cid.trim() ? cid.trim() : null)
 
     const { data, error } = await supabase
       .from('profiles')
       .select(
-        'name, role, headline, location, bio, skills, equipment, avatar_url, day_rate_amount, half_day_rate_amount, rates_currency, rates_notes, portfolio_website, portfolio_instagram, portfolio_linkedin, portfolio_vimeo, portfolio_behance, portfolio_projects, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, tax_number, vat_registered, notification_settings, subscription_tier'
+        'name, role, headline, location, bio, skills, equipment, avatar_url, day_rate_amount, half_day_rate_amount, rates_currency, rates_notes, portfolio_website, portfolio_instagram, portfolio_linkedin, portfolio_vimeo, portfolio_behance, portfolio_projects, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, tax_number, vat_registered, notification_settings, subscription_tier, trial_ends_at'
       )
       .eq('id', user.id)
       .single()
@@ -460,6 +532,7 @@ export default function ProfileScreen() {
       setVatRegistered(false)
       setNotif({ ...DEFAULT_NOTIFICATION_SETTINGS })
       setSubscriptionTier('starter')
+      setTrialEndsAt(null)
       setDayRate('')
       setHalfDayRate('')
       setRatesCurrency('EUR')
@@ -524,6 +597,8 @@ export default function ProfileScreen() {
       setHalfDayRate(halfDayCanonical != null ? String(halfDayCanonical) : '')
       setRatesCurrency((data?.rates_currency as string) || 'EUR')
       setRatesNotes((data?.rates_notes as string) || '')
+      const rawTrial = data?.trial_ends_at
+      setTrialEndsAt(typeof rawTrial === 'string' && rawTrial.trim() ? rawTrial.trim() : null)
     }
 
     setLoading(false)
@@ -1892,12 +1967,158 @@ export default function ProfileScreen() {
           )}
 
           {activeMenu === 'plan' ? (
-            IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY ? (
+            IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY ? (
               <View style={styles.sectionCard}>
-                <Text style={styles.cardTitle}>Subscription</Text>
-                <Text style={[styles.cardSubtitle, { marginBottom: 8 }]}>
-                  Manage your subscription on creaservices.de
+                <Text style={styles.cardTitle}>Plan</Text>
+                <Text style={styles.cardSubtitle}>
+                  Your tier and the options below explain what each plan includes. Paid upgrades, downgrades, and billing
+                  are handled on creaservices.de (required on iOS).
                 </Text>
+
+                <CurrentPlanSummary
+                  company={company}
+                  companyPlanTier={companyPlanTier}
+                  subscriptionTier={subscriptionTier}
+                />
+
+                {!ceo && !stripeCustomerId && inPlatformTrial ? (
+                  <View style={[styles.trialBanner, { marginTop: 14 }]}>
+                    <Text style={styles.trialBannerText}>
+                      <Text style={styles.trialBannerStrong}>Trial</Text> until{' '}
+                      <Text style={styles.trialBannerStrong}>{trialEndLabel}</Text>
+                      {' — '}same window as on the web. Subscribe on creaservices.de when you are ready.
+                    </Text>
+                  </View>
+                ) : !ceo && !stripeCustomerId ? (
+                  <View style={[styles.trialBanner, { marginTop: 14 }]}>
+                    <Text style={styles.trialBannerText}>
+                      <Text style={styles.trialBannerStrong}>Trial ended.</Text> Upgrade or manage billing on
+                      creaservices.de.
+                    </Text>
+                  </View>
+                ) : null}
+
+                <TouchableOpacity
+                  onPress={() =>
+                    Linking.openURL(`${getCreaMarketingSiteUrl().replace(/\/$/, '')}/pricing`).catch(() => {})
+                  }
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
+                >
+                  <Text style={styles.planIosPricingHeading}>Pricing &amp; features</Text>
+                </TouchableOpacity>
+
+                {company ? (
+                  <>
+                    <PlanRow
+                      title="Studio"
+                      price="€89 / month"
+                      desc="Up to 5 active project listings, crew pool up to 20, contract generator, standard support."
+                      cta={companyPlanTier === 'studio' ? 'Your plan' : 'Change on web'}
+                      current={companyPlanTier === 'studio'}
+                      disabled={companyPlanTier === 'studio'}
+                      onPress={() =>
+                        void Linking.openURL(
+                          `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/settings/company`
+                        ).catch(() => {})
+                      }
+                    />
+                    <PlanRow
+                      title="Agency"
+                      price="€129 / month"
+                      desc="Up to 15 listings, crew pool up to 50, team access (up to 3 users), integrations + priority support."
+                      cta={companyPlanTier === 'agency' ? 'Your plan' : 'Change on web'}
+                      current={companyPlanTier === 'agency'}
+                      disabled={companyPlanTier === 'agency'}
+                      onPress={() =>
+                        void Linking.openURL(
+                          `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/settings/company`
+                        ).catch(() => {})
+                      }
+                    />
+                    <PlanRow
+                      title="Business"
+                      price="€249 / month"
+                      desc="Unlimited listings/pool, legal automation, company insurance, team access (up to 5 users)."
+                      cta="Coming soon"
+                      current={companyPlanTier === 'business'}
+                      disabled
+                      onPress={() =>
+                        Alert.alert('Business', 'This tier is coming soon — check creaservices.de for updates.')
+                      }
+                    />
+                    <PlanRow
+                      title="Enterprise"
+                      price="Custom pricing"
+                      desc="Tailored setup for large companies: dedicated account manager, custom legal setup and integrations."
+                      cta={companyPlanTier === 'enterprise' ? 'Your plan' : 'Contact sales'}
+                      current={companyPlanTier === 'enterprise'}
+                      disabled={companyPlanTier === 'enterprise'}
+                      onPress={() => {
+                        if (companyPlanTier === 'enterprise') return
+                        Linking.openURL(
+                          'mailto:sales@creaservices.de?subject=Enterprise%20Plan%20Inquiry%20-%20Crea'
+                        ).catch(() => {})
+                      }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <PlanRow
+                      title="Workspace"
+                      price="€0 / month"
+                      desc="Solo workspace mode: private workflow, no talent-pool visibility, no marketplace DMs."
+                      cta={subscriptionTier === 'workspace' ? 'Your plan' : 'Change on web'}
+                      current={subscriptionTier === 'workspace'}
+                      disabled={subscriptionTier === 'workspace'}
+                      onPress={() =>
+                        void Linking.openURL(
+                          `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/settings/freelancer`
+                        ).catch(() => {})
+                      }
+                    />
+                    <PlanRow
+                      title="Starter"
+                      price="€9 / month"
+                      desc="Basic profile, basic project feed, 2 active bookings/month, standard support."
+                      cta={subscriptionTier === 'starter' ? 'Your plan' : 'Change on web'}
+                      current={subscriptionTier === 'starter'}
+                      disabled={subscriptionTier === 'starter'}
+                      onPress={() =>
+                        void Linking.openURL(
+                          `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/settings/freelancer`
+                        ).catch(() => {})
+                      }
+                    />
+                    <PlanRow
+                      title="Pro"
+                      price="€19 / month"
+                      desc="Everything in Starter + post project listings, 5 active bookings/month, Project feed+."
+                      cta={subscriptionTier === 'pro' ? 'Your plan' : 'Change on web'}
+                      current={subscriptionTier === 'pro'}
+                      disabled={subscriptionTier === 'pro'}
+                      onPress={() =>
+                        void Linking.openURL(
+                          `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/settings/freelancer`
+                        ).catch(() => {})
+                      }
+                    />
+                    <PlanRow
+                      title="Premium"
+                      price="€49 / month"
+                      desc="Everything in Pro, plus verified badge, liability insurance, legal docs and tax/accounting tools."
+                      cta="Coming soon"
+                      current={subscriptionTier === 'premium'}
+                      disabled
+                      onPress={() => Alert.alert('Premium', 'This tier is coming soon — see creaservices.de for updates.')}
+                    />
+                  </>
+                )}
+
+                <Text style={styles.stripeFoot}>
+                  Use Plan &amp; billing under Settings on the website to switch tiers or update payment details.
+                </Text>
+
                 <TouchableOpacity
                   style={styles.primaryBtn}
                   onPress={() => void openCreaWebsiteInBrowser()}
@@ -1908,13 +2129,24 @@ export default function ProfileScreen() {
               </View>
             ) : (
             <>
-              <View style={styles.trialBanner}>
-                <Text style={styles.trialBannerText}>
-                  <Text style={styles.trialBannerStrong}>Trial:</Text> Until{' '}
-                  <Text style={styles.trialBannerStrong}>{TRIAL_END_LABEL}</Text> you can use Crea without a paid plan.
-                  After that, pick a plan below - billing starts after checkout.
-                </Text>
-              </View>
+              {!ceo && !stripeCustomerId ? (
+                <View style={styles.trialBanner}>
+                  <Text style={styles.trialBannerText}>
+                    {inPlatformTrial ? (
+                      <>
+                        <Text style={styles.trialBannerStrong}>Trial:</Text> Until{' '}
+                        <Text style={styles.trialBannerStrong}>{trialEndLabel}</Text> you can use Crea without a paid
+                        plan. After that, pick a plan below — billing starts after checkout.
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.trialBannerStrong}>Trial ended.</Text> Pick a plan below — billing starts
+                        after checkout.
+                      </>
+                    )}
+                  </Text>
+                </View>
+              ) : null}
 
               <View style={styles.sectionCard}>
                 <Text style={styles.cardTitle}>Plan &amp; billing</Text>
@@ -1924,43 +2156,11 @@ export default function ProfileScreen() {
                   change payment method or cancel.
                 </Text>
 
-                <View style={styles.currentPlanBox}>
-                  <Text style={styles.currentPlanLabel}>Current plan</Text>
-                  <Text style={styles.currentPlanName}>
-                    {company
-                      ? companyPlanTier === 'enterprise'
-                        ? 'Enterprise'
-                        : companyPlanTier === 'business'
-                          ? 'Business'
-                          : companyPlanTier === 'agency'
-                            ? 'Agency'
-                            : 'Studio'
-                      : subscriptionTier === 'workspace'
-                        ? 'Workspace'
-                        : subscriptionTier === 'pro'
-                          ? 'Pro'
-                          : subscriptionTier === 'premium'
-                            ? 'Premium'
-                            : 'Starter'}
-                  </Text>
-                  <Text style={styles.currentPlanDesc}>
-                    {company
-                      ? companyPlanTier === 'enterprise'
-                        ? 'Custom package for large companies with dedicated account support.'
-                        : companyPlanTier === 'business'
-                          ? 'Scale plan with unlimited listings/pool and legal + insurance features.'
-                          : companyPlanTier === 'agency'
-                            ? 'Growth plan for agencies with more listings, larger crew pool and integrations.'
-                            : 'Core plan for studios with essential hiring workflow and contract generator.'
-                      : subscriptionTier === 'workspace'
-                        ? 'Solo workspace for your own projects - not visible in the talent pool or marketplace.'
-                        : subscriptionTier === 'pro'
-                          ? 'Everything in Starter + post project listings, 5 active bookings/month, Project feed+.'
-                          : subscriptionTier === 'premium'
-                            ? 'Everything in Pro including verified badge, liability insurance, legal docs, and tax/accounting tools.'
-                            : 'Basic profile, basic project feed, 2 active bookings/month, standard support.'}
-                  </Text>
-                </View>
+                <CurrentPlanSummary
+                  company={company}
+                  companyPlanTier={companyPlanTier}
+                  subscriptionTier={subscriptionTier}
+                />
 
                 <Text style={styles.stripeHint}>
                   No paid subscription yet — compare plans below or open the full comparison on the website.
@@ -2757,6 +2957,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,220,0,0.45)',
+  },
+  planIosPricingHeading: {
+    alignSelf: 'flex-start',
+    marginTop: 20,
+    marginBottom: 14,
+    fontSize: 11,
+    fontWeight: '800',
+    color: 'rgba(255,220,0,0.88)',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   secondaryBtnText: {
     fontSize: 15,

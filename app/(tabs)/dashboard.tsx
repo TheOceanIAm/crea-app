@@ -134,11 +134,43 @@ function quickActionsForRole(
   ]
   if (isFreelancerProfile(role ?? undefined)) {
     if (opts?.freelancerPlan && isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
+      const starterHint = 'Included from Starter — upgrade on creaservices.de'
       return [
+        { label: 'Projects', icon: Layers, href: '/(tabs)/workspace-projects' },
         {
-          label: 'Projects',
-          icon: Layers,
-          href: '/(tabs)/workspace-projects',
+          label: 'Browse jobs',
+          icon: Briefcase,
+          href: '/(tabs)/jobs',
+          disabled: true,
+          hint: starterHint,
+        },
+        {
+          label: 'Messages',
+          icon: MessageCircle,
+          href: '/(tabs)/messages',
+          disabled: true,
+          hint: starterHint,
+        },
+        {
+          label: 'Invoices',
+          icon: Receipt,
+          href: '/(tabs)/invoices',
+          disabled: true,
+          hint: starterHint,
+        },
+        {
+          label: 'Talent pool',
+          icon: Users,
+          href: '/(tabs)/talent-pool',
+          disabled: true,
+          hint: 'Included with Pro — Starter unlocks the job pool',
+        },
+        {
+          label: 'Availability',
+          icon: CalendarDays,
+          href: '/(tabs)/availability',
+          disabled: true,
+          hint: starterHint,
         },
         { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
       ]
@@ -641,6 +673,16 @@ export default function DashboardScreen() {
           </>
         ) : null}
 
+        {workspaceOnlyDashboard ? (
+          <View style={styles.workspaceBanner}>
+            <Text style={styles.workspaceBannerTitle}>Workspace</Text>
+            <Text style={styles.workspaceBannerText}>
+              Private projects are active. Marketplace shortcuts below stay locked until you upgrade to Starter on the
+              web — Talent pool unlocks on Pro.
+            </Text>
+          </View>
+        ) : null}
+
         {/* Stats */}
         {!workspaceOnlyDashboard ? (
           <View style={styles.statsRow}>
@@ -667,7 +709,7 @@ export default function DashboardScreen() {
             const Icon = a.icon
             return (
               <TouchableOpacity
-                key={a.href ?? a.label}
+                key={a.label}
                 style={[styles.actionCard, a.disabled && styles.actionCardDisabled]}
                 activeOpacity={0.7}
                 onPress={() => {
@@ -677,9 +719,13 @@ export default function DashboardScreen() {
                 disabled={!!a.disabled}
               >
                 <View style={styles.actionIconWrap}>
-                  <Icon size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                  <Icon
+                    size={22}
+                    color={a.disabled ? 'rgba(255,220,0,0.22)' : '#FFDC00'}
+                    strokeWidth={ICON_STROKE}
+                  />
                 </View>
-                <Text style={styles.actionLabel}>{a.label}</Text>
+                <Text style={[styles.actionLabel, a.disabled && styles.actionLabelMuted]}>{a.label}</Text>
                 {a.hint ? <Text style={styles.ceoHint}>{a.hint}</Text> : null}
               </TouchableOpacity>
             )
@@ -758,6 +804,28 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   actionLabel: { fontSize: 13, color: 'rgba(255,255,255,0.7)', fontWeight: '600' },
+  actionLabelMuted: { color: 'rgba(255,255,255,0.38)' },
+  workspaceBanner: {
+    backgroundColor: 'rgba(255,220,0,0.06)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.14)',
+  },
+  workspaceBannerTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFDC00',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  workspaceBannerText: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.62)',
+    lineHeight: 19,
+  },
   ceoHeaderText: { flex: 1, paddingRight: 12 },
   ceoOverviewShell: {
     backgroundColor: '#111111',

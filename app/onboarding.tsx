@@ -22,7 +22,7 @@ import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 import { pickAndUploadAvatarOnly } from '@/lib/uploadProfileAvatar'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { postTrialPlan } from '@/lib/trialPlanApi'
-import { IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY } from '@/lib/iosAppStoreCompliance'
+import { IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY } from '@/lib/iosAppStoreCompliance'
 
 type RoleChoice = 'freelancer' | 'company'
 
@@ -51,7 +51,7 @@ export default function OnboardingScreen() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [termsAccepted, setTermsAccepted] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [trialFreelancerPlan, setTrialFreelancerPlan] = useState<TrialFreelancerPlanKey>('starter')
+  const [trialFreelancerPlan, setTrialFreelancerPlan] = useState<TrialFreelancerPlanKey>('workspace')
   const [trialCompanyPlan, setTrialCompanyPlan] = useState<TrialCompanyPlanKey>('studio')
 
   const verifySession = useCallback(async () => {
@@ -107,7 +107,7 @@ export default function OnboardingScreen() {
 
   const goNext = () => {
     if (step === 0 && roleChoice) {
-      setStep(IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY ? 2 : 1)
+      setStep(IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY ? 2 : 1)
       return
     }
     if (step === 1) {
@@ -153,15 +153,13 @@ export default function OnboardingScreen() {
 
     setSaving(true)
 
-    if (!IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY) {
-      const trialRes = await postTrialPlan(
-        roleChoice === 'freelancer'
-          ? { freelancer_plan: trialFreelancerPlan }
-          : { company_plan: trialCompanyPlan }
-      )
-      if (!trialRes.ok && trialRes.error && trialRes.error !== 'missing_web_url') {
-        console.warn('[onboarding] trial plan:', trialRes.error)
-      }
+    const trialRes = await postTrialPlan(
+      roleChoice === 'freelancer'
+        ? { freelancer_plan: trialFreelancerPlan }
+        : { company_plan: trialCompanyPlan }
+    )
+    if (!trialRes.ok && trialRes.error && trialRes.error !== 'missing_web_url') {
+      console.warn('[onboarding] trial plan:', trialRes.error)
     }
 
     const { error } = await supabase.from('profiles').upsert(
@@ -195,7 +193,7 @@ export default function OnboardingScreen() {
   }
 
   const goBack = () => {
-    if (IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY) {
+    if (IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY) {
       if (step === 2) setStep(0)
       else if (step === 3) setStep(2)
       return
@@ -228,7 +226,7 @@ export default function OnboardingScreen() {
     step === 0
       ? 'You can change details later in settings.'
       : step === 1
-        ? 'During your trial you can switch tiers on the web under Settings → Plan. Premium / Business / Enterprise unlock after checkout or via sales.'
+        ? 'During your platform trial (same dates as creaservices.de) you can switch tiers on the web under Settings → Plan. Premium / Business / Enterprise unlock after checkout or via sales.'
         : step === 2
           ? roleChoice === 'company'
             ? 'This is how you appear to freelancers.'
@@ -280,7 +278,7 @@ export default function OnboardingScreen() {
             </View>
           ) : null}
 
-          {step === 1 && roleChoice && !IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY ? (
+          {step === 1 && roleChoice && !IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY ? (
             <>
               <TouchableOpacity style={styles.backRow} onPress={goBack} hitSlop={12}>
                 <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
@@ -438,7 +436,7 @@ export default function OnboardingScreen() {
           </TouchableOpacity>
 
           <Text style={styles.stepHint}>
-            {IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY
+            {IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY
               ? step === 0
                 ? 'Step 1 of 3'
                 : step === 2

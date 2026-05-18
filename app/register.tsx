@@ -14,8 +14,11 @@ import {
 import { router } from 'expo-router'
 import { supabase } from '@/lib/supabase'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
-import { getAuthRedirectUrl } from '@/lib/authDeepLink'
-import { IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY, CREA_WEBSITE_URL } from '@/lib/iosAppStoreCompliance'
+import { getWebAuthConfirmRedirectUrl } from '@/lib/creaWeb'
+import {
+  IOS_SIGNUP_ON_WEB_ONLY,
+  getCreaWebRegisterUrl,
+} from '@/lib/iosAppStoreCompliance'
 
 function RegisterIosWebOnly() {
   return (
@@ -30,10 +33,10 @@ function RegisterIosWebOnly() {
         </Text>
         <TouchableOpacity
           style={styles.button}
-          onPress={() => Linking.openURL(CREA_WEBSITE_URL).catch(() => {})}
+          onPress={() => Linking.openURL(getCreaWebRegisterUrl()).catch(() => {})}
           activeOpacity={0.85}
         >
-          <Text style={styles.buttonText}>Open creaservices.de</Text>
+          <Text style={styles.buttonText}>Continue to signup</Text>
         </TouchableOpacity>
         <Text style={styles.footer}>
           Already have an account?{' '}
@@ -55,7 +58,15 @@ function RegisterForm() {
     const normalizedEmail = email.trim().toLowerCase()
     if (!normalizedEmail || !password) return
     setLoading(true)
-    const emailRedirectTo = getAuthRedirectUrl('callback')
+    const emailRedirectTo = getWebAuthConfirmRedirectUrl()
+    if (!emailRedirectTo) {
+      setLoading(false)
+      Alert.alert(
+        'Configuration',
+        'Set EXPO_PUBLIC_CREA_WEB_URL (e.g. https://www.creaservices.de) so the confirmation link opens in the browser.'
+      )
+      return
+    }
     const { data, error } = await supabase.auth.signUp({
       email: normalizedEmail,
       password,
@@ -72,7 +83,7 @@ function RegisterForm() {
     }
     Alert.alert(
       'Almost there',
-      'Confirm your email via the link we sent you — it will open the Crea app when you tap it. Then you can log in.'
+      'Confirm your email via the link we sent — it opens creaservices.de to finish signup. Then open the CREA app and log in.'
     )
     router.replace('/login')
   }
@@ -145,7 +156,7 @@ function RegisterForm() {
 }
 
 export default function RegisterScreen() {
-  if (IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY) {
+  if (IOS_SIGNUP_ON_WEB_ONLY) {
     return <RegisterIosWebOnly />
   }
   return <RegisterForm />

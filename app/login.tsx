@@ -6,7 +6,10 @@ import {
 } from 'react-native'
 import { router } from 'expo-router'
 import { supabase } from '@/lib/supabase'
-import { IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY, CREA_WEBSITE_URL } from '@/lib/iosAppStoreCompliance'
+import {
+  IOS_SIGNUP_ON_WEB_ONLY,
+  getCreaWebRegisterUrl,
+} from '@/lib/iosAppStoreCompliance'
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('')
@@ -70,12 +73,12 @@ export default function LoginScreen() {
         </View>
 
         <Text style={styles.footer}>
-          {IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY ? (
+          {IOS_SIGNUP_ON_WEB_ONLY ? (
             <>
               New to CREA?{' '}
               <Text
                 style={styles.link}
-                onPress={() => Linking.openURL(CREA_WEBSITE_URL).catch(() => {})}
+                onPress={() => Linking.openURL(getCreaWebRegisterUrl()).catch(() => {})}
               >
                 Create account on creaservices.de
               </Text>

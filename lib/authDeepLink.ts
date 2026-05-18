@@ -28,7 +28,7 @@ export function consumeInitialSupabaseAuthUrlForBootstrap(): Promise<InitialSupa
 }
 
 export function getAuthRedirectUrl(kind: 'callback' | 'reset'): string {
-  // Force the app scheme so auth links generated in native builds stay stable.
+  /** Use only when the link is guaranteed to open inside the native app (not from email). */
   return Linking.createURL(`auth/${kind}`, { scheme: 'crea' })
 }
 
