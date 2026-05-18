@@ -4,7 +4,8 @@ import { type PropsWithChildren, useEffect, useState } from 'react'
 import { Linking, Alert, Platform, StyleSheet, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { StripeProvider } from '@stripe/stripe-react-native'
-import { PushNotificationRouter } from '@/components/PushNotificationRouter'
+import { SubscriptionPaywallGate } from '@/components/SubscriptionPaywallGate'
+import * as Notifications from 'expo-notifications'
 import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
@@ -44,6 +45,58 @@ function AuthDeepLinkBridge() {
   return null
 }
 
+function openDeepLinkFromPushData(
+  router: ReturnType<typeof useRouter>,
+  data: Record<string, unknown> | undefined,
+) {
+  if (!data || typeof data !== 'object') return
+  const type = typeof data.type === 'string' ? data.type : ''
+  if (type === 'message') {
+    const cid = data.conversationId
+    if (typeof cid === 'string' && cid.length > 0) router.push(`/conversation/${cid}`)
+    return
+  }
+  if (type === 'invoice') {
+    const id = data.invoiceId
+    if (typeof id === 'string' && id.length > 0) router.push(`/(tabs)/invoices/${id}`)
+    return
+  }
+  if (type === 'job_application') {
+    router.push('/(tabs)/company-applications')
+    return
+  }
+  if (type === 'workspace_ready' || type === 'project_message') {
+    const pid = data.projectId
+    if (typeof pid === 'string' && pid.length > 0) router.push(`/project/${pid}`)
+    return
+  }
+  if (type === 'profile_completion') {
+    router.push('/(tabs)/profile')
+  }
+}
+
+/** Must live in this file (not a separate module importing expo-router) to avoid circular-init undefined bindings on Hermes. */
+function PushNotificationRouter() {
+  const router = useRouter()
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return
+
+    void Notifications.getLastNotificationResponseAsync().then((r) => {
+      const data = r?.notification.request.content.data as Record<string, unknown> | undefined
+      openDeepLinkFromPushData(router, data)
+    })
+
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as Record<string, unknown> | undefined
+      openDeepLinkFromPushData(router, data)
+    })
+    return () => sub.remove()
+  }, [router])
+
+  return null
+}
+
 export default function RootLayout() {
   const stripePublishableKey = (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim()
   return (
@@ -55,8 +108,9 @@ export default function RootLayout() {
         urlScheme="crea"
       >
         <AppBootstrapOverlayProvider>
-          <BootstrapAuthGate>
+            <BootstrapAuthGate>
             <AuthDeepLinkBridge />
+            <SubscriptionPaywallGate />
             {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
             <StatusBar style="light" backgroundColor="#0a0a0a" />
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
