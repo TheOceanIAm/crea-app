@@ -1,8 +1,8 @@
 /**
- * Verfügbarkeit pro Kalendertag (ganzer Tag).
+ * Availability per calendar day (whole day).
  *
- * v2: fehlender Tag = off (Freelancer markiert explizit „available“ / „booked“).
- * v3: defaultDay „available“ — fehlender Tag = available; Freelancer speichert explizit „off“ und „booked“.
+ * v2: missing day = off (freelancer explicitly marks “available” / “booked”).
+ * v3: defaultDay “available” — missing day = available; freelancer stores explicit “off” and “booked”.
  */
 
 export type CellState = 'off' | 'available' | 'booked'
@@ -36,7 +36,7 @@ function mergeDayStates(a: CellState, b: CellState): CellState {
   return 'off'
 }
 
-/** Lokales Datum → YYYY-MM-DD (kein UTC-Shift). */
+/** Local date → YYYY-MM-DD (no UTC shift). */
 export function toISODateLocal(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -44,13 +44,13 @@ export function toISODateLocal(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
-/** Mo = 0 … So = 6 */
+/** Mon = 0 … Sun = 6 */
 export function mondayBasedColumnIndex(date = new Date()): number {
   const dow = date.getDay()
   return dow === 0 ? 6 : dow - 1
 }
 
-/** Legacy: eine Woche (7 Zellen) → konkrete ISO-Tage der Woche, die „heute“ enthält. */
+/** Legacy: one week (7 cells) → concrete ISO weekdays for the week containing “today”. */
 function legacyWeekSlotsToDays(slots: CellState[]): Record<string, CellState> {
   const days: Record<string, CellState> = {}
   const today = new Date()
@@ -139,7 +139,7 @@ export function parseAvailabilityCalendar(raw: unknown): AvailabilityCalendarPay
     if (version === 3 && o.defaultDay === 'available') {
       return { version: 3, defaultDay: 'available', days: {}, notes: notesTrim(notes) }
     }
-    // e.g. `{}` or legacy JSON without version → classic „all off“
+    // e.g. `{}` or legacy JSON without version → classic "all off"
     return { version: 2, days: {}, notes: notesTrim(notes) }
   }
 
@@ -165,8 +165,8 @@ export function nextCellState(s: CellState): CellState {
 export type CalendarDefaultMode = 'off' | 'available'
 
 /**
- * Speichern: `defaultMode` bestimmt v2 vs v3.
- * v3 speichert nur Abweichungen von „available“ (also „off“ und „booked“).
+ * Persist: `defaultMode` chooses v2 vs v3.
+ * v3 stores only deviations from “available” (i.e. “off” and “booked”).
  */
 export function toJsonPayload(
   days: Record<string, CellState>,
@@ -188,7 +188,7 @@ export function toJsonPayload(
   return { version: 3, defaultDay: 'available', days: trimmed, notes: n }
 }
 
-/** Effektiver Zustand aus gespeichertem Payload (v2/v3). */
+/** Effective state from stored payload (v2/v3). */
 export function effectiveCellState(cal: AvailabilityCalendarPayload, iso: string): CellState {
   if (cal.version === 3) {
     const v = cal.days[iso]
@@ -198,7 +198,7 @@ export function effectiveCellState(cal: AvailabilityCalendarPayload, iso: string
   return v !== undefined ? v : 'off'
 }
 
-/** Anzeige inkl. optionaler Job-/Buchungs-Tage (überschreibt mit „booked“). */
+/** Display including optional job/booking days (overrides with “booked”). */
 export function displayCellState(
   cal: AvailabilityCalendarPayload,
   iso: string,
@@ -208,7 +208,7 @@ export function displayCellState(
   return effectiveCellState(cal, iso)
 }
 
-/** Editor: sparse `days` + Default-Modus → effektiver Zellzustand. */
+/** Editor: sparse `days` + default mode → effective cell state. */
 export function effectiveDayStateMap(
   days: Record<string, CellState>,
   iso: string,
@@ -221,8 +221,8 @@ export function effectiveDayStateMap(
 }
 
 /**
- * @deprecated Nutze `effectiveCellState` / `effectiveDayStateMap`.
- * Nur noch für Kompatibilität: reines days-Objekt, fehlend = off.
+ * @deprecated Prefer `effectiveCellState` / `effectiveDayStateMap`.
+ * Compatibility only: plain days object, missing = off.
  */
 export function getDayState(days: Record<string, CellState>, iso: string): CellState {
   return days[iso] ?? 'off'

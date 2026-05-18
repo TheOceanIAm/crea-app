@@ -95,11 +95,11 @@ export function AppBootstrapLoading() {
   }, [pulseOpacity, pulseScale, smearReveal, softReveal])
 
   if (!fontsLoaded) {
-    return <View style={styles.root} accessibilityRole="progressbar" accessibilityLabel="CREA wird geladen" />
+    return <View style={styles.root} accessibilityRole="progressbar" accessibilityLabel="Loading CREA" />
   }
 
   return (
-    <View style={styles.root} accessibilityRole="progressbar" accessibilityLabel="CREA wird geladen">
+    <View style={styles.root} accessibilityRole="progressbar" accessibilityLabel="Loading CREA">
       <View style={styles.centerPlate} pointerEvents="none">
         <Animated.View
           style={{

@@ -1,9 +1,9 @@
 import { toISODateLocal } from '@/lib/availabilityCalendar'
 
-/** monthIndex 0–11; Rückgabe: Leerfelder vor Tag 1 (Mo–So = 0–6), Anzahl Tage */
+/** monthIndex 0–11; returns: leading blanks before day 1 (Mon–Sun = 0–6), day count */
 export function getMonthMeta(year: number, monthIndex: number) {
   const first = new Date(year, monthIndex, 1, 12, 0, 0, 0)
-  const jsDow = first.getDay() // 0 So … 6 Sa
+  const jsDow = first.getDay() // 0 Sun … 6 Sat
   const mondayStartPad = (jsDow + 6) % 7
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate()
   return { mondayStartPad, daysInMonth, year, monthIndex }
@@ -30,7 +30,7 @@ export function isoForDayInMonth(year: number, monthIndex: number, day: number):
   return toISODateLocal(dateFromDayInMonth(year, monthIndex, day))
 }
 
-/** 7er-Zeilen: `null` = leeres Rasterfeld, sonst ISO-Datum. */
+/** Week rows of 7: `null` = empty grid cell, otherwise ISO date string. */
 export function buildMonthSlotMatrix(year: number, monthIndex: number): (string | null)[][] {
   const meta = getMonthMeta(year, monthIndex)
   const flat: (string | null)[] = []

@@ -26,19 +26,19 @@ function RegisterIosWebOnly() {
       <View style={styles.inner}>
         <Text style={styles.logo}>CREA</Text>
         <Text style={[styles.subtitle, { marginBottom: 32 }]}>
-          Erstelle deinen Account auf creaservices.de
+          Create your account on creaservices.de
         </Text>
         <TouchableOpacity
           style={styles.button}
           onPress={() => Linking.openURL(CREA_WEBSITE_URL).catch(() => {})}
           activeOpacity={0.85}
         >
-          <Text style={styles.buttonText}>creaservices.de öffnen</Text>
+          <Text style={styles.buttonText}>Open creaservices.de</Text>
         </TouchableOpacity>
         <Text style={styles.footer}>
-          Schon ein Account?{' '}
+          Already have an account?{' '}
           <Text style={styles.link} onPress={() => router.back()}>
-            Anmelden
+            Log in
           </Text>
         </Text>
       </View>

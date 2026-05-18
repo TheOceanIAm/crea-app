@@ -392,7 +392,7 @@ export function ProductionShadowMapSection({
               thumbTintColor="#FFDC00"
             />
           ) : (
-            <Text style={styles.timeFallback}>Slider wird nach einem neuen iOS build aktiv.</Text>
+            <Text style={styles.timeFallback}>The slider activates after a new iOS build.</Text>
           )}
         </View>
       </View>

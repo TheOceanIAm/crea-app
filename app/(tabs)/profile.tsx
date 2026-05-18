@@ -620,7 +620,7 @@ export default function ProfileScreen() {
               }
               void load()
               Alert.alert(
-                'Plan aktualisiert',
+                'Plan updated',
                 'The plan was updated directly in the app (web sync was temporarily unavailable).'
               )
               return
@@ -651,7 +651,7 @@ export default function ProfileScreen() {
           setSubscriptionTier('agency')
         }
         void load()
-        Alert.alert('Plan aktualisiert', 'Dein Trial-Plan wurde aktualisiert.')
+        Alert.alert('Plan updated', 'Your trial plan was updated.')
       } finally {
         setSwitchingTrialPlan(false)
       }
@@ -1059,7 +1059,7 @@ export default function ProfileScreen() {
         await supabase.auth.signOut({ scope: 'local' })
         router.replace('/login')
       } else {
-        Alert.alert('Löschen fehlgeschlagen', 'error' in r ? r.error : 'Unbekannter Fehler')
+        Alert.alert('Delete failed', 'error' in r ? r.error : 'Unknown error')
       }
     } finally {
       setDeleteAccountBusy(false)
@@ -1068,12 +1068,12 @@ export default function ProfileScreen() {
 
   const confirmDeleteAccount = () => {
     Alert.alert(
-      'Account löschen',
-      'Dein Account und alle damit verbundenen Daten werden permanent gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.',
+      'Delete account',
+      'Your account and all associated data will be permanently deleted. This cannot be undone.',
       [
-        { text: 'Abbrechen', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Permanent löschen',
+          text: 'Delete permanently',
           style: 'destructive',
           onPress: () => void runDeleteAccount(),
         },
@@ -1894,16 +1894,16 @@ export default function ProfileScreen() {
           {activeMenu === 'plan' ? (
             IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY ? (
               <View style={styles.sectionCard}>
-                <Text style={styles.cardTitle}>Abonnement</Text>
+                <Text style={styles.cardTitle}>Subscription</Text>
                 <Text style={[styles.cardSubtitle, { marginBottom: 8 }]}>
-                  Verwalte dein Abonnement auf creaservices.de
+                  Manage your subscription on creaservices.de
                 </Text>
                 <TouchableOpacity
                   style={styles.primaryBtn}
                   onPress={() => void openCreaWebsiteInBrowser()}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.primaryBtnText}>creaservices.de öffnen</Text>
+                  <Text style={styles.primaryBtnText}>Open creaservices.de</Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -2510,7 +2510,7 @@ export default function ProfileScreen() {
                 {deleteAccountBusy ? (
                   <ActivityIndicator color="#ff8888" />
                 ) : (
-                  <Text style={styles.deleteAccountText}>Account löschen</Text>
+                  <Text style={styles.deleteAccountText}>Delete account</Text>
                 )}
               </TouchableOpacity>
 
@@ -2752,11 +2752,18 @@ const styles = StyleSheet.create({
     marginTop: 14,
     borderRadius: 100,
     paddingVertical: 14,
+    paddingHorizontal: 18,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,220,0,0.45)',
   },
-  secondaryBtnText: { fontSize: 15, fontWeight: '700', color: '#FFDC00' },
+  secondaryBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFDC00',
+    textAlign: 'center',
+  },
   btnDisabled: { opacity: 0.55 },
   inAppPayBlock: { marginTop: 20, gap: 0 },
   inAppPayTitle: { fontSize: 14, fontWeight: '800', color: '#ffffff', marginTop: 4 },
@@ -2899,7 +2906,7 @@ const styles = StyleSheet.create({
   segmentBtnText: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.45)' },
   segmentBtnTextActive: { color: '#FFDC00' },
   pushStatusOn: { fontSize: 13, color: 'rgba(255,220,0,0.85)', fontWeight: '600', marginBottom: 10 },
-  pushUnregisterBtn: { marginTop: 4, marginBottom: 12, alignSelf: 'flex-start' },
+  pushUnregisterBtn: { marginTop: 4, marginBottom: 12, alignSelf: 'stretch' },
   pushTypesTitle: { marginTop: 8, marginBottom: 8 },
   notifyBlock: {
     flexDirection: 'row',

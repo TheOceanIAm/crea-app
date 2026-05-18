@@ -1,4 +1,4 @@
--- One-shot install for CEO → Einstellungen (Platform settings RPCs).
+-- One-shot install for CEO → Settings (platform settings RPCs).
 -- Run the whole file in Supabase → SQL Editor if the app says
 -- "Could not find the function public.ceo_get_platform_settings …".
 -- Keeps the same definitions as platform_settings.sql + ceo_admin_rpcs.sql (platform block).

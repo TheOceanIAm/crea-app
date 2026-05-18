@@ -412,7 +412,7 @@ revoke all on function public.ceo_get_invoice(uuid) from public;
 grant execute on function public.ceo_get_invoice(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
--- Subscription revenue (Abo): gross/net totals + breakdown by audience & tier
+-- Subscription revenue: gross/net totals + breakdown by audience & tier
 -- ---------------------------------------------------------------------------
 create or replace function public.ceo_subscription_revenue_snapshot()
 returns jsonb

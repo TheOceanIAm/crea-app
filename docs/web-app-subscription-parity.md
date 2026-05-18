@@ -1,124 +1,124 @@
-# Web ↔ App: Abo-Logik & Feature-Parität (1:1 Referenz)
+# Web ↔ App: subscription logic & feature parity (1:1 reference)
 
-Diese Datei ist die **Single Source of Truth** für Marketing, Website und App-Kommunikation.  
-**CEO-Rolle:** absichtlich nicht Endnutzer-relevant (Admin); nicht in Pricing/Feature-Matrizen aufnehmen.
+This file is the **single source of truth** for marketing, website, and in-app messaging.  
+**CEO role:** intentionally not end-user facing (admin); do not include in pricing/feature matrices.
 
 ---
 
-## 1. Datenquellen (müssen Web & App identisch sein)
+## 1. Data sources (must match web & app)
 
-| Feld | Wo | Nutzung |
-|------|-----|---------|
+| Field | Where | Usage |
+|------|-------|-------|
 | `profiles.role` | DB | `freelancer`, `company`, `ceo`, … |
-| `auth.users.user_metadata.freelancer_plan` | JWT / Auth | `workspace` \| `starter` \| `pro` \| `premium` (Default **`starter`** wenn fehlt/unbekannt) |
-| `profiles.subscription_tier` | DB | Company-Tiers (siehe Sun Planner Normalisierung in App) |
+| `auth.users.user_metadata.freelancer_plan` | JWT / Auth | `workspace` \| `starter` \| `pro` \| `premium` (default **`starter`** if missing/unknown) |
+| `profiles.subscription_tier` | DB | Company tiers (see Sun Planner normalization in the app) |
 
-**App-Helfer:** `lib/freelancerPlan.ts` (`resolveFreelancerPlanFromUser`, `isFreelancerWorkspaceOnlyPlan`, `isFreelancerStarterPlan`, `isFreelancerTalentPoolPlan`, `canFreelancerCreatePrivateProjects`).
-
----
-
-## 2. Freelancer-Pläne — Matrix
-
-| Plan | Private Projekte anlegen (Lead) | Talent Pool | Tabs „Jobs / Messages / Alerts“ | Income/Stats auf Dashboard | Crew Pro-Features im Projekt | Public Freelancer Calendar (Overview) |
-|------|----------------------------------|-------------|----------------------------------|----------------------------|------------------------------|--------------------------------------|
-| **Workspace** | Ja | Nein | **Ausgeblendet** (nur Home + Profil + ggf. versteckte Routes) | Nein | Nur **manueller** Crew (ADD CREW), **kein** Namensuche / kein externes Crew wie Pro-Pfad | — (Projekt ggf. eingeschränkt) |
-| **Starter** | **Nein** | Nein | Ja | Ja | Gesperrt + Hinweis **Pro** | Gesperrt + Hinweis **Pro** |
-| **Pro** | Ja | Ja | Ja | Ja | Namensuche + externe Crew | Ja |
-| **Premium** | Ja | Ja (wie Pro) | Ja | Ja | Wie Pro | Wie Pro |
-
-**Wichtig:** In der App sind **Pro** und **Premium** für Talent Pool **gleich** (`isFreelancerTalentPoolPlan`). Premium nur über **Marketing** differenzieren, nicht über andere Gates — oder später eigene Funktion einbauen.
+**App helpers:** `lib/freelancerPlan.ts` (`resolveFreelancerPlanFromUser`, `isFreelancerWorkspaceOnlyPlan`, `isFreelancerStarterPlan`, `isFreelancerTalentPoolPlan`, `canFreelancerCreatePrivateProjects`).
 
 ---
 
-## 3. Private Projekte — Definition & Regel
+## 2. Freelancer plans — matrix
 
-- **Lead-owned private workspace:** Zeile `projects` mit `company_id = Lead`, typischerweise **`job_id` leer** (nicht aus Firmen-Job-Feed).
-- **Starter:** **`canFreelancerCreatePrivateProjects`** = falsch → keine neuen privaten Lead-Projekte (Liste/Erstellung gesperrt; Hinweis **Pro oder Workspace**).
-- **Workspace / Pro / Premium:** anlegen erlaubt.
+| Plan | Create private projects (lead) | Talent pool | Tabs “Jobs / Messages / Alerts” | Income/stats on dashboard | Crew Pro features in project | Public freelancer calendar (overview) |
+|------|-------------------------------|-------------|-----------------------------------|----------------------------|------------------------------|----------------------------------------|
+| **Workspace** | Yes | No | **Hidden** (Home + profile only, plus any hidden routes) | No | **Manual** crew only (ADD CREW), **no** name search / external crew like Pro path | — (project may be limited) |
+| **Starter** | **No** | No | Yes | Yes | Locked + **Pro** hint | Locked + **Pro** hint |
+| **Pro** | Yes | Yes | Yes | Yes | Name search + external crew | Yes |
+| **Premium** | Yes | Yes (same as Pro) | Yes | Yes | Same as Pro | Same as Pro |
 
-**App-Orientierung:** `canFreelancerCreatePrivateProjects`, `app/(tabs)/workspace-projects.tsx`, `app/(tabs)/dashboard.tsx`.
-
-**Öffentliches Profil — Availability-Buchung (Company → Freelancer):** Hier wird **kein** privates Projekt angelegt. Es ist nur die Auswahl eines **bestehenden, aktiven Firmen-Jobs** (`jobs.status = 'active'`) möglich — **App** (`BookFreelancerModal`) und **Web** (`crea-services` → `FreelancerPublicCalendar` BookingModal) sind dabei abgestimmt. Die App verschickt strukturierte Booking-DMs (`sendAvailabilityProjectInvite`); das Web schickt Klartext — die Datenbank löst beim Accept den Job zu (Deep-Link bzw. `Project:`-Zeile).
-
----
-
-## 4. Sun Planner & Weather (Production)
-
-**Freelancer — Produktregeln (Marketing / Pricing):**
-
-| Plan | Weather (Production) | Sun Planner (Production) |
-|------|------------------------|---------------------------|
-| **Workspace** | 14 Tage Test, danach gesperrt — Workspace nur für **private Organisation**, kein Talent Pool / Jobs / Marktplatz | 14 Tage Test, danach gesperrt — gleiches Fenster wie Weather |
-| **Starter** | **Vollzugriff** | **14-Tage-Test**; dauerhaft voll mit **Pro / Premium** |
-| **Pro / Premium** | Vollzugriff | Vollzugriff |
-
-**Firma (`role === company`):** Sun über **`profiles.subscription_tier`** (normalisiert zu Studio/Agency/…); siehe `app/project/[id].tsx`.
-
-**Technik:** Umsetzung in `lib/sunPlannerWorkspaceTrial.ts` (Funktionen `freelancerProductionSunAllowed` / `freelancerProductionWeatherAllowed`) und `app/project/[id].tsx` — **kein** `job_id`-Bypass für Workspace; Trial-Start per `touch_sun_planner_trial_start` (Workspace + Starter).
-
-**Kommunikation Website (EN):** Workspace = private-only; Sun & Weather in Production = **14-day trial then locked**. Starter = **full Weather**; Sun Planner = **14-day trial**, full on **Pro/Premium**.
+**Important:** In the app **Pro** and **Premium** are **equal** for the talent pool (`isFreelancerTalentPoolPlan`). Differentiate Premium in **marketing** only, not via other gates — or add a dedicated feature later.
 
 ---
 
-## 5. Firmen (Hiring)
+## 3. Private projects — definition & rules
 
-| Bereich | Kurz |
-|---------|------|
-| Öffentliche Jobs posten, Bewerbungen | Nur **Company**, nicht Freelancer |
-| Talent Pool | Company hat Zugriff |
-| Projekt-Workspace aus Job | Typisch `job_id` gesetzt → Crew, Marktplatz-Kontext; **Sun/Weather für Freelancer** weiter nach **§4** (Abo), nicht automatisch „voll“ durch den Job |
+- **Lead-owned private workspace:** `projects` row with `company_id = lead`, typically **`job_id` empty** (not from company job feed).
+- **Starter:** **`canFreelancerCreatePrivateProjects`** = false → no new private lead projects (list/create locked; hint **Pro or Workspace**).
+- **Workspace / Pro / Premium:** creation allowed.
 
----
+**App entry points:** `canFreelancerCreatePrivateProjects`, `app/(tabs)/workspace-projects.tsx`, `app/(tabs)/dashboard.tsx`.
 
-## 6. Alerts / Push (Kurz)
-
-- Crew hinzugefügt (`project_members`): Alert-Eintrag + optional Push `project_crew_invite`; privates Projekt mit Namen des Leads im Text.
-- CEO: Feed oft absichtlich leer für Projekt-Alerts.
+**Public profile — availability booking (company → freelancer):** No private project is created here. Only selection of an **existing active company job** (`jobs.status = 'active'`) — **app** (`BookFreelancerModal`) and **web** (`crea-services` → `FreelancerPublicCalendar` booking modal) stay aligned. The app sends structured booking DMs (`sendAvailabilityProjectInvite`); the web sends plain text — the DB resolves on accept (deep link or `Project:` line).
 
 ---
 
-## 7. Copy-Vorschlag (einheitlich Web + App)
+## 4. Sun planner & weather (production)
 
-Nutze **kurze Notizen** unter gesperrten Elementen:
+**Freelancer — product rules (marketing / pricing):**
 
-| Situation | Kurztext (DE) |
-|-----------|----------------|
-| Talent Pool gesperrt | Nur mit **Pro oder Premium**. Upgrade unter Account auf der Website. |
-| Private Projekte als Starter | Private Lead-Projekte ab **Pro** oder **Workspace**. Im Web unter Abo wählen. |
-| Crew Pro-Features (Starter) | Nur mit **Pro** (Crew per Namen, externe Kontakte). |
-| Public Freelancer Calendar (Starter) | Nur mit **Pro**; Shoot-Tage erscheinen im öffentlichen Profil. |
-| Sun/Weather nach Trial (Workspace) | 14-Tage-Test für Sun **und** Weather in Production beendet — erneut nutzbar mit Upgrade (z. B. Pro/Premium). Kein paralleler „Firmen-Job“-Pfad im Workspace-Marketing. |
-| Sun Planner nach Trial (Starter) | Dauerhaft voll mit **Pro / Premium**; Weather bleibt bei Starter voll. |
+| Plan | Weather (production) | Sun planner (production) |
+|------|----------------------|---------------------------|
+| **Workspace** | 14-day trial, then locked — workspace is **private organization** only, no talent pool / jobs / marketplace | 14-day trial, then locked — same window as weather |
+| **Starter** | **Full access** | **14-day trial**; permanent full access with **Pro / Premium** |
+| **Pro / Premium** | Full access | Full access |
 
-EN spiegeln: „Available from Pro“, „Pro or Workspace plan“, „14-day trial on private projects“.
+**Company (`role === company`):** Sun via **`profiles.subscription_tier`** (normalized to Studio/Agency/…); see `app/project/[id].tsx`.
 
----
+**Implementation:** `lib/sunPlannerWorkspaceTrial.ts` (`freelancerProductionSunAllowed` / `freelancerProductionWeatherAllowed`) and `app/project/[id].tsx` — **no** `job_id` bypass for workspace; trial start via `touch_sun_planner_trial_start` (workspace + starter).
 
-## 8. Website: technische To-dos (wenn Web-Projekt offen)
-
-1. **Gleiche Entitlement-Quelle** wie die App: `user_metadata.freelancer_plan` + `role` + `subscription_tier` (Company).  
-2. **UI spiegeln:** Buttons/Seiten statt deaktivieren + Hinweis wie in Tabelle.  
-3. **Kein** anderes Verhalten als die App für dieselbe Zielgruppe behaupten.  
-4. **Premium = Pro** in der App-Logik für Pool — Website-Text: entweder „Pro / Premium“ oder explizit „Premium inkl. …“ wenn ihr mehr verkauft.
+**Website copy (EN):** Workspace = private-only; sun & weather in production = **14-day trial then locked**. Starter = **full weather**; sun planner = **14-day trial**, full on **Pro/Premium**.
 
 ---
 
-## 9. App-Datei-Index (für Entwickler)
+## 5. Companies (hiring)
 
-| Thema | Datei(en) |
-|------|-----------|
-| Pläne | `lib/freelancerPlan.ts`, `lib/sunPlannerWorkspaceTrial.ts` |
-| Tabs Workspace-only | `app/(tabs)/_layout.tsx` |
-| Dashboard Quick Actions | `app/(tabs)/dashboard.tsx` |
-| Private Projekte Liste | `app/(tabs)/workspace-projects.tsx` |
-| Projekt: Sun, Workspace, Starter | `app/project/[id].tsx` |
-| Production Sun/Weather | `app/components/project/[projectId]/ProductionTab.tsx` |
+| Area | Summary |
+|------|---------|
+| Post public jobs, applications | **Company** only, not freelancer |
+| Talent pool | Company has access |
+| Project workspace from job | Typically `job_id` set → crew, marketplace context; **sun/weather for freelancer** still per **§4** (subscription), not automatically “full” because of the job |
+
+---
+
+## 6. Alerts / push (short)
+
+- Crew added (`project_members`): feed entry + optional push `project_crew_invite`; private project includes lead name in text.
+- CEO: feed often intentionally empty for project alerts.
+
+---
+
+## 7. Copy suggestions (aligned web + app)
+
+Use **short notes** under locked elements:
+
+| Situation | Short copy (EN) |
+|-----------|-----------------|
+| Talent pool locked | Available with **Pro or Premium**. Upgrade in your account on the website. |
+| Private projects as starter | Private lead projects from **Pro** or **Workspace**. Choose a plan on the web. |
+| Crew Pro features (starter) | **Pro** only (crew by name, external contacts). |
+| Public freelancer calendar (starter) | **Pro** only; shoot days appear on the public profile. |
+| Sun/weather after trial (workspace) | 14-day trial for sun **and** weather in production has ended — unlock again with an upgrade (e.g. Pro/Premium). No parallel “company job” path in workspace marketing. |
+| Sun planner after trial (starter) | Full access with **Pro / Premium**; weather stays full on starter. |
+
+Mirror in DE if needed: „Available from Pro“, „Pro or Workspace plan“, „14-day trial on private projects“.
+
+---
+
+## 8. Website: technical to-dos (when working on the web project)
+
+1. **Same entitlement source** as the app: `user_metadata.freelancer_plan` + `role` + `subscription_tier` (company).  
+2. **Mirror UI:** buttons/pages instead of silent disable + hint as in the table.  
+3. **Do not** claim different behavior than the app for the same audience.  
+4. **Premium = Pro** in app logic for pool — website copy: either “Pro / Premium” or explicit “Premium includes …” if you sell more.
+
+---
+
+## 9. App file index (for developers)
+
+| Topic | File(s) |
+|-------|---------|
+| Plans | `lib/freelancerPlan.ts`, `lib/sunPlannerWorkspaceTrial.ts` |
+| Workspace-only tabs | `app/(tabs)/_layout.tsx` |
+| Dashboard quick actions | `app/(tabs)/dashboard.tsx` |
+| Private projects list | `app/(tabs)/workspace-projects.tsx` |
+| Project: sun, workspace, starter | `app/project/[id].tsx` |
+| Production sun/weather | `app/components/project/[projectId]/ProductionTab.tsx` |
 | Crew + Pro | `components/project/ProjectCrewTab.tsx` |
-| Talent Pool | `app/(tabs)/talent-pool.tsx` |
-| Availability-Buchung (nur aktive Jobs; Web↔App gleiche Regel) | App: `components/profile/BookFreelancerModal.tsx`, `FreelancerPublicProfileContent.tsx` · Web: `crea-services/app/components/FreelancerPublicCalendar.tsx` |
-| Feed Alerts | `lib/notificationsFeed.ts` |
-| RLS Pool (DB) | `supabase/sql/talent_pool_select_policies.sql` |
+| Talent pool | `app/(tabs)/talent-pool.tsx` |
+| Availability booking (active jobs only; web↔app same rule) | App: `components/profile/BookFreelancerModal.tsx`, `FreelancerPublicProfileContent.tsx` · Web: `crea-services/app/components/FreelancerPublicCalendar.tsx` |
+| Feed alerts | `lib/notificationsFeed.ts` |
+| RLS pool (DB) | `supabase/sql/talent_pool_select_policies.sql` |
 
 ---
 
-*Zuletzt an die App-Logik in `crea-app` angeglichen; bei Abweichungen im Web-Repo diese Datei aktualisieren.*
+*Last aligned with app logic in `crea-app`; if the web repo diverges, update this file.*

@@ -1,7 +1,7 @@
--- Ergänzt Portfolio, Rechnung/Bank, Benachrichtigungen (JSON), Abo-Kennzeichnung.
--- Nach extend_profile_identity.sql ausführen.
+-- Adds portfolio, invoice/bank fields, notifications (JSON), subscription tier marker.
+-- Run after extend_profile_identity.sql.
 
--- Portfolio & Links
+-- Portfolio & links
 alter table public.profiles add column if not exists portfolio_website text;
 alter table public.profiles add column if not exists portfolio_instagram text;
 alter table public.profiles add column if not exists portfolio_linkedin text;
@@ -9,7 +9,7 @@ alter table public.profiles add column if not exists portfolio_vimeo text;
 alter table public.profiles add column if not exists portfolio_behance text;
 alter table public.profiles add column if not exists portfolio_projects jsonb default '[]'::jsonb;
 
--- Rechnung / Bank (PDF-Vorlagen)
+-- Invoice / bank (PDF templates)
 alter table public.profiles add column if not exists bank_account_holder text;
 alter table public.profiles add column if not exists bank_iban text;
 alter table public.profiles add column if not exists bank_bic text;
@@ -18,10 +18,10 @@ alter table public.profiles add column if not exists invoice_address text;
 alter table public.profiles add column if not exists tax_number text;
 alter table public.profiles add column if not exists vat_registered boolean default false;
 
--- E-Mail-Benachrichtigungen & Digest (App liest/schreibt JSON)
+-- Email notifications & digest (app reads/writes JSON)
 alter table public.profiles add column if not exists notification_settings jsonb default '{}'::jsonb;
 
--- Anzeige aktueller Plan (Stripe-Anbindung später)
+-- Current plan display (Stripe wiring later)
 alter table public.profiles add column if not exists subscription_tier text default 'starter';
 
 comment on column public.profiles.portfolio_projects is 'Array {title, client, link}';

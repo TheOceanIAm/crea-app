@@ -72,12 +72,12 @@ export default function LoginScreen() {
         <Text style={styles.footer}>
           {IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY ? (
             <>
-              Neu bei CREA?{' '}
+              New to CREA?{' '}
               <Text
                 style={styles.link}
                 onPress={() => Linking.openURL(CREA_WEBSITE_URL).catch(() => {})}
               >
-                Account auf creaservices.de erstellen
+                Create account on creaservices.de
               </Text>
             </>
           ) : (

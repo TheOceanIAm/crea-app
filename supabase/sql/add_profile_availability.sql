@@ -1,5 +1,5 @@
--- Supabase → SQL Editor → einmal ausführen.
--- Behebt u.a. "column ... does not exist" und legt das Kalender-Feld an.
+-- Supabase → SQL Editor → run once.
+-- Fixes missing-column errors and adds the calendar field.
 
 alter table public.profiles
   add column if not exists availability_status text;

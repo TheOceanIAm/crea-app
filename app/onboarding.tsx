@@ -332,7 +332,7 @@ export default function OnboardingScreen() {
                 style={styles.input}
                 value={displayName}
                 onChangeText={setDisplayName}
-                placeholder={roleChoice === 'company' ? 'e.g. North Frame Studio' : 'e.g. Alex Müller'}
+                placeholder={roleChoice === 'company' ? 'e.g. North Frame Studio' : 'e.g. Jamie Chen'}
                 placeholderTextColor="rgba(255,255,255,0.3)"
                 autoCapitalize="words"
               />
@@ -440,10 +440,10 @@ export default function OnboardingScreen() {
           <Text style={styles.stepHint}>
             {IOS_SUBSCRIPTION_AND_SIGNUP_ON_WEB_ONLY
               ? step === 0
-                ? 'Schritt 1 von 3'
+                ? 'Step 1 of 3'
                 : step === 2
-                  ? 'Schritt 2 von 3'
-                  : 'Schritt 3 von 3'
+                  ? 'Step 2 of 3'
+                  : 'Step 3 of 3'
               : step === 0
                 ? 'Step 1 of 4'
                 : step === 1

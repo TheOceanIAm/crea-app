@@ -1,14 +1,14 @@
 const major = Number(process.version.slice(1).split(".")[0]);
 if (major >= 24) {
   console.error(
-    `[crea-app] Node ${process.version} wird von Expo 52 nicht unterstützt (Fehler z. B. ERR_INVALID_PACKAGE_CONFIG).\n` +
-      "Bitte Node 20 LTS nutzen, z. B.:\n" +
+    `[crea-app] Node ${process.version} is not supported by Expo 52 (e.g. ERR_INVALID_PACKAGE_CONFIG).\n` +
+      "Use Node 20 LTS, for example:\n" +
       "  source ~/.nvm/nvm.sh && nvm use\n" +
-      "Oder im Projektordner: npm start (Simulator + Metro) / npm run dev nur Metro (lädt nvm und .nvmrc, falls nvm installiert ist)."
+      "Or from the project folder: npm start (simulator + Metro) / npm run dev for Metro only (loads nvm and .nvmrc when nvm is installed)."
   );
   process.exit(1);
 }
 if (major < 18) {
-  console.error(`[crea-app] Node ${process.version} ist zu alt; bitte Node 18+ (empfohlen: 20 LTS).`);
+  console.error(`[crea-app] Node ${process.version} is too old; use Node 18+ (recommended: 20 LTS).`);
   process.exit(1);
 }

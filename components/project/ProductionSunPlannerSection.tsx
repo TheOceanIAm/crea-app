@@ -445,7 +445,7 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
               />
             ) : (
               <Text style={styles.timeSliderFallback}>
-                Slider wird nach einem neuen iOS build aktiv. Nutze bis dahin -/+ Buttons.
+                The slider activates after a new iOS build. Until then, use the - / + buttons.
               </Text>
             )}
           </View>
