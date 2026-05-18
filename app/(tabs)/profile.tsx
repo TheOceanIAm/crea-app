@@ -57,6 +57,13 @@ import { registerForExpoPushTokenAsync } from '@/lib/pushNotifications'
 import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
 import { resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { postTrialPlan } from '@/lib/trialPlanApi'
+import {
+  fetchFreelancerStripeConnectFromSupabase,
+  fetchFreelancerStripeConnectStatus,
+  mergeFreelancerStripeConnectStatus,
+  openFreelancerStripeConnectOnboarding,
+  type FreelancerStripeConnectStatus,
+} from '@/lib/freelancerStripeConnect'
 import { openCreaServicesStripeUrl } from '@/lib/stripeWebCheckout'
 import {
   computeCompanyProfileCompletion,
@@ -227,6 +234,11 @@ export default function ProfileScreen() {
   const [vatRegistered, setVatRegistered] = useState(false)
   const [savingInvoice, setSavingInvoice] = useState(false)
 
+  const [connectStatusLoading, setConnectStatusLoading] = useState(false)
+  const [connectStatusError, setConnectStatusError] = useState<string | null>(null)
+  const [connectStatus, setConnectStatus] = useState<FreelancerStripeConnectStatus | null>(null)
+  const [connectBusy, setConnectBusy] = useState(false)
+
   const [notif, setNotif] = useState<NotificationSettings>({ ...DEFAULT_NOTIFICATION_SETTINGS })
   const [savingNotif, setSavingNotif] = useState(false)
   const [registeringPush, setRegisteringPush] = useState(false)
@@ -354,6 +366,25 @@ export default function ProfileScreen() {
     companyCpExtras,
     email,
   ])
+
+  const loadStripeConnectStatus = useCallback(async () => {
+    if (!freelancer) return
+    setConnectStatusLoading(true)
+    setConnectStatusError(null)
+
+    const fromDb = await fetchFreelancerStripeConnectFromSupabase()
+
+    const r = await fetchFreelancerStripeConnectStatus()
+    setConnectStatusLoading(false)
+    if (r.ok === true) {
+      setConnectStatus(mergeFreelancerStripeConnectStatus(r.status, fromDb))
+      setConnectStatusError(null)
+      return
+    }
+
+    setConnectStatus(fromDb)
+    setConnectStatusError(r.errorMessage)
+  }, [freelancer])
 
   const visibleMenuItems = useMemo(() => {
     if (ceo) return MENU_ITEMS.filter((item) => !CEO_HIDDEN_MENU_IDS.includes(item.id))
@@ -499,6 +530,18 @@ export default function ProfileScreen() {
     useCallback(() => {
       load()
     }, [load])
+  )
+
+  useEffect(() => {
+    if (activeMenu !== 'billing' || !freelancer) return
+    void loadStripeConnectStatus()
+  }, [activeMenu, freelancer, loadStripeConnectStatus])
+
+  useFocusEffect(
+    useCallback(() => {
+      if (activeMenu !== 'billing' || !freelancer) return
+      void loadStripeConnectStatus()
+    }, [activeMenu, freelancer, loadStripeConnectStatus])
   )
 
   useEffect(() => {
@@ -1581,6 +1624,64 @@ export default function ProfileScreen() {
               </View>
 
               <View style={styles.sectionCard}>
+                <Text style={styles.cardTitle}>CREA Pay — Stripe payouts</Text>
+                <Text style={styles.cardSubtitle}>
+                  Connect your bank through Stripe for in-app card payouts. Your IBAN below is still used for manual
+                  transfers and PDF invoices.
+                </Text>
+                {connectStatusLoading ? (
+                  <ActivityIndicator color="#FFDC00" style={styles.connectSpinner} />
+                ) : (
+                  <>
+                    {connectStatusError ? (
+                      <Text style={styles.connectWarningText}>{connectStatusError}</Text>
+                    ) : null}
+                    {connectStatus?.connected ? (
+                      <Text style={styles.connectLinkedLine}>Stripe payout account is linked.</Text>
+                    ) : null}
+                    {connectStatus ? (
+                      <Text style={styles.connectStatusSummary}>
+                        Details:{' '}
+                        <Text style={connectStatus.detailsSubmitted ? styles.connectOk : styles.connectPending}>
+                          {connectStatus.detailsSubmitted ? 'Submitted' : 'Not yet'}
+                        </Text>
+                        {'  ·  '}
+                        Charges:{' '}
+                        <Text style={connectStatus.chargesEnabled ? styles.connectOk : styles.connectPending}>
+                          {connectStatus.chargesEnabled ? 'Enabled' : 'Pending'}
+                        </Text>
+                        {'  ·  '}
+                        Payouts:{' '}
+                        <Text style={connectStatus.payoutsEnabled ? styles.connectOk : styles.connectPending}>
+                          {connectStatus.payoutsEnabled ? 'Enabled' : 'Pending'}
+                        </Text>
+                      </Text>
+                    ) : null}
+                  </>
+                )}
+                <TouchableOpacity
+                  style={[styles.secondaryBtn, (connectBusy || connectStatusLoading) && styles.btnDisabled]}
+                  disabled={connectBusy || connectStatusLoading}
+                  activeOpacity={0.8}
+                  onPress={() =>
+                    void (async () => {
+                      setConnectBusy(true)
+                      await openFreelancerStripeConnectOnboarding()
+                      setConnectBusy(false)
+                    })()
+                  }
+                >
+                  {connectBusy ? (
+                    <ActivityIndicator color="#FFDC00" />
+                  ) : (
+                    <Text style={styles.secondaryBtnText}>
+                      {connectStatus?.connected ? 'Update payout details in Stripe' : 'Set up Stripe payouts'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.sectionCard}>
                 <Text style={styles.cardTitle}>Bank &amp; PayPal</Text>
                 <Text style={styles.cardSubtitle}>Bank details for transfers — shown on the PDF invoice.</Text>
                 <Text style={styles.fieldLabel}>Account holder</Text>
@@ -2492,6 +2593,13 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 18, fontWeight: '800', color: '#ffffff', marginBottom: 6 },
   cardSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.38)', lineHeight: 18, marginBottom: 18 },
+  connectSpinner: { marginVertical: 6, alignSelf: 'flex-start' },
+  connectErrorText: { fontSize: 12, color: 'rgba(255,140,120,0.9)', lineHeight: 17, marginBottom: 12 },
+  connectWarningText: { fontSize: 12, color: 'rgba(255,211,106,0.85)', lineHeight: 17, marginBottom: 12 },
+  connectStatusSummary: { fontSize: 12, color: 'rgba(255,255,255,0.35)', lineHeight: 18, marginBottom: 12 },
+  connectOk: { color: 'rgba(120,220,160,0.95)', fontWeight: '600' },
+  connectPending: { color: 'rgba(255,255,255,0.45)', fontWeight: '600' },
+  connectLinkedLine: { fontSize: 13, fontWeight: '600', color: 'rgba(120,220,160,0.92)', marginBottom: 10 },
   fieldLabel: {
     fontSize: 10,
     fontWeight: '700',
