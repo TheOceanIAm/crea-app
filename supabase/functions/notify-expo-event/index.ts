@@ -30,6 +30,75 @@ function parseNotif(raw: unknown): NotifSettings {
   }
 }
 
+async function workspaceRecipientIds(
+  admin: ReturnType<typeof createClient>,
+  opts: { projectId?: string; jobId?: string; excludeUserId: string },
+): Promise<{ recipientIds: string[]; projectTitle: string; projectId: string | null; jobId: string | null }> {
+  const ids = new Set<string>()
+  let projectId = opts.projectId?.trim() || null
+  let jobId = opts.jobId?.trim() || null
+  let title = 'Project'
+
+  if (jobId && !projectId) {
+    const { data: proj } = await admin
+      .from('projects')
+      .select('id, title, company_id, freelancer_id')
+      .eq('job_id', jobId)
+      .maybeSingle()
+    if (proj) {
+      projectId = String(proj.id)
+      title = String(proj.title ?? title).trim() || title
+      if (proj.company_id) ids.add(String(proj.company_id))
+      if (proj.freelancer_id) ids.add(String(proj.freelancer_id))
+    } else {
+      const { data: job } = await admin.from('jobs').select('company_id, title').eq('id', jobId).maybeSingle()
+      if (job) {
+        title = String(job.title ?? title).trim() || title
+        if (job.company_id) ids.add(String(job.company_id))
+      }
+    }
+    const { data: apps } = await admin
+      .from('job_applications')
+      .select('freelancer_id')
+      .eq('job_id', jobId)
+      .eq('status', 'accepted')
+    for (const a of apps ?? []) {
+      if (a.freelancer_id) ids.add(String(a.freelancer_id))
+    }
+  }
+
+  if (projectId) {
+    const { data: proj } = await admin
+      .from('projects')
+      .select('title, company_id, freelancer_id, job_id')
+      .eq('id', projectId)
+      .maybeSingle()
+    if (proj) {
+      title = String(proj.title ?? title).trim() || title
+      if (proj.company_id) ids.add(String(proj.company_id))
+      if (proj.freelancer_id) ids.add(String(proj.freelancer_id))
+      if (proj.job_id) jobId = String(proj.job_id)
+    }
+    const { data: members } = await admin.from('project_members').select('profile_id').eq('project_id', projectId)
+    for (const m of members ?? []) {
+      if (m.profile_id) ids.add(String(m.profile_id))
+    }
+    if (jobId) {
+      const { data: apps } = await admin
+        .from('job_applications')
+        .select('freelancer_id')
+        .eq('job_id', jobId)
+        .eq('status', 'accepted')
+      for (const a of apps ?? []) {
+        if (a.freelancer_id) ids.add(String(a.freelancer_id))
+      }
+    }
+  }
+
+  ids.delete(opts.excludeUserId)
+  return { recipientIds: [...ids], projectTitle: title, projectId, jobId }
+}
+
 async function sendExpoPush(opts: {
   recipientId: string
   admin: ReturnType<typeof createClient>
@@ -287,13 +356,10 @@ Deno.serve(async (req) => {
       })
     }
     const projectId = String(msg.project_id)
-    const { data: members } = await admin
-      .from('project_members')
-      .select('profile_id')
-      .eq('project_id', projectId)
-    const ids = [...new Set((members ?? []).map((m) => String(m.profile_id)).filter((id) => id && id !== user.id))]
-    const { data: proj } = await admin.from('projects').select('title').eq('id', projectId).maybeSingle()
-    const pt = String(proj?.title ?? 'Project').trim() || 'Project'
+    const { recipientIds, projectTitle: pt, jobId } = await workspaceRecipientIds(admin, {
+      projectId,
+      excludeUserId: user.id,
+    })
     const preview =
       typeof msg.body === 'string' && msg.body.trim()
         ? msg.body.trim().length > 120
@@ -301,18 +367,126 @@ Deno.serve(async (req) => {
           : msg.body.trim()
         : 'New project message'
     const results: unknown[] = []
-    for (const rid of ids) {
+    for (const rid of recipientIds) {
       const r = await sendExpoPush({
         recipientId: rid,
         admin,
         title: pt,
         body: preview,
-        data: { type: 'project_message', projectId, messageId },
+        data: { type: 'project_message', projectId, messageId, jobId: jobId ?? undefined },
         allow: (s) => Boolean(s.pushProjectChat ?? true),
       })
       results.push(r)
     }
-    return new Response(JSON.stringify({ ok: true, notified: ids.length, results }), {
+    return new Response(JSON.stringify({ ok: true, notified: recipientIds.length, results }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+
+  if (kind === 'job_message') {
+    const messageId = typeof body.messageId === 'string' ? body.messageId.trim() : ''
+    if (!messageId) {
+      return new Response(JSON.stringify({ error: 'messageId required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const { data: msg } = await admin
+      .from('job_messages')
+      .select('job_id, sender_id, content')
+      .eq('id', messageId)
+      .maybeSingle()
+    if (!msg || msg.sender_id !== user.id) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const jobId = String(msg.job_id)
+    const { recipientIds, projectTitle: pt, projectId } = await workspaceRecipientIds(admin, {
+      jobId,
+      excludeUserId: user.id,
+    })
+    const preview =
+      typeof msg.content === 'string' && msg.content.trim()
+        ? msg.content.trim().length > 120
+          ? `${msg.content.trim().slice(0, 117)}…`
+          : msg.content.trim()
+        : 'New workspace message'
+    const results: unknown[] = []
+    for (const rid of recipientIds) {
+      const r = await sendExpoPush({
+        recipientId: rid,
+        admin,
+        title: pt,
+        body: preview,
+        data: { type: 'project_message', projectId: projectId ?? undefined, jobId, messageId },
+        allow: (s) => Boolean(s.pushProjectChat ?? true),
+      })
+      results.push(r)
+    }
+    return new Response(JSON.stringify({ ok: true, notified: recipientIds.length, results }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+
+  if (kind === 'workspace_activity') {
+    const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : ''
+    const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : ''
+    const activity = typeof body.activity === 'string' ? body.activity.trim() : 'update'
+    const detail = typeof body.detail === 'string' ? body.detail.trim() : ''
+    if (!projectId && !jobId) {
+      return new Response(JSON.stringify({ error: 'projectId or jobId required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const { recipientIds: allMembers, projectTitle: pt, projectId: resolvedProjectId, jobId: resolvedJobId } =
+      await workspaceRecipientIds(admin, {
+        projectId: projectId || undefined,
+        jobId: jobId || undefined,
+        excludeUserId: '',
+      })
+    if (!allMembers.includes(user.id)) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const recipientIds = allMembers.filter((id) => id !== user.id)
+    if (recipientIds.length === 0) {
+      return new Response(JSON.stringify({ ok: true, notified: 0 }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const activityLabels: Record<string, string> = {
+      milestone: 'New milestone',
+      file: 'New file in workspace',
+      report: 'Production report posted',
+    }
+    const pushTitle = activityLabels[activity] ?? 'Workspace update'
+    const pushBody = detail || `«${pt}» was updated`
+    const results: unknown[] = []
+    for (const rid of recipientIds) {
+      const r = await sendExpoPush({
+        recipientId: rid,
+        admin,
+        title: pushTitle,
+        body: pushBody.length > 120 ? `${pushBody.slice(0, 117)}…` : pushBody,
+        data: {
+          type: 'workspace_activity',
+          activity,
+          projectId: resolvedProjectId ?? undefined,
+          jobId: resolvedJobId ?? undefined,
+        },
+        allow: (s) => Boolean(s.pushProjectChat ?? true),
+      })
+      results.push(r)
+    }
+    return new Response(JSON.stringify({ ok: true, notified: recipientIds.length, results }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

@@ -59,6 +59,14 @@ import {
   parseNotificationSettings,
   parsePortfolioProjects,
 } from '@/lib/profileSettingsExtras'
+import { loadPortfolioProjectsForSettings } from '@/lib/freelancerPortfolioTable'
+import { resolveCanonicalFreelancerHeadline } from '@/lib/freelancerHeadlineSync'
+import { postSyncFreelancerProfileToWeb } from '@/lib/syncFreelancerProfileApi'
+import {
+  mirrorProfilesToFreelancerProfiles,
+  syncFreelancerCoreProfileToWeb,
+  syncFreelancerInvoiceFieldsToWeb,
+} from '@/lib/syncFreelancerProfileToWeb'
 import { registerForExpoPushTokenAsync } from '@/lib/pushNotifications'
 import { CreaProfileTabSkeleton } from '@/components/CreaLoading'
 import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
@@ -502,13 +510,15 @@ export default function ProfileScreen() {
     const { data, error } = await supabase
       .from('profiles')
       .select(
-        'name, role, headline, location, bio, skills, equipment, avatar_url, day_rate_amount, half_day_rate_amount, rates_currency, rates_notes, portfolio_website, portfolio_instagram, portfolio_linkedin, portfolio_vimeo, portfolio_behance, portfolio_projects, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, tax_number, vat_registered, notification_settings, subscription_tier, trial_ends_at'
+        'name, role, headline, location, bio, skills, equipment, avatar_url, day_rate_amount, half_day_rate_amount, rates_currency, rates_notes, open_to_remote, open_to_travel, portfolio_website, portfolio_instagram, portfolio_linkedin, portfolio_vimeo, portfolio_behance, portfolio_projects, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, tax_number, vat_registered, notification_settings, subscription_tier, trial_ends_at'
       )
       .eq('id', user.id)
       .single()
-    const { data: freelancerRates } = await supabase
+    const { data: freelancerRates, data: freelancerMirror } = await supabase
       .from('freelancer_profiles')
-      .select('day_rate, half_day_rate')
+      .select(
+        'day_rate, half_day_rate, job_title, bio, location, skills, essentials, open_to_remote, open_to_travel, website, instagram, linkedin, vimeo, behance, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, steuer_id, vat_registered'
+      )
       .eq('id', user.id)
       .maybeSingle()
 
@@ -544,27 +554,40 @@ export default function ProfileScreen() {
       setRatesNotes('')
       setCompanyCpExtras(null)
     } else {
+      const fp = freelancerMirror as Record<string, unknown> | null
       setEditName(data?.name ?? '')
       setRole(resolveAppRole(data?.role, user))
-      setHeadline(data?.headline ?? '')
-      setLocation(data?.location ?? '')
-      setBio(data?.bio ?? '')
+      setHeadline(
+        resolveCanonicalFreelancerHeadline(
+          typeof data?.headline === 'string' ? data.headline : null,
+          typeof fp?.job_title === 'string' ? fp.job_title : null
+        )
+      )
+      setLocation(String(data?.location ?? fp?.location ?? ''))
+      setBio(String(data?.bio ?? fp?.bio ?? ''))
       setAvatarUrl(data?.avatar_url ?? '')
-      setSkillsList(Array.isArray(data?.skills) ? data.skills : [])
-      setEquipmentList(Array.isArray(data?.equipment) ? data.equipment : [])
-      setPortfolioWebsite(data?.portfolio_website ?? '')
-      setPortfolioInstagram(data?.portfolio_instagram ?? '')
-      setPortfolioLinkedin(data?.portfolio_linkedin ?? '')
-      setPortfolioVimeo(data?.portfolio_vimeo ?? '')
-      setPortfolioBehance(data?.portfolio_behance ?? '')
-      setPortfolioProjects(parsePortfolioProjects(data?.portfolio_projects))
-      setBankHolder(data?.bank_account_holder ?? '')
-      setBankIban(data?.bank_iban ?? '')
-      setBankBic(data?.bank_bic ?? '')
-      setPaypalEmail(data?.paypal_email ?? '')
-      setInvoiceAddress(data?.invoice_address ?? '')
-      setTaxNumber(data?.tax_number ?? '')
-      setVatRegistered(Boolean(data?.vat_registered))
+      const skillsFromProfiles = Array.isArray(data?.skills) ? data.skills : []
+      const skillsFromFp = Array.isArray(fp?.skills) ? (fp.skills as string[]) : []
+      setSkillsList(skillsFromProfiles.length > 0 ? skillsFromProfiles : skillsFromFp)
+      const equipmentFromProfiles = Array.isArray(data?.equipment) ? data.equipment : []
+      const essentialsFromFp = Array.isArray(fp?.essentials) ? (fp.essentials as string[]) : []
+      setEquipmentList(
+        equipmentFromProfiles.length > 0 ? equipmentFromProfiles : essentialsFromFp
+      )
+      setPortfolioWebsite(String(data?.portfolio_website ?? fp?.website ?? ''))
+      setPortfolioInstagram(String(data?.portfolio_instagram ?? fp?.instagram ?? ''))
+      setPortfolioLinkedin(String(data?.portfolio_linkedin ?? fp?.linkedin ?? ''))
+      setPortfolioVimeo(String(data?.portfolio_vimeo ?? fp?.vimeo ?? ''))
+      setPortfolioBehance(String(data?.portfolio_behance ?? fp?.behance ?? ''))
+      const mergedPortfolio = await loadPortfolioProjectsForSettings(user.id)
+      setPortfolioProjects(mergedPortfolio)
+      setBankHolder(String(data?.bank_account_holder ?? fp?.bank_account_holder ?? ''))
+      setBankIban(String(data?.bank_iban ?? fp?.bank_iban ?? ''))
+      setBankBic(String(data?.bank_bic ?? fp?.bank_bic ?? ''))
+      setPaypalEmail(String(data?.paypal_email ?? fp?.paypal_email ?? ''))
+      setInvoiceAddress(String(data?.invoice_address ?? fp?.invoice_address ?? ''))
+      setTaxNumber(String(data?.tax_number ?? fp?.steuer_id ?? ''))
+      setVatRegistered(Boolean(data?.vat_registered ?? fp?.vat_registered))
       setNotif(parseNotificationSettings(data?.notification_settings))
       const dbTier = String((data?.subscription_tier as string) || '')
         .trim()
@@ -604,6 +627,10 @@ export default function ProfileScreen() {
       setRatesNotes((data?.rates_notes as string) || '')
       const rawTrial = data?.trial_ends_at
       setTrialEndsAt(typeof rawTrial === 'string' && rawTrial.trim() ? rawTrial.trim() : null)
+
+      if (isFreelancerProfile(resolveAppRole(data?.role, user))) {
+        await mirrorProfilesToFreelancerProfiles(user.id)
+      }
     }
 
     setLoading(false)
@@ -872,12 +899,28 @@ export default function ProfileScreen() {
     }
 
     const { error } = await supabase.from('profiles').update(payload).eq('id', user.id)
-    setSavingProfile(false)
-
     if (error) {
+      setSavingProfile(false)
       Alert.alert('Save failed', error.message)
       return
     }
+
+    if (freelancer) {
+      const mirror = await syncFreelancerCoreProfileToWeb(user.id, {
+        headline: headline.trim() || null,
+        bio: bio.trim() || null,
+        location: location.trim() || null,
+        skills: skillsList,
+        equipment: equipmentList,
+      })
+      if (mirror.error) {
+        setSavingProfile(false)
+        Alert.alert('Save failed', mirror.error)
+        return
+      }
+    }
+
+    setSavingProfile(false)
     Alert.alert('Saved', 'Your profile was updated.')
   }
 
@@ -929,6 +972,9 @@ export default function ProfileScreen() {
         },
         { onConflict: 'id' }
       )
+    if (!error && !legacyRateError && freelancer) {
+      await mirrorProfilesToFreelancerProfiles(user.id)
+    }
     setSavingRates(false)
     if (error || legacyRateError) {
       Alert.alert('Save failed', error?.message || legacyRateError?.message || 'Could not save rates.')
@@ -968,11 +1014,27 @@ export default function ProfileScreen() {
       payload.portfolio_projects = portfolioProjects
     }
     const { error } = await supabase.from('profiles').update(payload).eq('id', user.id)
-    setSavingPortfolio(false)
     if (error) {
+      setSavingPortfolio(false)
       Alert.alert('Save failed', error.message)
       return
     }
+
+    if (!company) {
+      const sync = await postSyncFreelancerProfileToWeb()
+      if (!sync.ok) {
+        const fallback = await mirrorProfilesToFreelancerProfiles(user.id)
+        if (fallback.error) {
+          setSavingPortfolio(false)
+          Alert.alert('Save failed', sync.error ?? fallback.error)
+          return
+        }
+      }
+      const refreshed = await loadPortfolioProjectsForSettings(user.id)
+      setPortfolioProjects(refreshed)
+    }
+
+    setSavingPortfolio(false)
     Alert.alert('Saved', company ? 'Links were updated.' : 'Portfolio & links were updated.')
   }
 
@@ -992,11 +1054,30 @@ export default function ProfileScreen() {
         vat_registered: vatRegistered,
       })
       .eq('id', user.id)
-    setSavingInvoice(false)
     if (error) {
+      setSavingInvoice(false)
       Alert.alert('Save failed', error.message)
       return
     }
+
+    if (freelancer) {
+      const mirror = await syncFreelancerInvoiceFieldsToWeb(user.id, {
+        bank_account_holder: bankHolder,
+        bank_iban: bankIban,
+        bank_bic: bankBic,
+        paypal_email: paypalEmail,
+        invoice_address: invoiceAddress,
+        tax_number: taxNumber,
+        vat_registered: vatRegistered,
+      })
+      if (mirror.error) {
+        setSavingInvoice(false)
+        Alert.alert('Save failed', mirror.error)
+        return
+      }
+    }
+
+    setSavingInvoice(false)
     Alert.alert('Saved', 'Invoice details were saved.')
   }
 

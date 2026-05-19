@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useGlobalSearchParams, useLocalSearchParams, useRouter } from 'expo-router'
@@ -30,7 +31,9 @@ import {
 import { replyToBookingMessage } from '@/lib/replyToBookingMessage'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
-import { applyToJobViaWebApi, fetchJobApplicationStatus } from '@/lib/applyToJobApi'
+import { applyToJobViaWebApi, fetchJobApplicationStatus, type JobApplicationStatus } from '@/lib/applyToJobApi'
+import { parseJobCategoryRoles } from '@/lib/jobCategoryRoles'
+import { resolveAppliedRoleForSubmit } from '@/lib/jobApplicationRole'
 
 type BookingDeepState =
   | { kind: 'none' }
@@ -97,8 +100,10 @@ export default function JobDetailScreen() {
   const [uid, setUid] = useState<string | null>(null)
   const [role, setRole] = useState<string | null>(null)
   const [applied, setApplied] = useState(false)
+  const [applicationStatus, setApplicationStatus] = useState<JobApplicationStatus>('none')
   const [applyBusy, setApplyBusy] = useState(false)
   const [projectId, setProjectId] = useState<string | null>(null)
+  const [hasWorkspaceAccess, setHasWorkspaceAccess] = useState(false)
   const [applicantsCount, setApplicantsCount] = useState(0)
   const [companyName, setCompanyName] = useState('Company')
   const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null)
@@ -106,6 +111,8 @@ export default function JobDetailScreen() {
   const [accessDenied, setAccessDenied] = useState(false)
   const [bookingDeep, setBookingDeep] = useState<BookingDeepState>({ kind: 'none' })
   const [bookingBusy, setBookingBusy] = useState(false)
+  const [rolePickerOpen, setRolePickerOpen] = useState(false)
+  const [selectedApplyRole, setSelectedApplyRole] = useState('')
 
   /** Params can hydrate after first paint — bump `none` → `loading` when invite query appears. */
   useEffect(() => {
@@ -121,6 +128,10 @@ export default function JobDetailScreen() {
       return
     }
     setAccessDenied(false)
+    setApplied(false)
+    setApplicationStatus('none')
+    setHasWorkspaceAccess(false)
+    setProjectId(null)
     const { data: { user } } = await supabase.auth.getUser()
     setUid(user?.id ?? null)
 
@@ -199,23 +210,35 @@ export default function JobDetailScreen() {
 
     if (user) {
       const appStatus = await fetchJobApplicationStatus(id)
-      if (!appStatus.error) {
-        setApplied(appStatus.applied)
-        setApplicantsCount(appStatus.applicantCount)
-      }
+      setApplied(appStatus.applied)
+      setApplicationStatus(appStatus.status)
+      setApplicantsCount(appStatus.applicantCount)
+      if (appStatus.projectId) setProjectId(appStatus.projectId)
+      setHasWorkspaceAccess(appStatus.hasWorkspaceAccess)
 
       const ownerIdRow = String((row as JobRow).company_id || '').trim()
       if (resolvedRole && isCompanyProfile(resolvedRole) && ownerIdRow === user.id) {
         await ensureMarketplaceJobWorkspaceRow(supabase, { jobId: id, userId: user.id })
       }
 
-      const { data: proj } = await supabase.from('projects').select('id').eq('job_id', id).maybeSingle()
-      let pid = proj?.id ?? null
-      if (!pid) {
-        const { data: projById } = await supabase.from('projects').select('id').eq('id', id).maybeSingle()
-        pid = projById?.id ?? null
+      if (!appStatus.projectId) {
+        const { data: proj } = await supabase.from('projects').select('id').eq('job_id', id).maybeSingle()
+        let pid = proj?.id ?? null
+        if (!pid) {
+          const { data: projById } = await supabase.from('projects').select('id').eq('id', id).maybeSingle()
+          pid = projById?.id ?? null
+        }
+        if (pid) {
+          setProjectId(pid)
+          if (!appStatus.hasWorkspaceAccess) {
+            const { data: inProject } = await supabase.rpc('user_in_project', {
+              p_project_id: pid,
+              p_user: user.id,
+            })
+            setHasWorkspaceAccess(Boolean(inProject))
+          }
+        }
       }
-      setProjectId(pid)
     }
 
     setLoading(false)
@@ -338,6 +361,22 @@ export default function JobDetailScreen() {
   /** Hide “Apply” for invite URLs until we fall back to `invalid` (broken/stale link). */
   const hideApplyForInviteDeepLink = openedFromBooking && bookingDeep.kind !== 'invalid'
 
+  const canShowApply =
+    freelancer &&
+    !isOwner &&
+    job?.status === 'active' &&
+    !pendingBookingGate &&
+    !hideApplyForInviteDeepLink &&
+    applicationStatus === 'none' &&
+    !hasWorkspaceAccess
+
+  const showWorkspace = Boolean(
+    projectId &&
+      (hasWorkspaceAccess ||
+        (company && isOwner) ||
+        (freelancer && applicationStatus === 'accepted'))
+  )
+
   const onBookingRespond = async (status: BookingReplyStatus) => {
     if (bookingDeep.kind !== 'ready') return
     setBookingBusy(true)
@@ -371,16 +410,28 @@ export default function JobDetailScreen() {
     router.push(`/conversation/${convId}`)
   }
 
-  const onApply = async () => {
+  const jobRoles = useMemo(() => parseJobCategoryRoles(job?.category), [job?.category])
+
+  const submitApplication = async (appliedRole: string | null) => {
     if (!uid || !job) return
     setApplyBusy(true)
-    const result = await applyToJobViaWebApi(job.id)
+    const result = await applyToJobViaWebApi(job.id, appliedRole)
     setApplyBusy(false)
     if (!result.ok) {
       const msg = result.error ?? ''
+      if (msg === 'applied_role_required') {
+        Alert.alert('Choose a role', 'Please select which role you are applying for.')
+        setRolePickerOpen(true)
+        return
+      }
+      if (msg === 'invalid_applied_role') {
+        Alert.alert('Invalid role', 'That role is not listed on this job.')
+        return
+      }
       if (msg === 'already_applied') {
         Alert.alert('Already applied', 'You have already applied to this job.')
         setApplied(true)
+        setApplicationStatus('pending')
         return
       }
       if (msg === 'cannot_apply_to_own_job') {
@@ -418,14 +469,28 @@ export default function JobDetailScreen() {
     if (result.alreadyApplied) {
       Alert.alert('Already applied', 'You have already applied to this job.')
       setApplied(true)
+      setApplicationStatus('pending')
       return
     }
     setApplied(true)
+    setApplicationStatus('pending')
+    setRolePickerOpen(false)
     setApplicantsCount((c) => c + 1)
     if (result.applicationId) {
       void notifyExpoEvent({ kind: 'job_application', applicationId: result.applicationId })
     }
     Alert.alert('Applied', 'The company will see your application.')
+  }
+
+  const onApply = () => {
+    if (!uid || !job) return
+    const resolved = resolveAppliedRoleForSubmit(job.category, null)
+    if (!resolved.ok) {
+      setSelectedApplyRole('')
+      setRolePickerOpen(true)
+      return
+    }
+    void submitApplication(resolved.role)
   }
 
   const openWorkspace = () => {
@@ -485,6 +550,57 @@ export default function JobDetailScreen() {
           <Share2 size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
         </TouchableOpacity>
       </View>
+
+      <Modal visible={rolePickerOpen} transparent animationType="fade" onRequestClose={() => setRolePickerOpen(false)}>
+        <View style={styles.roleBackdrop}>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.roleScroll}>
+            <View style={styles.roleCard}>
+              <Text style={styles.roleTitle}>Apply for role</Text>
+              <Text style={styles.roleHint}>
+                Pick the role you&apos;re applying for on this job.
+              </Text>
+              <View style={styles.roleChips}>
+                {jobRoles.map((r) => {
+                  const on = selectedApplyRole === r
+                  return (
+                    <TouchableOpacity
+                      key={r}
+                      style={[styles.roleChip, on && styles.roleChipOn]}
+                      onPress={() => setSelectedApplyRole(r)}
+                      disabled={applyBusy}
+                    >
+                      <Text style={[styles.roleChipText, on && styles.roleChipTextOn]}>{r}</Text>
+                    </TouchableOpacity>
+                  )
+                })}
+              </View>
+              <View style={styles.roleActions}>
+                <TouchableOpacity style={styles.roleCancel} onPress={() => setRolePickerOpen(false)} disabled={applyBusy}>
+                  <Text style={styles.roleCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.roleConfirm, (!selectedApplyRole || applyBusy) && styles.btnDisabled]}
+                  disabled={!selectedApplyRole || applyBusy}
+                  onPress={() => {
+                    const resolved = resolveAppliedRoleForSubmit(job?.category, selectedApplyRole)
+                    if (!resolved.ok) {
+                      Alert.alert('Choose a role', 'Please select one of the roles listed on this job.')
+                      return
+                    }
+                    void submitApplication(resolved.role)
+                  }}
+                >
+                  {applyBusy ? (
+                    <ActivityIndicator color="#0a0a0a" />
+                  ) : (
+                    <Text style={styles.roleConfirmText}>Send application</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
 
       <ShareSheetModal
         visible={shareOpen}
@@ -595,18 +711,30 @@ export default function JobDetailScreen() {
           </View>
         ) : null}
 
-        {freelancer && !isOwner && job.status === 'active' && !pendingBookingGate && !hideApplyForInviteDeepLink ? (
+        {canShowApply ? (
           <TouchableOpacity
-            style={[styles.primaryBtn, (applied || applyBusy) && styles.btnDisabled]}
+            style={[styles.primaryBtn, applyBusy && styles.btnDisabled]}
             onPress={onApply}
-            disabled={applied || applyBusy}
+            disabled={applyBusy}
           >
             {applyBusy ? (
               <ActivityIndicator color="#0a0a0a" />
             ) : (
-              <Text style={styles.primaryBtnText}>{applied ? 'Applied' : 'Apply now'}</Text>
+              <Text style={styles.primaryBtnText}>Apply now</Text>
             )}
           </TouchableOpacity>
+        ) : null}
+
+        {freelancer && !isOwner && applicationStatus === 'pending' ? (
+          <View style={[styles.applicationStatusPill, styles.applicationStatusPillPending]}>
+            <Text style={styles.applicationStatusPending}>Application pending</Text>
+          </View>
+        ) : null}
+
+        {freelancer && !isOwner && applicationStatus === 'declined' ? (
+          <View style={[styles.applicationStatusPill, styles.applicationStatusPillDeclined]}>
+            <Text style={styles.applicationStatusDeclined}>Application not selected</Text>
+          </View>
         ) : null}
 
         {company && isOwner && openedFromBooking ? (
@@ -627,7 +755,7 @@ export default function JobDetailScreen() {
           </>
         ) : null}
 
-        {projectId ? (
+        {showWorkspace ? (
           <>
             <TouchableOpacity style={styles.primaryBtn} onPress={openWorkspace}>
               <Text style={styles.primaryBtnText}>Open project workspace</Text>
@@ -820,6 +948,29 @@ const styles = StyleSheet.create({
   bookingResolvedNo: { backgroundColor: 'rgba(180,83,9,0.25)' },
   bookingResolvedText: { fontSize: 13, fontWeight: '800', color: 'rgba(255,255,255,0.9)' },
   btnDisabled: { opacity: 0.55 },
+  applicationStatusPill: {
+    marginTop: 24,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  applicationStatusPillPending: {
+    borderColor: 'rgba(255,220,0,0.35)',
+  },
+  applicationStatusPillDeclined: {
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  applicationStatusPending: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: 'rgba(255,220,0,0.85)',
+  },
+  applicationStatusDeclined: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.4)',
+  },
   missTitle: { color: '#ffffff', fontSize: 18, fontWeight: '700' },
   missSub: {
     marginTop: 10,
@@ -829,4 +980,49 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     paddingHorizontal: 24,
   },
+  roleBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  roleScroll: { flexGrow: 1, justifyContent: 'center' },
+  roleCard: {
+    backgroundColor: '#161616',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 20,
+  },
+  roleTitle: { fontSize: 22, fontWeight: '900', color: '#fff', marginBottom: 8 },
+  roleHint: { fontSize: 13, color: 'rgba(255,255,255,0.45)', lineHeight: 19, marginBottom: 16 },
+  roleChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 },
+  roleChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  roleChipOn: { backgroundColor: '#FFDC00', borderColor: '#FFDC00' },
+  roleChipText: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.75)' },
+  roleChipTextOn: { color: '#0a0a0a' },
+  roleActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
+  roleCancel: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  roleCancelText: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.55)' },
+  roleConfirm: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: '#FFDC00',
+    minWidth: 140,
+    alignItems: 'center',
+  },
+  roleConfirmText: { fontSize: 14, fontWeight: '800', color: '#0a0a0a' },
 })

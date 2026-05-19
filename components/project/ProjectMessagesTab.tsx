@@ -10,12 +10,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Image,
 } from 'react-native'
 import { useFocusEffect } from 'expo-router'
 import { Send } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
+import { loadProfileAvatarsByIds, normalizeProfileAvatarUrl } from '@/lib/profileAvatar'
+import { mirrorProjectMessageToJob } from '@/lib/syncWorkspaceMessage'
+import { fetchMergedWorkspaceMessages, workspaceMessageSyncKey } from '@/lib/workspaceMessages'
 
 type Row = {
   id: string
@@ -23,34 +27,96 @@ type Row = {
   sender_id: string
   body: string
   created_at: string
-  profiles?: { name: string | null } | null
+  avatar_url: string | null
+  profiles?: { name: string | null; avatar_url?: string | null } | null
 }
 
 type Props = { projectId: string; userId: string }
 
+function appendMessageRow(prev: Row[], next: Row): Row[] {
+  const syncKey = workspaceMessageSyncKey(next.sender_id, next.body, next.created_at)
+  if (prev.some((m) => m.id === next.id)) return prev
+  if (prev.some((m) => workspaceMessageSyncKey(m.sender_id, m.body, m.created_at) === syncKey)) return prev
+  return [...prev, next]
+}
+
+function mapMergedToRows(
+  projectId: string,
+  merged: Awaited<ReturnType<typeof fetchMergedWorkspaceMessages>>['rows'],
+  avatarLookup: Map<string, string>
+): Row[] {
+  return merged.map((r) => {
+    const prof = r.profiles as { name?: string | null; avatar_url?: string | null } | null | undefined
+    const p = Array.isArray(prof) ? prof[0] : prof
+    const avatar_url =
+      normalizeProfileAvatarUrl(p?.avatar_url) ?? avatarLookup.get(r.sender_id) ?? null
+    return {
+      id: r.id,
+      project_id: projectId,
+      sender_id: r.sender_id,
+      body: r.content,
+      created_at: r.created_at,
+      avatar_url,
+      profiles: p ? { name: p.name ?? null, avatar_url } : null,
+    }
+  })
+}
+
 export function ProjectMessagesTab({ projectId, userId }: Props) {
   const [rows, setRows] = useState<Row[]>([])
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [companyId, setCompanyId] = useState<string | null>(null)
+  const [jobContextReady, setJobContextReady] = useState(false)
   const [loading, setLoading] = useState(true)
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
   const listRef = useRef<FlatList>(null)
 
+  useEffect(() => {
+    let cancelled = false
+    setJobContextReady(false)
+    void (async () => {
+      const { data: proj } = await supabase
+        .from('projects')
+        .select('job_id, company_id')
+        .eq('id', projectId)
+        .maybeSingle()
+      if (!cancelled) {
+        setJobId(proj?.job_id != null ? String(proj.job_id) : null)
+        setCompanyId(proj?.company_id != null ? String(proj.company_id) : null)
+        setJobContextReady(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
   const load = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('project_messages')
-      .select('id, project_id, sender_id, body, created_at, profiles(name)')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: true })
-      .limit(200)
+    const { rows: merged, error } = await fetchMergedWorkspaceMessages(supabase, {
+      projectId,
+      jobId,
+    })
 
     if (error) {
-      Alert.alert('Messages', error.message)
+      Alert.alert('Messages', error)
       setRows([])
     } else {
-      setRows((data as unknown as Row[]) ?? [])
+      const senderIds = [...new Set(merged.map((r) => r.sender_id))]
+      const avatarLookup = await loadProfileAvatarsByIds(supabase, senderIds)
+      if (companyId) {
+        const { data: cp } = await supabase
+          .from('company_profiles')
+          .select('logo_url')
+          .eq('id', companyId)
+          .maybeSingle()
+        const logo = normalizeProfileAvatarUrl((cp as { logo_url?: string | null } | null)?.logo_url)
+        if (logo) avatarLookup.set(companyId, logo)
+      }
+      setRows(mapMergedToRows(projectId, merged, avatarLookup))
     }
     setLoading(false)
-  }, [projectId])
+  }, [projectId, jobId, companyId])
 
   useEffect(() => {
     setLoading(true)
@@ -64,8 +130,10 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
   )
 
   useEffect(() => {
-    const ch = supabase
-      .channel(`project-messages-${projectId}`)
+    if (!jobContextReady) return
+
+    let channel = supabase
+      .channel(`project-messages-${projectId}-${jobId ?? 'none'}`)
       .on(
         'postgres_changes',
         {
@@ -78,12 +146,28 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
           load()
         }
       )
-      .subscribe()
+
+    if (jobId) {
+      channel = channel.on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'job_messages',
+          filter: `job_id=eq.${jobId}`,
+        },
+        () => {
+          load()
+        }
+      )
+    }
+
+    channel.subscribe()
 
     return () => {
-      supabase.removeChannel(ch)
+      supabase.removeChannel(channel)
     }
-  }, [projectId, load])
+  }, [projectId, jobId, jobContextReady, load])
 
   const send = async () => {
     const t = body.trim()
@@ -96,7 +180,7 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
         sender_id: userId,
         body: t,
       })
-      .select('id')
+      .select('id, project_id, sender_id, body, created_at, profiles(name, avatar_url)')
       .single()
     setSending(false)
     if (error) {
@@ -105,6 +189,24 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
     }
     if (insertedMsg?.id) {
       void notifyExpoEvent({ kind: 'project_message', messageId: insertedMsg.id })
+    }
+    const inserted = insertedMsg as Row | null
+    if (inserted) {
+      const prof = inserted.profiles as { name?: string | null; avatar_url?: string | null } | null
+      const avatar_url = normalizeProfileAvatarUrl(prof?.avatar_url) ?? null
+      setRows((prev) =>
+        appendMessageRow(prev, {
+          ...inserted,
+          avatar_url,
+          profiles: prof ? { name: prof.name ?? null, avatar_url } : null,
+        })
+      )
+    }
+    if (jobId) {
+      const mirrored = await mirrorProjectMessageToJob({ jobId, senderId: userId, body: t })
+      if (mirrored.error) {
+        Alert.alert('Sync warning', `Message sent, but web workspace sync failed: ${mirrored.error}`)
+      }
     }
     setBody('')
     load()
@@ -133,18 +235,25 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         renderItem={({ item }) => {
           const mine = item.sender_id === userId
-          const prof = item.profiles as { name: string | null } | { name: string | null }[] | null | undefined
-          const p = Array.isArray(prof) ? prof[0] : prof
-          const name = p?.name || 'Member'
+          const prof = item.profiles
+          const name = prof?.name || 'Member'
           return (
             <View style={[styles.bubbleWrap, mine && styles.bubbleWrapMine]}>
-              <Text style={styles.meta}>
-                {name}
-                {!mine ? '' : ' · you'}
-              </Text>
-              <View style={[styles.bubble, mine && styles.bubbleMine]}>
-                <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{item.body}</Text>
+              {!mine && item.avatar_url ? (
+                <Image source={{ uri: item.avatar_url }} style={styles.msgAvatar} />
+              ) : null}
+              <View style={styles.bubbleCol}>
+                <Text style={styles.meta}>
+                  {name}
+                  {!mine ? '' : ' · you'}
+                </Text>
+                <View style={[styles.bubble, mine && styles.bubbleMine]}>
+                  <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{item.body}</Text>
+                </View>
               </View>
+              {mine && item.avatar_url ? (
+                <Image source={{ uri: item.avatar_url }} style={styles.msgAvatar} />
+              ) : null}
             </View>
           )
         }}
@@ -174,8 +283,17 @@ const styles = StyleSheet.create({
   list: { flex: 1 },
   listContent: { paddingBottom: 12, paddingTop: 8 },
   empty: { textAlign: 'center', color: 'rgba(255,255,255,0.35)', marginTop: 24, paddingHorizontal: 24 },
-  bubbleWrap: { alignSelf: 'flex-start', maxWidth: '88%', marginBottom: 12 },
-  bubbleWrapMine: { alignSelf: 'flex-end' },
+  bubbleWrap: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    alignSelf: 'flex-start',
+    maxWidth: '92%',
+    marginBottom: 12,
+  },
+  bubbleWrapMine: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
+  msgAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#222' },
+  bubbleCol: { flex: 1, minWidth: 0 },
   meta: { fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 4, marginLeft: 4 },
   bubble: {
     backgroundColor: '#1a1a1a',

@@ -1,4 +1,6 @@
 export type PortfolioProject = {
+  /** Row id in `freelancer_portfolio_projects` when synced from web. */
+  id?: string
   title: string
   client: string
   link: string
@@ -130,6 +132,7 @@ function extractProjectLink(r: Record<string, unknown>): string {
   const keys = [
     'link',
     'url',
+    'video',
     'href',
     'src',
     'video_url',
@@ -210,6 +213,8 @@ export function parsePortfolioProjects(raw: unknown): PortfolioProject[] {
     const r = p as Record<string, unknown>
     const roleRaw = r.role ?? r.category ?? r.type ?? r.role_in_project
     const link = extractProjectLink(r)
+    const client =
+      String(r.client ?? r.company ?? r.brand ?? r.role_in_project ?? '').trim() || undefined
     const imgRaw =
       r.image_url ??
       r.thumbnail_url ??
@@ -220,15 +225,20 @@ export function parsePortfolioProjects(raw: unknown): PortfolioProject[] {
       r.poster ??
       r.preview_image ??
       r.previewImage
-    const imageUrl =
+    let imageUrl =
       typeof imgRaw === 'string' && /^https?:\/\//i.test(imgRaw.trim()) ? imgRaw.trim() : undefined
+    if (!imageUrl && link) {
+      const yt = link.match(/youtu\.be\/([\w-]{6,})/i) ?? link.match(/[?&]v=([\w-]{6,})/i)
+      const ytId = yt?.[1]
+      if (ytId) imageUrl = `https://img.youtube.com/vi/${ytId}/mqdefault.jpg`
+    }
     const titleRaw =
       String(r.title ?? r.name ?? r.slug ?? r.label ?? '').trim() ||
       String(r.client ?? r.company ?? r.brand ?? '').trim()
     const title = titleRaw || (link ? titleFromUrl(link) : 'Project')
     out.push({
       title,
-      client: String(r.client ?? r.company ?? r.brand ?? ''),
+      client: client ?? '',
       link,
       role: typeof roleRaw === 'string' && roleRaw.trim() ? roleRaw.trim() : undefined,
       image_url: imageUrl,

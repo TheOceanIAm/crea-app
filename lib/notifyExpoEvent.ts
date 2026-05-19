@@ -4,6 +4,8 @@ export type NotifyExpoKind =
   | 'job_application'
   | 'invoice'
   | 'project_message'
+  | 'job_message'
+  | 'workspace_activity'
   | 'workspace_ready'
   | 'project_crew_invite'
 

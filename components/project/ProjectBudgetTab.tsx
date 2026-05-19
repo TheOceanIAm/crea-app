@@ -11,7 +11,10 @@ import {
 } from 'react-native'
 import { supabase } from '@/lib/supabase'
 import {
+  budgetVarianceTone,
   computeCrewSpendLines,
+  computeForecastRemaining,
+  computeWrapUpVariance,
   formatMoneyAmount,
   sumBudgetLineSpent,
   type CrewSpendMemberRow,
@@ -140,12 +143,21 @@ export function ProjectBudgetTab({ projectId }: Props) {
 
   const totalBudgetNum = parseMoneyInput(totalStr)
   const productionCapNum = parseMoneyInput(productionStr)
+  const otherPlanned = lineTotals.planned
   const otherSpent = lineTotals.spent
 
-  const remainingTotal =
-    totalBudgetNum != null ? Math.round((totalBudgetNum - crew.total - otherSpent) * 100) / 100 : null
+  const forecastRemaining = computeForecastRemaining(totalBudgetNum, crew.total, otherPlanned)
+  const wrapUpVariance = computeWrapUpVariance(totalBudgetNum, crew.total, otherSpent)
+  const wrapUpTone = budgetVarianceTone(wrapUpVariance)
   const remainingProduction =
     productionCapNum != null ? Math.round((productionCapNum - crew.total) * 100) / 100 : null
+
+  const varianceStyle = (v: number | null) => {
+    const tone = budgetVarianceTone(v)
+    if (tone === 'over') return styles.neg
+    if (tone === 'under') return styles.pos
+    return undefined
+  }
 
   const savePlan = async () => {
     setSavingPlan(true)
@@ -256,7 +268,8 @@ export function ProjectBudgetTab({ projectId }: Props) {
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lead}>
         Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each
-        person&apos;s public day / half-day rate when set.
+        person&apos;s public day / half-day rate when set. Enter planned estimates before the shoot; after wrap, enter
+        actual spend for the final balance.
       </Text>
 
       <View style={styles.card}>
@@ -321,28 +334,75 @@ export function ProjectBudgetTab({ projectId }: Props) {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Snapshot</Text>
+        <Text style={styles.cardTitle}>Forecast</Text>
+        <Text style={styles.muted}>Before the shoot — uses planned other expenses.</Text>
         <View style={styles.snapRow}>
-          <Text style={styles.snapLabel}>Other expenses (tracked below)</Text>
-          <Text style={styles.snapVal}>{formatMoneyAmount(otherSpent, currency)}</Text>
+          <Text style={styles.snapLabel}>Crew (booked)</Text>
+          <Text style={styles.snapVal}>{formatMoneyAmount(crew.total, currency)}</Text>
+        </View>
+        <View style={styles.snapRow}>
+          <Text style={styles.snapLabel}>Other expenses (planned)</Text>
+          <Text style={styles.snapVal}>{formatMoneyAmount(otherPlanned, currency)}</Text>
         </View>
         {productionCapNum != null ? (
           <View style={styles.snapRow}>
             <Text style={styles.snapLabel}>Remaining in production bucket</Text>
-            <Text style={[styles.snapVal, remainingProduction != null && remainingProduction < 0 && styles.neg]}>
+            <Text style={[styles.snapVal, varianceStyle(remainingProduction)]}>
               {formatMoneyAmount(remainingProduction ?? 0, currency)}
             </Text>
           </View>
         ) : null}
         {totalBudgetNum != null ? (
           <View style={styles.snapRow}>
-            <Text style={styles.snapLabel}>Remaining total budget</Text>
-            <Text style={[styles.snapVal, remainingTotal != null && remainingTotal < 0 && styles.neg]}>
-              {formatMoneyAmount(remainingTotal ?? 0, currency)}
+            <Text style={styles.snapLabel}>Headroom (total budget)</Text>
+            <Text style={[styles.snapVal, styles.snapValLg, varianceStyle(forecastRemaining)]}>
+              {formatMoneyAmount(forecastRemaining ?? 0, currency)}
             </Text>
           </View>
         ) : (
-          <Text style={styles.muted}>Set a total budget above to see what&apos;s left after crew and expenses.</Text>
+          <Text style={styles.muted}>Set a total budget above to forecast headroom with planned expenses.</Text>
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          wrapUpTone === 'over' && styles.wrapCardOver,
+          wrapUpTone === 'under' && styles.wrapCardUnder,
+        ]}
+      >
+        <Text style={styles.cardTitle}>Wrap-up</Text>
+        <Text style={styles.muted}>After the shoot — uses actual spend on other expenses.</Text>
+        <View style={styles.snapRow}>
+          <Text style={styles.snapLabel}>Crew (booked)</Text>
+          <Text style={styles.snapVal}>{formatMoneyAmount(crew.total, currency)}</Text>
+        </View>
+        <View style={styles.snapRow}>
+          <Text style={styles.snapLabel}>Other expenses (actual)</Text>
+          <Text style={styles.snapVal}>{formatMoneyAmount(otherSpent, currency)}</Text>
+        </View>
+        {totalBudgetNum != null ? (
+          <>
+            <View style={styles.snapRow}>
+              <Text style={styles.snapLabel}>Committed total</Text>
+              <Text style={styles.snapVal}>{formatMoneyAmount(crew.total + otherSpent, currency)}</Text>
+            </View>
+            <View style={styles.snapRow}>
+              <Text style={[styles.snapLabel, styles.snapLabelStrong]}>
+                {wrapUpTone === 'over' ? 'Over budget' : wrapUpTone === 'under' ? 'Under budget' : 'On budget'}
+              </Text>
+              <Text style={[styles.snapVal, styles.snapValXl, varianceStyle(wrapUpVariance)]}>
+                {wrapUpVariance != null && wrapUpVariance < 0
+                  ? '−'
+                  : wrapUpVariance != null && wrapUpVariance > 0
+                    ? '+'
+                    : ''}
+                {formatMoneyAmount(wrapUpVariance != null ? Math.abs(wrapUpVariance) : 0, currency)}
+              </Text>
+            </View>
+          </>
+        ) : (
+          <Text style={styles.muted}>Set a total budget to see the final wrap-up balance.</Text>
         )}
       </View>
 
@@ -367,7 +427,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
             />
             <View style={styles.lineInputs}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.hint}>Planned</Text>
+                <Text style={styles.hint}>Planned (forecast)</Text>
                 <TextInput
                   style={styles.input}
                   value={l.plannedStr}
@@ -377,7 +437,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.hint}>Spent</Text>
+                <Text style={styles.hint}>Actual (wrap-up)</Text>
                 <TextInput
                   style={styles.input}
                   value={l.spentStr}
@@ -479,6 +539,12 @@ const styles = StyleSheet.create({
   snapLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 13, flex: 1, paddingRight: 8 },
   snapVal: { color: '#fff', fontWeight: '700', fontSize: 15 },
   neg: { color: '#ff6b6b' },
+  pos: { color: '#34d399' },
+  snapValLg: { fontSize: 17 },
+  snapValXl: { fontSize: 20 },
+  snapLabelStrong: { color: 'rgba(255,255,255,0.85)', fontWeight: '700' },
+  wrapCardOver: { borderColor: 'rgba(255,107,107,0.35)', backgroundColor: 'rgba(255,107,107,0.06)' },
+  wrapCardUnder: { borderColor: 'rgba(52,211,153,0.35)', backgroundColor: 'rgba(52,211,153,0.06)' },
   presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   presetChip: {
     backgroundColor: '#0a0a0a',

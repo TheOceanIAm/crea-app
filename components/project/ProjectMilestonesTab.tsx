@@ -11,6 +11,7 @@ import {
 } from 'react-native'
 import { Check, Plus, Trash2 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
 
 type Milestone = {
@@ -73,6 +74,12 @@ export function ProjectMilestonesTab({ projectId, onCountsChanged, canManage }: 
     setNewTitle('')
     setRows((prev) => [...prev, data as Milestone])
     onCountsChanged?.()
+    void notifyExpoEvent({
+      kind: 'workspace_activity',
+      projectId,
+      activity: 'milestone',
+      detail: t,
+    })
   }
 
   const toggle = async (m: Milestone) => {

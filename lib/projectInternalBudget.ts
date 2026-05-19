@@ -108,6 +108,33 @@ export function sumBudgetLineSpent(
   }
 }
 
+/** Remaining headroom while planning — crew + planned other expenses vs total budget. */
+export function computeForecastRemaining(
+  totalBudget: number | null,
+  crewTotal: number,
+  otherPlanned: number,
+): number | null {
+  if (totalBudget == null) return null
+  return Math.round((totalBudget - crewTotal - otherPlanned) * 100) / 100
+}
+
+/** Post-shoot balance — crew + actual other spend vs total budget (negative = over budget). */
+export function computeWrapUpVariance(
+  totalBudget: number | null,
+  crewTotal: number,
+  otherSpent: number,
+): number | null {
+  if (totalBudget == null) return null
+  return Math.round((totalBudget - crewTotal - otherSpent) * 100) / 100
+}
+
+export function budgetVarianceTone(variance: number | null): 'neutral' | 'under' | 'over' {
+  if (variance == null) return 'neutral'
+  if (variance < 0) return 'over'
+  if (variance > 0) return 'under'
+  return 'neutral'
+}
+
 export function formatMoneyAmount(amount: number | null | undefined, currency = 'EUR'): string {
   const n = typeof amount === 'number' && !Number.isNaN(amount) ? amount : 0
   try {

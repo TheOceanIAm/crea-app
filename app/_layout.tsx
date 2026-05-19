@@ -65,7 +65,7 @@ function openDeepLinkFromPushData(
     router.push('/(tabs)/company-applications')
     return
   }
-  if (type === 'workspace_ready' || type === 'project_message') {
+  if (type === 'workspace_ready' || type === 'project_message' || type === 'workspace_activity') {
     const pid = data.projectId
     if (typeof pid === 'string' && pid.length > 0) router.push(`/project/${pid}`)
     return

@@ -1036,6 +1036,8 @@ export default function ProjectWorkspaceScreen() {
                     canUseSunPlanner={sunPlannerEnabled}
                     productionWeatherLockedHint={productionWeatherLockedHint}
                     sunPlannerLockedHint={sunPlannerLockedHint}
+                    productionWindowStart={scheduleStart}
+                    productionWindowEnd={scheduleEnd}
                   />
                 )}
                 {tab === 'crew' && (
@@ -1043,6 +1045,7 @@ export default function ProjectWorkspaceScreen() {
                     projectId={project.id}
                     canManage={canManageCrew}
                     viewerIsCompany={canEditProductionSchedule}
+                    viewerId={userId}
                     workspaceOnly={workspaceOnlyPlan}
                     proFeaturesEnabled={!starterFreelancerPlan}
                     productionWindowStart={scheduleStart}

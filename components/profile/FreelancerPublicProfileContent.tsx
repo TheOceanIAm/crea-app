@@ -39,6 +39,7 @@ import {
 } from '@/lib/profilePublicLinks'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { canFreelancerCreatePrivateProjects, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { enrichPortfolioProjectsThumbnails } from '@/lib/freelancerPortfolioTable'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
 import { profileShareUrl } from '@/lib/shareLinks'
 import { supabase } from '@/lib/supabase'
@@ -135,10 +136,23 @@ export function FreelancerPublicProfileContent({
   const [companyJobsLoading, setCompanyJobsLoading] = useState(false)
   const [visibleProjectCount, setVisibleProjectCount] = useState(6)
 
-  const projects = useMemo(
+  const parsedProjects = useMemo(
     () => parsePortfolioProjects(profileNorm.portfolio_projects),
     [profileNorm.portfolio_projects]
   )
+  const [projects, setProjects] = useState<PortfolioProject[]>(parsedProjects)
+
+  useEffect(() => {
+    let cancelled = false
+    setProjects(parsedProjects)
+    void (async () => {
+      const enriched = await enrichPortfolioProjectsThumbnails(parsedProjects)
+      if (!cancelled) setProjects(enriched)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [parsedProjects])
 
   const skills = useMemo(() => profileNorm.skills as string[], [profileNorm.skills])
   const equipment = useMemo(() => profileNorm.equipment as string[], [profileNorm.equipment])

@@ -2,8 +2,11 @@ import { supabase } from '@/lib/supabase'
 import type { FreelancerPublicProfilePayload } from '@/lib/freelancerPublicProfileTypes'
 import {
   buildPortfolioProjectsFromTableRows,
+  enrichPortfolioProjectsThumbnails,
   fetchFreelancerPortfolioTableRows,
+  mergeTableAndJsonPortfolio,
 } from '@/lib/freelancerPortfolioTable'
+import { alignHeadlineFieldsOnRow, resolveCanonicalFreelancerHeadline } from '@/lib/freelancerHeadlineSync'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
 import { coerceStringArray } from '@/lib/normalizePublicProfileRpc'
 
@@ -125,6 +128,17 @@ function normalizeRawProfileRow(row: Record<string, unknown>): Record<string, un
     if (isMeaningfulValue(o.skill_tags)) o.skills = o.skill_tags
     else if (isMeaningfulValue(o.tags)) o.skills = o.tags
   }
+  if (!isMeaningfulValue(o.equipment)) {
+    if (isMeaningfulValue(o.essentials)) o.equipment = o.essentials
+  } else if (!isMeaningfulValue(o.essentials)) {
+    o.essentials = o.equipment
+  }
+  if (!isMeaningfulValue(o.headline) && isMeaningfulValue(o.job_title)) {
+    o.headline = o.job_title
+  } else if (isMeaningfulValue(o.headline) && !isMeaningfulValue(o.job_title)) {
+    o.job_title = o.headline
+  }
+  alignHeadlineFieldsOnRow(o)
   if (!isMeaningfulValue(o.availability_calendar) && isMeaningfulValue(o.availability)) {
     o.availability_calendar = o.availability
   }
@@ -243,27 +257,6 @@ function mergeProfileRows(
     }
   }
   return normalizeRawProfileRow(out)
-}
-
-/** Web “Work” table rows + JSON `portfolio_projects` — table rows first, dedupe by `link`. */
-function mergeTableAndJsonPortfolio(tableProjects: PortfolioProject[], jsonRaw: unknown): PortfolioProject[] {
-  const fromJson = parsePortfolioProjects(jsonRaw)
-  const seen = new Set<string>()
-  const merged: PortfolioProject[] = []
-  for (const p of [...tableProjects, ...fromJson]) {
-    const key = typeof p.link === 'string' ? p.link.trim().toLowerCase() : ''
-    if (key) {
-      if (seen.has(key)) continue
-      seen.add(key)
-      merged.push(p)
-      continue
-    }
-    const fallback = `${p.title}\0${p.image_url ?? ''}`
-    if (seen.has(fallback)) continue
-    seen.add(fallback)
-    merged.push(p)
-  }
-  return merged
 }
 
 function isMeaningfulValue(v: unknown): boolean {
@@ -476,12 +469,22 @@ export async function loadPublicProfile(userId: string): Promise<{
 
   const merged = combineProfileSources(mergedRow, rpcPayload, wsCount)
 
+  const canonicalHeadline = resolveCanonicalFreelancerHeadline(
+    merged.headline as string | null | undefined,
+    (mergedRow?.job_title ?? (rpcPayload as Record<string, unknown> | null)?.job_title) as
+      | string
+      | null
+      | undefined
+  )
+  if (canonicalHeadline) merged.headline = canonicalHeadline
+
   if (!merged.id && trimmed) {
     merged.id = trimmed
   }
 
   const tablePortfolio = await buildPortfolioProjectsFromTableRows(portfolioTableRows)
-  merged.portfolio_projects = mergeTableAndJsonPortfolio(tablePortfolio, merged.portfolio_projects)
+  const mergedPortfolio = mergeTableAndJsonPortfolio(tablePortfolio, merged.portfolio_projects)
+  merged.portfolio_projects = await enrichPortfolioProjectsThumbnails(mergedPortfolio)
   const portfolioCount = parsePortfolioProjects(merged.portfolio_projects).length
   merged.portfolio_items_count = Math.max(merged.portfolio_items_count ?? 0, portfolioCount)
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -8,16 +8,29 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  Modal,
+  Pressable,
+  FlatList,
 } from 'react-native'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
-import { Check, ChevronLeft, ChevronRight, Clock, MapPin, Pencil, Plus, Users } from 'lucide-react-native'
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  MapPin,
+  Pencil,
+  Plus,
+  Users,
+} from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { formatShootDayOptionLabel, listProductionWindowYmd } from '@/lib/projectProductionWindow'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProductionWeatherSection } from '@/components/project/ProductionWeatherSection'
 import { ProductionSunPlannerSection } from '@/components/project/ProductionSunPlannerSection'
 import { BriefAiFormattedOutput } from '@/components/project/BriefAiFormattedOutput'
-import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 
 type ShotStatus = 'open' | 'rolling' | 'done' | 'pick'
 
@@ -173,6 +186,9 @@ type Props = {
   productionWeatherLockedHint?: string | null
   /** When Sun Planner is gated (e.g. trial ended); overrides default upgrade copy. */
   sunPlannerLockedHint?: string | null
+  /** Inclusive production window from workspace Overview. */
+  productionWindowStart?: string | null
+  productionWindowEnd?: string | null
 }
 
 const PRODUCTION_SECTIONS = [
@@ -222,13 +238,55 @@ export function ProductionTab({
   canUseSunPlanner = false,
   productionWeatherLockedHint,
   sunPlannerLockedHint,
+  productionWindowStart,
+  productionWindowEnd,
 }: Props) {
   const [shootDay, setShootDay] = useState(() => todayLocalISODate())
   const [dayInput, setDayInput] = useState(() => todayLocalISODate())
+  const [dayPickerOpen, setDayPickerOpen] = useState(false)
+  const [windowStart, setWindowStart] = useState(productionWindowStart?.trim().slice(0, 10) ?? '')
+  const [windowEnd, setWindowEnd] = useState(productionWindowEnd?.trim().slice(0, 10) ?? '')
+
+  const productionDays = useMemo(
+    () => listProductionWindowYmd(windowStart, windowEnd),
+    [windowStart, windowEnd]
+  )
   useEffect(() => {
     setDayInput(shootDay)
   }, [shootDay])
   const isCompany = userId === companyId
+
+  useEffect(() => {
+    const a = productionWindowStart?.trim().slice(0, 10) ?? ''
+    const b = productionWindowEnd?.trim().slice(0, 10) ?? ''
+    if (a) setWindowStart(a)
+    if (b) setWindowEnd(b)
+  }, [productionWindowStart, productionWindowEnd])
+
+  useEffect(() => {
+    if (!projectId) return
+    if (windowStart && windowEnd) return
+    void (async () => {
+      const { data } = await supabase
+        .from('projects')
+        .select('scheduling_start_date, scheduling_end_date')
+        .eq('id', projectId)
+        .maybeSingle()
+      if (!data) return
+      const row = data as { scheduling_start_date?: string | null; scheduling_end_date?: string | null }
+      const a = typeof row.scheduling_start_date === 'string' ? row.scheduling_start_date.slice(0, 10) : ''
+      const b = typeof row.scheduling_end_date === 'string' ? row.scheduling_end_date.slice(0, 10) : ''
+      if (/^\d{4}-\d{2}-\d{2}$/.test(a)) setWindowStart(a)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(b)) setWindowEnd(b)
+    })()
+  }, [projectId, windowStart, windowEnd])
+
+  useEffect(() => {
+    if (productionDays.length === 0) return
+    if (!productionDays.includes(shootDay)) {
+      setShootDay(productionDays[0])
+    }
+  }, [productionDays])
 
   const [shots, setShots] = useState<ProductionShot[]>([])
   const [crew, setCrew] = useState<CrewRow[]>([])
@@ -238,8 +296,13 @@ export function ProductionTab({
   const [editingShotId, setEditingShotId] = useState<string | null>(null)
   const [shotDrafts, setShotDrafts] = useState<Record<string, ShotDraft>>({})
   const [creatingDay, setCreatingDay] = useState(false)
-  const [savingNotes, setSavingNotes] = useState(false)
-  const [generating, setGenerating] = useState(false)
+  const [savingCallSheet, setSavingCallSheet] = useState(false)
+  const [callDraft, setCallDraft] = useState<Record<string, CallOverride>>({})
+  const [wrapDraft, setWrapDraft] = useState('')
+  const [notesDraft, setNotesDraft] = useState('')
+  const [callSheetDirty, setCallSheetDirty] = useState(false)
+  const callSheetDirtyRef = useRef(false)
+  const prevCallSheetOpenRef = useRef(false)
   const [exportingPdf, setExportingPdf] = useState(false)
   /** `null` = category hub; otherwise full-screen feature */
   const [openFeature, setOpenFeature] = useState<ProductionSectionId | null>(null)
@@ -293,6 +356,104 @@ export function ProductionTab({
 
     setLoading(false)
   }, [projectId, shootDay])
+
+  const applyProdDayToDrafts = useCallback((row: ProductionDayRow) => {
+    setProdDay(row)
+    if (callSheetDirtyRef.current) return
+    setCallDraft(row.call_sheet ?? {})
+    setWrapDraft(row.wrap_time ?? '')
+    setNotesDraft(row.notes ?? '')
+  }, [])
+
+  const parseProdDayRow = (raw: Record<string, unknown>): ProductionDayRow | null => {
+    const id = raw.id
+    const project_id = raw.project_id
+    if (id == null || project_id == null) return null
+    return {
+      id: String(id),
+      project_id: String(project_id),
+      date: String(raw.date ?? '').slice(0, 10),
+      wrap_time: (raw.wrap_time as string | null) ?? null,
+      notes: (raw.notes as string | null) ?? null,
+      call_sheet: (raw.call_sheet as Record<string, CallOverride>) ?? {},
+    }
+  }
+
+  useEffect(() => {
+    callSheetDirtyRef.current = callSheetDirty
+  }, [callSheetDirty])
+
+  useEffect(() => {
+    if (!prodDay) {
+      setCallDraft({})
+      setWrapDraft('')
+      setNotesDraft('')
+      setCallSheetDirty(false)
+      callSheetDirtyRef.current = false
+      return
+    }
+    if (callSheetDirty) return
+    setCallDraft(prodDay.call_sheet ?? {})
+    setWrapDraft(prodDay.wrap_time ?? '')
+    setNotesDraft(prodDay.notes ?? '')
+  }, [prodDay, shootDay, callSheetDirty])
+
+  const fetchProdDayOnly = useCallback(async () => {
+    if (!projectId || !shootDay) return
+    const { data, error } = await supabase
+      .from('production_days')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('date', shootDay)
+      .maybeSingle()
+    if (error) {
+      Alert.alert('Call sheet', error.message)
+      return
+    }
+    if (!data) {
+      if (!callSheetDirtyRef.current) setProdDay(null)
+      return
+    }
+    const row = parseProdDayRow(data as Record<string, unknown>)
+    if (row) applyProdDayToDrafts(row)
+  }, [projectId, shootDay, applyProdDayToDrafts])
+
+  useEffect(() => {
+    const open = openFeature === 'call_sheet'
+    const entered = open && !prevCallSheetOpenRef.current
+    prevCallSheetOpenRef.current = open
+    if (!entered || !projectId || !shootDay) return
+    void fetchProdDayOnly()
+  }, [openFeature, projectId, shootDay, fetchProdDayOnly])
+
+  useEffect(() => {
+    if (openFeature !== 'call_sheet' || !projectId || !shootDay) return
+
+    const channel = supabase
+      .channel(`production-day-${projectId}-${shootDay}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'production_days',
+          filter: `project_id=eq.${projectId}`,
+        },
+        (payload) => {
+          const row = payload.new as Record<string, unknown> | undefined
+          if (!row?.id) return
+          const parsed = parseProdDayRow(row)
+          if (!parsed || parsed.date !== shootDay) return
+          if (callSheetDirtyRef.current) return
+          applyProdDayToDrafts(parsed)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [openFeature, projectId, shootDay, applyProdDayToDrafts])
 
   useEffect(() => {
     setLoading(true)
@@ -410,99 +571,28 @@ export function ProductionTab({
     })
   }
 
-  const saveCallCell = async (profileId: string, patch: CallOverride) => {
+  const saveCallSheet = async () => {
     if (!prodDay) return
-    const next = { ...prodDay.call_sheet, [profileId]: { ...prodDay.call_sheet[profileId], ...patch } }
-    const { error } = await supabase.from('production_days').update({ call_sheet: next }).eq('id', prodDay.id)
+    setSavingCallSheet(true)
+    const wrap_time = wrapDraft.trim() || null
+    const { error } = await supabase
+      .from('production_days')
+      .update({
+        call_sheet: callDraft,
+        notes: notesDraft,
+        wrap_time,
+      })
+      .eq('id', prodDay.id)
+    setSavingCallSheet(false)
     if (error) {
       Alert.alert('Call sheet', error.message)
       return
     }
-    setProdDay({ ...prodDay, call_sheet: next })
-  }
-
-  const saveNotesBlock = async (notes: string, wrap_time: string | null) => {
-    if (!prodDay) return
-    setSavingNotes(true)
-    const { error } = await supabase
-      .from('production_days')
-      .update({ notes, wrap_time: wrap_time || null })
-      .eq('id', prodDay.id)
-    setSavingNotes(false)
-    if (error) {
-      Alert.alert('Notes', error.message)
-      return
-    }
-    setProdDay({ ...prodDay, notes, wrap_time })
-  }
-
-  const buildReportContext = () => {
-    const lines: string[] = []
-    lines.push(`Project: ${projectTitle}`)
-    lines.push(`Date: ${shootDay}`)
-    if (briefContext?.trim()) lines.push(`Brief context:\n${briefContext.trim()}`)
-    if (shots.length) {
-      lines.push('\nShots this day:')
-      shots.forEach((s, i) => {
-        const bits = [
-          `Scene ${s.scene_nr || '—'}`,
-          s.location?.trim() ? `Loc: ${s.location.trim()}` : null,
-          s.framing?.trim() ? `Framing: ${s.framing.trim()}` : null,
-          s.description?.trim() ? `Action: ${s.description.trim()}` : null,
-          s.lens?.trim() ? `Lens: ${s.lens.trim()}` : null,
-          s.audio_notes?.trim() ? `Audio: ${s.audio_notes.trim()}` : null,
-          `Status: ${s.status}`,
-        ].filter(Boolean)
-        lines.push(`${i + 1}. ${bits.join(' · ')}`)
-      })
-    }
-    if (prodDay?.notes?.trim()) lines.push(`\nTeam notes:\n${prodDay.notes.trim()}`)
-    return lines.join('\n')
-  }
-
-  const generateReport = async () => {
-    setGenerating(true)
-    const { data, error } = await supabase.functions.invoke<{ content?: string; error?: string }>('brief-ai', {
-      body: {
-        projectId,
-        tool: 'production_report',
-        context: buildReportContext(),
-      },
-    })
-    setGenerating(false)
-
-    if (error) {
-      Alert.alert('Brief AI', error.message)
-      return
-    }
-    if (data && typeof data === 'object' && 'error' in data && data.error) {
-      Alert.alert('Brief AI', String(data.error))
-      return
-    }
-    const content = data?.content
-    if (typeof content !== 'string' || !content.trim()) {
-      Alert.alert('Brief AI', 'No content returned.')
-      return
-    }
-
-    const body = `📋 **Production report (${shootDay})**\n\n${content.trim()}`
-    const { data: insertedMsg, error: msgErr } = await supabase
-      .from('project_messages')
-      .insert({
-        project_id: projectId,
-        sender_id: userId,
-        body,
-      })
-      .select('id')
-      .single()
-    if (msgErr) {
-      Alert.alert('Messages', msgErr.message)
-      return
-    }
-    if (insertedMsg?.id) {
-      void notifyExpoEvent({ kind: 'project_message', messageId: insertedMsg.id })
-    }
-    Alert.alert('Saved', 'The report was posted to Messages for everyone.')
+    const saved: ProductionDayRow = { ...prodDay, call_sheet: callDraft, notes: notesDraft, wrap_time }
+    setProdDay(saved)
+    setCallSheetDirty(false)
+    callSheetDirtyRef.current = false
+    Alert.alert('Saved', 'Call sheet saved — web workspace updates automatically.')
   }
 
   const exportCallSheetPdf = async () => {
@@ -514,7 +604,7 @@ export function ProductionTab({
           const p = Array.isArray(prof) ? prof[0] : prof
           const name = escapeHtml(p?.name || 'Member')
           const role = escapeHtml(roleLabel(m.member_role))
-          const ov = prodDay?.call_sheet[m.profile_id]
+          const ov = callDraft[m.profile_id]
           const call = escapeHtml(ov?.call_time?.trim() || '—')
           const loc = escapeHtml(ov?.location?.trim() || projectLocation || '—')
           return `<tr><td>${name}</td><td>${role}</td><td>${call}</td><td>${loc}</td></tr>`
@@ -598,34 +688,87 @@ export function ProductionTab({
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {openFeature === 'shotlist' || openFeature === 'call_sheet' ? (
         <View style={styles.shootDayRow}>
-          <Text style={styles.shootDayLabel}>Calendar day (YYYY-MM-DD)</Text>
-          <View style={styles.shootDayControls}>
-            <TextInput
-              style={styles.shootDayInput}
-              value={dayInput}
-              onChangeText={setDayInput}
-              placeholder={todayLocalISODate()}
-              placeholderTextColor="rgba(255,255,255,0.25)"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+          <Text style={styles.shootDayLabel}>Shoot day</Text>
+          {productionDays.length > 0 ? (
             <TouchableOpacity
-              style={styles.shootDayBtn}
-              onPress={() => {
-                const v = parseIsoDateInput(dayInput)
-                if (!v) {
-                  Alert.alert('Date', 'Use a valid date: YYYY-MM-DD')
-                  return
-                }
-                setShootDay(v)
-              }}
+              style={styles.shootDaySelect}
+              onPress={() => setDayPickerOpen(true)}
+              activeOpacity={0.88}
             >
-              <Text style={styles.shootDayBtnText}>Load day</Text>
+              <Text style={styles.shootDaySelectText} numberOfLines={1}>
+                {formatShootDayOptionLabel(shootDay)}
+              </Text>
+              <ChevronDown size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
             </TouchableOpacity>
-          </View>
+          ) : (
+            <View style={styles.shootDayControls}>
+              <TextInput
+                style={styles.shootDayInput}
+                value={dayInput}
+                onChangeText={setDayInput}
+                placeholder={todayLocalISODate()}
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          )}
+          <TouchableOpacity
+            style={styles.shootDayBtn}
+            onPress={() => {
+              if (productionDays.length > 0) {
+                void load()
+                return
+              }
+              const v = parseIsoDateInput(dayInput)
+              if (!v) {
+                Alert.alert('Date', 'Use a valid date: YYYY-MM-DD')
+                return
+              }
+              setShootDay(v)
+            }}
+          >
+            <Text style={styles.shootDayBtnText}>Load day</Text>
+          </TouchableOpacity>
           <Text style={styles.shootDayHint}>
-            Brief AI → Production sync must use this same date. New shots and call sheet rows use this day.
+            {productionDays.length > 0
+              ? 'Days from the workspace production window. Pick a day, then Load day to refresh.'
+              : 'Set the production window on Overview for a day list, or enter YYYY-MM-DD manually.'}
           </Text>
+          <Modal
+            visible={dayPickerOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setDayPickerOpen(false)}
+          >
+            <Pressable style={styles.dayPickerBackdrop} onPress={() => setDayPickerOpen(false)}>
+              <Pressable style={styles.dayPickerSheet} onPress={(e) => e.stopPropagation()}>
+                <Text style={styles.dayPickerTitle}>Production days</Text>
+                <FlatList
+                  data={productionDays}
+                  keyExtractor={(d) => d}
+                  style={styles.dayPickerList}
+                  renderItem={({ item }) => {
+                    const active = item === shootDay
+                    return (
+                      <TouchableOpacity
+                        style={[styles.dayPickerRow, active && styles.dayPickerRowActive]}
+                        onPress={() => {
+                          setDayPickerOpen(false)
+                          setDayInput(item)
+                          setShootDay(item)
+                        }}
+                      >
+                        <Text style={[styles.dayPickerRowText, active && styles.dayPickerRowTextActive]}>
+                          {formatShootDayOptionLabel(item)}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  }}
+                />
+              </Pressable>
+            </Pressable>
+          </Modal>
         </View>
       ) : null}
       {openFeature === 'weather' ? (
@@ -858,7 +1001,7 @@ export function ProductionTab({
         </TouchableOpacity>
       ) : null}
 
-      {prodDay && (prodDay.notes ?? '').trim() ? (
+      {prodDay && (notesDraft.trim() || (prodDay.notes ?? '').trim()) ? (
         <View style={styles.csLogisticsCard}>
           <View style={styles.csLogisticsHeader}>
             <View style={styles.csLogisticsIcon}>
@@ -872,7 +1015,7 @@ export function ProductionTab({
               </Text>
             </View>
           </View>
-          <BriefAiFormattedOutput content={(prodDay.notes ?? '').trim()} embedded />
+          <BriefAiFormattedOutput content={(notesDraft || prodDay.notes || '').trim()} embedded />
         </View>
       ) : null}
 
@@ -885,9 +1028,9 @@ export function ProductionTab({
           {crew.map((m) => {
             const prof = m.profiles as { name: string | null } | { name: string | null }[] | null | undefined
             const p = Array.isArray(prof) ? prof[0] : prof
-            const ov = prodDay?.call_sheet[m.profile_id]
+            const ov = callDraft[m.profile_id]
             const callVal = ov?.call_time ?? ''
-            const locVal = ov?.location ?? projectLocation ?? ''
+            const locVal = ov?.location ?? ''
             return (
               <View key={`${m.id}-${prodDay?.id ?? 'none'}`} style={styles.csMemberCard}>
                 <View style={styles.csMemberHead}>
@@ -904,12 +1047,15 @@ export function ProductionTab({
                       style={styles.csInputBlock}
                       placeholder="e.g. 07:00"
                       placeholderTextColor="rgba(255,255,255,0.25)"
-                      defaultValue={callVal}
+                      value={callVal}
                       editable={!!prodDay}
-                      onEndEditing={(e) => {
-                        if (!prodDay) return
-                        const v = e.nativeEvent.text
-                        if (v !== (ov?.call_time ?? '')) void saveCallCell(m.profile_id, { call_time: v })
+                      onChangeText={(v) => {
+                        setCallSheetDirty(true)
+                        callSheetDirtyRef.current = true
+                        setCallDraft((prev) => ({
+                          ...prev,
+                          [m.profile_id]: { ...(prev[m.profile_id] ?? {}), call_time: v },
+                        }))
                       }}
                     />
                   </View>
@@ -922,14 +1068,17 @@ export function ProductionTab({
                       style={[styles.csInputBlock, styles.csInputBlockTall]}
                       placeholder="Address, stage, parking note…"
                       placeholderTextColor="rgba(255,255,255,0.25)"
-                      defaultValue={locVal}
+                      value={locVal}
                       editable={!!prodDay}
                       multiline
                       textAlignVertical="top"
-                      onEndEditing={(e) => {
-                        if (!prodDay) return
-                        const v = e.nativeEvent.text
-                        if (v !== (ov?.location ?? (projectLocation || ''))) void saveCallCell(m.profile_id, { location: v })
+                      onChangeText={(v) => {
+                        setCallSheetDirty(true)
+                        callSheetDirtyRef.current = true
+                        setCallDraft((prev) => ({
+                          ...prev,
+                          [m.profile_id]: { ...(prev[m.profile_id] ?? {}), location: v },
+                        }))
                       }}
                     />
                   </View>
@@ -950,17 +1099,54 @@ export function ProductionTab({
 
       {/* —— Daily wrap —— */}
       <Text style={[styles.sectionHead, styles.sectionSp]}>DAILY WRAP</Text>
-      <TouchableOpacity style={[styles.accentBtn, generating && styles.dim]} onPress={generateReport} disabled={generating}>
-        <Text style={styles.accentBtnText}>{generating ? 'Brief AI…' : 'Generate report (Brief AI)'}</Text>
-      </TouchableOpacity>
-      <Text style={styles.subtle}>The report is posted to Messages for everyone automatically.</Text>
-
       <Text style={styles.fieldLabel}>Wrap (optional)</Text>
-      <WrapNotesBlock
-        prodDay={prodDay}
-        saving={savingNotes}
-        onSave={(notes, wrap) => void saveNotesBlock(notes, wrap)}
-      />
+      {prodDay ? (
+        <>
+          <TextInput
+            style={styles.wrapInput}
+            placeholder="e.g. 7:30 PM"
+            placeholderTextColor="rgba(255,255,255,0.25)"
+            value={wrapDraft}
+            onChangeText={(v) => {
+              setCallSheetDirty(true)
+              callSheetDirtyRef.current = true
+              setWrapDraft(v)
+            }}
+            editable={!savingCallSheet}
+          />
+          <Text style={styles.fieldLabel}>Notes</Text>
+          <TextInput
+            style={styles.notesInput}
+            placeholder="What happened, what's next…"
+            placeholderTextColor="rgba(255,255,255,0.25)"
+            value={notesDraft}
+            onChangeText={(v) => {
+              setCallSheetDirty(true)
+              callSheetDirtyRef.current = true
+              setNotesDraft(v)
+            }}
+            multiline
+            editable={!savingCallSheet}
+          />
+          <TouchableOpacity
+            style={[
+              styles.saveCallSheetBtn,
+              (savingCallSheet || !callSheetDirty) && styles.dim,
+            ]}
+            onPress={() => void saveCallSheet()}
+            disabled={savingCallSheet || !callSheetDirty}
+          >
+            <Text style={styles.saveCallSheetBtnText}>
+              {savingCallSheet ? 'Saving…' : 'Save call sheet'}
+            </Text>
+          </TouchableOpacity>
+          {!callSheetDirty && !savingCallSheet ? (
+            <Text style={styles.subtle}>Saved — syncs to web automatically.</Text>
+          ) : null}
+        </>
+      ) : (
+        <Text style={styles.muted}>Notes are available after a production day has been created.</Text>
+      )}
         </>
       ) : null}
       </ScrollView>
@@ -969,53 +1155,6 @@ export function ProductionTab({
 }
 
 export default ProductionTab
-
-function WrapNotesBlock({
-  prodDay,
-  saving,
-  onSave,
-}: {
-  prodDay: ProductionDayRow | null
-  saving: boolean
-  onSave: (notes: string, wrap: string | null) => void
-}) {
-  const [wrap, setWrap] = useState(prodDay?.wrap_time ?? '')
-  const [notes, setNotes] = useState(prodDay?.notes ?? '')
-
-  useEffect(() => {
-    setWrap(prodDay?.wrap_time ?? '')
-    setNotes(prodDay?.notes ?? '')
-  }, [prodDay?.id, prodDay?.wrap_time, prodDay?.notes])
-
-  if (!prodDay) {
-    return <Text style={styles.muted}>Notes are available after a production day has been created.</Text>
-  }
-
-  return (
-    <>
-      <TextInput
-        style={styles.wrapInput}
-        placeholder="e.g. 7:30 PM"
-        placeholderTextColor="rgba(255,255,255,0.25)"
-        value={wrap}
-        onChangeText={setWrap}
-        onEndEditing={() => onSave(notes, wrap.trim() || null)}
-        editable={!saving}
-      />
-      <Text style={styles.fieldLabel}>Notes</Text>
-      <TextInput
-        style={styles.notesInput}
-        placeholder="What happened, what's next…"
-        placeholderTextColor="rgba(255,255,255,0.25)"
-        value={notes}
-        onChangeText={setNotes}
-        onEndEditing={() => onSave(notes, wrap.trim() || null)}
-        multiline
-        editable={!saving}
-      />
-    </>
-  )
-}
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
@@ -1069,6 +1208,25 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 8,
   },
+  shootDaySelect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    backgroundColor: '#111',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.35)',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  shootDaySelectText: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   shootDayControls: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   shootDayInput: {
     flex: 1,
@@ -1096,6 +1254,44 @@ const styles = StyleSheet.create({
     marginTop: 8,
     lineHeight: 16,
   },
+  dayPickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  dayPickerSheet: {
+    maxHeight: '55%',
+    backgroundColor: '#141414',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.2)',
+    paddingTop: 16,
+    paddingBottom: 24,
+  },
+  dayPickerTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.45)',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    paddingHorizontal: 18,
+    marginBottom: 8,
+  },
+  dayPickerList: { paddingHorizontal: 12 },
+  dayPickerRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    marginBottom: 6,
+  },
+  dayPickerRowActive: {
+    backgroundColor: 'rgba(255,220,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.35)',
+  },
+  dayPickerRowText: { color: 'rgba(255,255,255,0.85)', fontSize: 16, fontWeight: '600' },
+  dayPickerRowTextActive: { color: '#FFDC00' },
   sectionHead: {
     fontSize: 20,
     fontWeight: '900',
@@ -1386,7 +1582,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     textAlignVertical: 'top',
+    marginBottom: 4,
   },
+  saveCallSheetBtn: {
+    marginTop: 20,
+    backgroundColor: '#FFDC00',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  saveCallSheetBtnText: { color: '#0a0a0a', fontWeight: '800', fontSize: 15 },
   muted: { fontSize: 13, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic' },
   aiDocCard: {
     marginTop: 18,

@@ -29,7 +29,7 @@ export function ProjectOverviewAbout({
 }: Props) {
   const [editing, setEditing] = useState(false)
   const displayLine =
-    (briefContext ?? '').trim() || 'No project summary yet.'
+    (briefContext ?? '').trim() || 'No description yet.'
   const showEditChrome = Boolean(canEdit && onChangeBrief && onSaveBrief)
 
   const toggleEdit = () => setEditing((v) => !v)
@@ -43,7 +43,7 @@ export function ProjectOverviewAbout({
   return (
     <View style={styles.wrap}>
       <View style={styles.headerRow}>
-        <Text style={styles.label}>About this project</Text>
+        <Text style={styles.label}>About This Project</Text>
         {showEditChrome ? (
           <TouchableOpacity
             onPress={toggleEdit}
@@ -62,7 +62,7 @@ export function ProjectOverviewAbout({
             <TextInput
               style={styles.input}
               multiline
-              placeholder="Project summary for your crew…"
+              placeholder="Same as job description when you posted…"
               placeholderTextColor="rgba(255,255,255,0.25)"
               value={briefContext ?? ''}
               onChangeText={onChangeBrief}
@@ -76,7 +76,7 @@ export function ProjectOverviewAbout({
               {saving ? (
                 <ActivityIndicator color="#0a0a0a" size="small" />
               ) : (
-                <Text style={styles.saveBtnText}>Save summary</Text>
+                <Text style={styles.saveBtnText}>Save</Text>
               )}
             </TouchableOpacity>
           </>

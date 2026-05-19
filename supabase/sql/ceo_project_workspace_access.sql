@@ -22,6 +22,21 @@ as $$
       select 1 from public.projects p
       where p.id = p_project_id
         and (p.company_id = p_user or p.freelancer_id = p_user)
+    )
+    or exists (
+      select 1
+      from public.projects p
+      inner join public.jobs j on j.id = coalesce(p.job_id, p.id)
+      where p.id = p_project_id
+        and j.company_id = p_user
+    )
+    or exists (
+      select 1
+      from public.projects p
+      inner join public.job_applications ja on ja.job_id = coalesce(p.job_id, p.id)
+      where p.id = p_project_id
+        and ja.freelancer_id = p_user
+        and ja.status = 'accepted'
     );
 $$;
 

@@ -29,6 +29,7 @@ import {
   type BookedDateEntry,
 } from '@/lib/memberBookedDates'
 import { CrewMemberBookedDaysCalendar } from '@/components/project/CrewMemberBookedDaysCalendar'
+import { crewDisplayRole } from '@/lib/jobApplicationRole'
 
 type Member = {
   id: string
@@ -40,6 +41,7 @@ type Member = {
   contact_email?: string | null
   contact_phone?: string | null
   contact_label?: string | null
+  works_as?: string | null
   profiles: {
     name: string | null
     avatar_url: string | null
@@ -63,6 +65,7 @@ type CrewRow =
       id: string
       profile_id: string
       member_role: string
+      avatar_url: string | null
       name: string
       subtitle: string
       role_display?: string | null
@@ -93,6 +96,8 @@ type Props = {
   canManage: boolean
   /** True when the signed-in user is the hiring company (`projects.company_id`). Used for shoot days + job contact fields. */
   viewerIsCompany: boolean
+  /** Signed-in user id from parent (avoids race before auth effect in this tab). */
+  viewerId?: string | null
   workspaceOnly?: boolean
   proFeaturesEnabled?: boolean
   /** Job production window (Overview); required to pick shoot days per freelancer. */
@@ -120,6 +125,7 @@ export function ProjectCrewTab({
   projectId,
   canManage,
   viewerIsCompany,
+  viewerId: viewerIdProp,
   workspaceOnly = false,
   proFeaturesEnabled = true,
   productionWindowStart,
@@ -150,26 +156,47 @@ export function ProjectCrewTab({
   const [memberBookedDraftSlots, setMemberBookedDraftSlots] = useState<BookedDateEntry[]>([])
   const [shootDatesEditorOpen, setShootDatesEditorOpen] = useState(false)
   const [savingMemberSchedule, setSavingMemberSchedule] = useState(false)
-  const [viewerUserId, setViewerUserId] = useState<string | null>(null)
+  const [viewerUserId, setViewerUserId] = useState<string | null>(viewerIdProp ?? null)
+  const effectiveViewerId = viewerIdProp ?? viewerUserId
   const [projectContactEmail, setProjectContactEmail] = useState('')
   const [projectContactPhone, setProjectContactPhone] = useState('')
   const [projectContactLabel, setProjectContactLabel] = useState('')
 
   useEffect(() => {
+    if (viewerIdProp) {
+      setViewerUserId(viewerIdProp)
+      return
+    }
     void (async () => {
       const {
         data: { user },
       } = await supabase.auth.getUser()
       setViewerUserId(user?.id ?? null)
     })()
-  }, [])
+  }, [viewerIdProp])
 
   const load = useCallback(async () => {
+    const { data: projRow } = await supabase.from('projects').select('job_id').eq('id', projectId).maybeSingle()
+    const jobId = (projRow as { job_id?: string | null } | null)?.job_id?.trim() || ''
+    let appliedRoleByProfile = new Map<string, string>()
+    if (jobId) {
+      const { data: appRows } = await supabase
+        .from('job_applications')
+        .select('freelancer_id, applied_role, status')
+        .eq('job_id', jobId)
+        .in('status', ['pending', 'accepted'])
+      for (const row of appRows ?? []) {
+        const fid = String((row as { freelancer_id?: string }).freelancer_id ?? '').trim()
+        const ar = String((row as { applied_role?: string | null }).applied_role ?? '').trim()
+        if (fid && ar) appliedRoleByProfile.set(fid, ar)
+      }
+    }
+
     const [registeredRes, manualRes] = await Promise.all([
       supabase
         .from('project_members')
         .select(
-          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, booked_dates, contact_email, contact_phone, contact_label, profiles(name, avatar_url, headline, email)'
+          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, booked_dates, contact_email, contact_phone, contact_label, works_as, profiles(name, avatar_url, headline, email)'
         )
         .eq('project_id', projectId)
         .order('member_role', { ascending: true }),
@@ -217,8 +244,13 @@ export function ProjectCrewTab({
           ? m.contact_label.trim()
           : ''
       const rl = roleLabel(m.member_role)
-      const roleDisplay =
-        typeof p?.headline === 'string' && p.headline.trim().length > 0 ? p.headline.trim() : rl
+      const worksAs = typeof m.works_as === 'string' && m.works_as.trim() ? m.works_as.trim() : ''
+      const appliedForJob = appliedRoleByProfile.get(m.profile_id) ?? ''
+      const roleDisplay = crewDisplayRole(
+        worksAs || appliedForJob,
+        typeof p?.headline === 'string' && p.headline.trim().length > 0 ? p.headline.trim() : null,
+        rl,
+      )
       const subtitle =
         rawContactNote.length > 0
           ? `${roleDisplay} · ${rawContactNote.length > 38 ? `${rawContactNote.slice(0, 38)}…` : rawContactNote}`
@@ -232,6 +264,7 @@ export function ProjectCrewTab({
         id: m.id,
         profile_id: m.profile_id,
         member_role: m.member_role,
+        avatar_url: crewAvatarUri(p?.avatar_url),
         role_display: roleDisplay,
         name: p?.name || 'Member',
         subtitle,
@@ -433,28 +466,39 @@ export function ProjectCrewTab({
 
   const canRemoveMember = (m: CrewRow | null) => {
     if (!m) return false
-    return canManage && m.member_role !== 'company'
+    return viewerIsCompany && m.member_role !== 'company'
   }
 
   /** Manual rows always; registered row only when this device user is that profile (e.g. client/company row = you). */
   const canEditOwnRegisteredRow =
     Boolean(
       selectedCrew?.source === 'registered' &&
-        viewerUserId &&
-        selectedCrew.profile_id === viewerUserId
+        effectiveViewerId &&
+        selectedCrew.profile_id === effectiveViewerId
     )
-  const canEditPersonFields = selectedCrew?.source === 'manual' || canEditOwnRegisteredRow
 
-  /** Hiring company only: shoot days + project_members contact fields for freelancers (not leads). */
+  /** Workspace / project owner may edit manual crew cards (no Crea account). */
+  const canEditManualCrewFields = Boolean(
+    selectedCrew?.source === 'manual' && (viewerIsCompany || canManage)
+  )
+
+  /** Hiring company: shoot days + job contact for other freelancers. Workspace: own row contact too. */
   const companyCanEditMemberJobFields = Boolean(
     viewerIsCompany &&
       selectedCrew?.source === 'registered' &&
       selectedCrew.member_role !== 'company'
   )
 
+  /** Own row: contact for this project. Company: other freelancers’ job contact + shoot days. */
+  const canEditProjectContactFields = Boolean(
+    companyCanEditMemberJobFields || canEditOwnRegisteredRow
+  )
+
+  const canEditPersonFields = canEditManualCrewFields || canEditOwnRegisteredRow
+
   const canSavePersonModal =
     selectedCrew?.source === 'manual'
-      ? canEditPersonFields
+      ? canEditManualCrewFields
       : Boolean(companyCanEditMemberJobFields || canEditOwnRegisteredRow)
 
   const saveMemberProductionDates = async () => {
@@ -529,6 +573,11 @@ export function ProjectCrewTab({
     if (!selectedCrew) return
 
     if (selectedCrew.source === 'manual') {
+      const manualOk = viewerIsCompany || canManage
+      if (!manualOk) {
+        Alert.alert('Person info', 'You cannot edit this entry.')
+        return
+      }
       const nextName = personName.trim()
       if (nextName.length < 2) {
         Alert.alert('Person info', 'Please enter at least 2 characters for the name.')
@@ -559,19 +608,19 @@ export function ProjectCrewTab({
       return
     }
 
-    if (!canEditOwnRegisteredRow && !companyCanEditMemberJobFields) {
+    if (!canEditOwnRegisteredRow && !canEditProjectContactFields) {
       Alert.alert('Person info', 'You cannot edit this entry.')
       return
     }
 
-    if (canEditOwnRegisteredRow && viewerUserId) {
+    if (canEditOwnRegisteredRow && effectiveViewerId) {
       const nextName = personName.trim()
       if (nextName.length < 2) {
         Alert.alert('Person info', 'Please enter at least 2 characters for the name.')
         return
       }
       setBusy(true)
-      const { error: nameErr } = await supabase.from('profiles').update({ name: nextName }).eq('id', viewerUserId)
+      const { error: nameErr } = await supabase.from('profiles').update({ name: nextName }).eq('id', effectiveViewerId)
       setBusy(false)
       if (nameErr) {
         Alert.alert('Save failed', nameErr.message)
@@ -579,7 +628,7 @@ export function ProjectCrewTab({
       }
     }
 
-    if (companyCanEditMemberJobFields) {
+    if (canEditProjectContactFields) {
       setBusy(true)
       const { error: pmErr } = await supabase
         .from('project_members')
@@ -717,13 +766,7 @@ export function ProjectCrewTab({
                               onPress={() => void addByProfileId(item.id)}
                             >
                               <View style={styles.dropdownAvatarWrap}>
-                                {uri ? (
-                                  <Image source={{ uri }} style={styles.dropdownAvatar} />
-                                ) : (
-                                  <View style={styles.dropdownAvatarPh}>
-                                    <Text style={styles.dropdownAvatarLetter}>{crewAvatarInitial(item.name)}</Text>
-                                  </View>
-                                )}
+                                {uri ? <Image source={{ uri }} style={styles.dropdownAvatar} /> : null}
                               </View>
                               <Text style={styles.dropdownName} numberOfLines={1}>
                                 {label}
@@ -756,6 +799,9 @@ export function ProjectCrewTab({
         const canSwipeDelete = canRemoveMember(m)
         const rowContent = (
           <View style={styles.row}>
+            {m.source === 'registered' && m.avatar_url ? (
+              <Image source={{ uri: m.avatar_url }} style={styles.rowAvatar} />
+            ) : null}
             <TouchableOpacity style={styles.rowText} onPress={() => openPersonCard(m)}>
               <Text style={styles.name}>{m.name}</Text>
               <Text style={styles.role}>{m.subtitle}</Text>
@@ -872,7 +918,9 @@ export function ProjectCrewTab({
                 : companyCanEditMemberJobFields
                   ? 'Shoot days and “On this project” are for this job only (hiring company). Your display name still updates your Crea profile when this card is you.'
                   : canEditOwnRegisteredRow
-                    ? 'Your display name updates your Crea profile. Shoot days and job contact are set by the hiring company.'
+                    ? workspaceOnly
+                      ? 'Update your display name and how you appear on this project’s crew list (contact email/phone for this project).'
+                      : 'Your display name updates your Crea profile. Shoot days and job contact are set by the hiring company.'
                     : 'Shoot days and job contact can only be changed by the hiring company. Names come from each person’s Crea profile.'}
             </Text>
             {selectedCrew?.source === 'registered' &&
@@ -959,6 +1007,7 @@ export function ProjectCrewTab({
                 placeholderTextColor="rgba(255,255,255,0.3)"
                 value={personRole}
                 onChangeText={setPersonRole}
+                editable={canEditPersonFields}
               />
             ) : selectedCrew ? (
               <View style={styles.modalReadonlyBlock}>
@@ -978,6 +1027,7 @@ export function ProjectCrewTab({
                   onChangeText={setPersonEmail}
                   autoCapitalize="none"
                   keyboardType="email-address"
+                  editable={canEditPersonFields}
                 />
                 <TextInput
                   style={styles.modalInput}
@@ -986,6 +1036,7 @@ export function ProjectCrewTab({
                   value={personPhone}
                   onChangeText={setPersonPhone}
                   keyboardType="phone-pad"
+                  editable={canEditPersonFields}
                 />
               </>
             ) : selectedCrew ? (
@@ -998,7 +1049,7 @@ export function ProjectCrewTab({
                   style={[
                     styles.modalInput,
                     styles.modalInputMultiline,
-                    !companyCanEditMemberJobFields && styles.modalInputLocked,
+                    !canEditProjectContactFields && styles.modalInputLocked,
                   ]}
                   placeholder="Contact person / note for crew…"
                   placeholderTextColor="rgba(255,255,255,0.3)"
@@ -1006,26 +1057,26 @@ export function ProjectCrewTab({
                   onChangeText={setProjectContactLabel}
                   multiline
                   textAlignVertical="top"
-                  editable={companyCanEditMemberJobFields}
+                  editable={canEditProjectContactFields}
                 />
                 <TextInput
-                  style={[styles.modalInput, !companyCanEditMemberJobFields && styles.modalInputLocked]}
+                  style={[styles.modalInput, !canEditProjectContactFields && styles.modalInputLocked]}
                   placeholder="Email for this job"
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   value={projectContactEmail}
                   onChangeText={setProjectContactEmail}
                   autoCapitalize="none"
                   keyboardType="email-address"
-                  editable={companyCanEditMemberJobFields}
+                  editable={canEditProjectContactFields}
                 />
                 <TextInput
-                  style={[styles.modalInput, !companyCanEditMemberJobFields && styles.modalInputLocked]}
+                  style={[styles.modalInput, !canEditProjectContactFields && styles.modalInputLocked]}
                   placeholder="Phone for this job"
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   value={projectContactPhone}
                   onChangeText={setProjectContactPhone}
                   keyboardType="phone-pad"
-                  editable={companyCanEditMemberJobFields}
+                  editable={canEditProjectContactFields}
                 />
               </View>
             ) : null}
@@ -1170,6 +1221,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   dim: { opacity: 0.5 },
+  rowAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: '#222' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

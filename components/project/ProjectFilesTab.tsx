@@ -17,6 +17,7 @@ import { FileText, ImageIcon, Upload } from 'lucide-react-native'
 import { useFocusEffect } from 'expo-router'
 import { requireOptionalNativeModule } from 'expo-modules-core'
 import { supabase } from '@/lib/supabase'
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
 
 type Props = { projectId: string }
@@ -119,6 +120,12 @@ export function ProjectFilesTab({ projectId }: Props) {
       Alert.alert('Upload failed', error.message)
     } else {
       void load()
+      void notifyExpoEvent({
+        kind: 'workspace_activity',
+        projectId,
+        activity: 'file',
+        detail: baseName,
+      })
     }
     setBusy(false)
   }

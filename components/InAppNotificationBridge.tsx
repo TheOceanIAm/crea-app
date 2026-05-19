@@ -212,15 +212,25 @@ export function InAppNotificationBridge() {
             if (String(row.sender_id) === uid) return
             const pid = typeof row.project_id === 'string' ? row.project_id : ''
             if (!pid) return
-            const { data: m } = await supabase
-              .from('project_members')
-              .select('project_id')
-              .eq('project_id', pid)
-              .eq('profile_id', uid)
+            const { data: proj } = await supabase
+              .from('projects')
+              .select('title, company_id, freelancer_id')
+              .eq('id', pid)
               .maybeSingle()
-            if (!m) return
+            if (!proj) return
+            const isMember =
+              String(proj.company_id) === uid ||
+              String(proj.freelancer_id) === uid ||
+              (
+                await supabase
+                  .from('project_members')
+                  .select('id')
+                  .eq('project_id', pid)
+                  .eq('profile_id', uid)
+                  .maybeSingle()
+              ).data != null
+            if (!isMember) return
             invalidateAlertsBadge()
-            const { data: proj } = await supabase.from('projects').select('title').eq('id', pid).maybeSingle()
             const b =
               typeof row.body === 'string' && row.body.trim()
                 ? row.body.trim().length > 120
@@ -231,6 +241,94 @@ export function InAppNotificationBridge() {
               id: `pm-${String(row.id)}`,
               title: String(proj?.title ?? 'Project'),
               body: b,
+              onPress: () => router.push(`/project/${pid}`),
+            })
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'job_messages' },
+          async (payload) => {
+            if (AppState.currentState !== 'active' || !uid) return
+            const row = payload.new as Record<string, unknown>
+            if (String(row.sender_id) === uid) return
+            const jobId = typeof row.job_id === 'string' ? row.job_id : ''
+            if (!jobId) return
+            const { data: job } = await supabase.from('jobs').select('company_id, title').eq('id', jobId).maybeSingle()
+            if (!job) return
+            let allowed = String(job.company_id) === uid
+            if (!allowed) {
+              const { data: app } = await supabase
+                .from('job_applications')
+                .select('id')
+                .eq('job_id', jobId)
+                .eq('freelancer_id', uid)
+                .eq('status', 'accepted')
+                .maybeSingle()
+              allowed = Boolean(app)
+            }
+            const { data: proj } = await supabase
+              .from('projects')
+              .select('id, title, freelancer_id')
+              .eq('job_id', jobId)
+              .maybeSingle()
+            if (!allowed && proj) {
+              if (String(proj.freelancer_id) === uid) allowed = true
+              if (!allowed) {
+                const { data: pm } = await supabase
+                  .from('project_members')
+                  .select('id')
+                  .eq('project_id', proj.id)
+                  .eq('profile_id', uid)
+                  .maybeSingle()
+                allowed = Boolean(pm)
+              }
+            }
+            if (!allowed || !proj?.id) return
+            invalidateAlertsBadge()
+            const raw = typeof row.content === 'string' ? row.content.trim() : ''
+            const b =
+              raw.length > 120 ? `${raw.slice(0, 117)}…` : raw || 'New message in project workspace'
+            showBanner({
+              id: `jm-${String(row.id)}`,
+              title: String(proj.title ?? job.title ?? 'Project'),
+              body: b,
+              onPress: () => router.push(`/project/${proj.id}`),
+            })
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'project_milestones' },
+          async (payload) => {
+            if (AppState.currentState !== 'active' || !uid) return
+            const row = payload.new as Record<string, unknown>
+            const pid = typeof row.project_id === 'string' ? row.project_id : ''
+            if (!pid) return
+            const { data: proj } = await supabase
+              .from('projects')
+              .select('title, company_id, freelancer_id')
+              .eq('id', pid)
+              .maybeSingle()
+            if (!proj) return
+            const isMember =
+              String(proj.company_id) === uid ||
+              String(proj.freelancer_id) === uid ||
+              (
+                await supabase
+                  .from('project_members')
+                  .select('id')
+                  .eq('project_id', pid)
+                  .eq('profile_id', uid)
+                  .maybeSingle()
+              ).data != null
+            if (!isMember) return
+            invalidateAlertsBadge()
+            const title = String(row.title ?? '').trim() || 'Milestone'
+            showBanner({
+              id: `pms-${String(row.id)}`,
+              title: String(proj.title ?? 'Project'),
+              body: `New milestone: ${title}`,
               onPress: () => router.push(`/project/${pid}`),
             })
           }

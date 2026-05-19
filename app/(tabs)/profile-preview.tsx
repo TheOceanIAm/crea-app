@@ -17,6 +17,8 @@ import { FreelancerPublicProfileContent } from '@/components/profile/FreelancerP
 import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { supabase } from '@/lib/supabase'
 import { loadPublicProfile } from '@/lib/loadPublicProfile'
+import { postSyncFreelancerProfileToWeb } from '@/lib/syncFreelancerProfileApi'
+import { mirrorProfilesToFreelancerProfiles } from '@/lib/syncFreelancerProfileToWeb'
 import type { FreelancerPublicProfilePayload } from '@/lib/freelancerPublicProfileTypes'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isCeoProfile, isFreelancerProfile } from '@/lib/profileRole'
@@ -46,6 +48,11 @@ export default function ProfilePreviewScreen() {
       return
     }
     setAuthUserId(user.id)
+
+    const sync = await postSyncFreelancerProfileToWeb()
+    if (!sync.ok) {
+      await mirrorProfilesToFreelancerProfiles(user.id)
+    }
 
     const { profile, error } = await loadPublicProfile(user.id)
 
