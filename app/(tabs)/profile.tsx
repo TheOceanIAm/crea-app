@@ -126,8 +126,8 @@ const MENU_ITEMS: MenuItem[] = [
 ]
 
 const CEO_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability', 'billing', 'plan']
-/** Rates & availability are freelancer-focused; companies use jobs for budgets. Website/social live under Profile. */
-const COMPANY_HIDDEN_MENU_IDS: MenuId[] = ['rates', 'availability']
+/** Rates, availability & links are freelancer-focused; companies edit website/social under Profile. */
+const COMPANY_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability']
 const WORKSPACE_PLAN_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability', 'billing']
 
 function roleLabel(role: string) {
@@ -957,23 +957,23 @@ export default function ProfileScreen() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     setSavingPortfolio(true)
-    const { error } = await supabase
-      .from('profiles')
-      .update({
-        portfolio_website: portfolioWebsite.trim() || null,
-        portfolio_instagram: portfolioInstagram.trim() || null,
-        portfolio_linkedin: portfolioLinkedin.trim() || null,
-        portfolio_vimeo: portfolioVimeo.trim() || null,
-        portfolio_behance: portfolioBehance.trim() || null,
-        portfolio_projects: portfolioProjects,
-      })
-      .eq('id', user.id)
+    const payload: Record<string, unknown> = {
+      portfolio_website: portfolioWebsite.trim() || null,
+      portfolio_instagram: portfolioInstagram.trim() || null,
+      portfolio_linkedin: portfolioLinkedin.trim() || null,
+      portfolio_vimeo: portfolioVimeo.trim() || null,
+      portfolio_behance: portfolioBehance.trim() || null,
+    }
+    if (!company) {
+      payload.portfolio_projects = portfolioProjects
+    }
+    const { error } = await supabase.from('profiles').update(payload).eq('id', user.id)
     setSavingPortfolio(false)
     if (error) {
       Alert.alert('Save failed', error.message)
       return
     }
-    Alert.alert('Saved', 'Portfolio & links were updated.')
+    Alert.alert('Saved', company ? 'Links were updated.' : 'Portfolio & links were updated.')
   }
 
   const saveInvoiceBank = async () => {
@@ -1568,15 +1568,19 @@ export default function ProfileScreen() {
           {activeMenu === 'portfolio' && (
             <>
               <View style={styles.sectionCard}>
-                <Text style={styles.cardTitle}>Social &amp; portfolio links</Text>
-                <Text style={styles.cardSubtitle}>Shown as icons on your public profile.</Text>
+                <Text style={styles.cardTitle}>{company ? 'Links' : 'Social & portfolio links'}</Text>
+                <Text style={styles.cardSubtitle}>
+                  {company
+                    ? 'Website and social profiles on your public company profile.'
+                    : 'Shown as icons on your public profile.'}
+                </Text>
 
                 <Text style={styles.fieldLabel}>Website</Text>
                 <TextInput
                   style={styles.input}
                   value={portfolioWebsite}
                   onChangeText={setPortfolioWebsite}
-                  placeholder="https://yoursite.com"
+                  placeholder={company ? 'https://yourcompany.com' : 'https://yoursite.com'}
                   placeholderTextColor="rgba(255,255,255,0.28)"
                   autoCapitalize="none"
                 />
@@ -1596,7 +1600,7 @@ export default function ProfileScreen() {
                   style={styles.input}
                   value={portfolioLinkedin}
                   onChangeText={setPortfolioLinkedin}
-                  placeholder="linkedin.com/in/… or handle"
+                  placeholder={company ? 'linkedin.com/company/… or full URL' : 'linkedin.com/in/… or handle'}
                   placeholderTextColor="rgba(255,255,255,0.28)"
                   autoCapitalize="none"
                 />
@@ -1622,50 +1626,52 @@ export default function ProfileScreen() {
                 />
               </View>
 
-              <View style={styles.sectionCard}>
-                <Text style={styles.cardTitle}>Portfolio projects</Text>
-                <Text style={styles.cardSubtitle}>Highlights on your profile.</Text>
+              {!company ? (
+                <View style={styles.sectionCard}>
+                  <Text style={styles.cardTitle}>Portfolio projects</Text>
+                  <Text style={styles.cardSubtitle}>Highlights on your profile.</Text>
 
-                {portfolioProjects.map((p, i) => (
-                  <View key={`${p.title}-${i}`} style={styles.projectRow}>
-                    <View style={styles.projectRowBody}>
-                      <Text style={styles.projectTitle}>{p.title}</Text>
-                      {p.client ? <Text style={styles.projectMeta}>{p.client}</Text> : null}
-                      {p.link ? <Text style={styles.projectLink} numberOfLines={1}>{p.link}</Text> : null}
+                  {portfolioProjects.map((p, i) => (
+                    <View key={`${p.title}-${i}`} style={styles.projectRow}>
+                      <View style={styles.projectRowBody}>
+                        <Text style={styles.projectTitle}>{p.title}</Text>
+                        {p.client ? <Text style={styles.projectMeta}>{p.client}</Text> : null}
+                        {p.link ? <Text style={styles.projectLink} numberOfLines={1}>{p.link}</Text> : null}
+                      </View>
+                      <TouchableOpacity onPress={() => removePortfolioProject(i)} hitSlop={10}>
+                        <Trash2 size={20} color="rgba(255,100,100,0.85)" strokeWidth={ICON_STROKE} />
+                      </TouchableOpacity>
                     </View>
-                    <TouchableOpacity onPress={() => removePortfolioProject(i)} hitSlop={10}>
-                      <Trash2 size={20} color="rgba(255,100,100,0.85)" strokeWidth={ICON_STROKE} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
+                  ))}
 
-                <Text style={styles.presetLabel}>Add project</Text>
-                <TextInput
-                  style={styles.input}
-                  value={projTitle}
-                  onChangeText={setProjTitle}
-                  placeholder="Project title"
-                  placeholderTextColor="rgba(255,255,255,0.28)"
-                />
-                <TextInput
-                  style={[styles.input, styles.inputSpaced]}
-                  value={projClient}
-                  onChangeText={setProjClient}
-                  placeholder="Client"
-                  placeholderTextColor="rgba(255,255,255,0.28)"
-                />
-                <TextInput
-                  style={[styles.input, styles.inputSpaced]}
-                  value={projLink}
-                  onChangeText={setProjLink}
-                  placeholder="Link (Vimeo, YouTube, website …)"
-                  placeholderTextColor="rgba(255,255,255,0.28)"
-                  autoCapitalize="none"
-                />
-                <TouchableOpacity style={[styles.primaryBtn, styles.addProjectBtn]} onPress={addPortfolioProject}>
-                  <Text style={styles.primaryBtnText}>Add project</Text>
-                </TouchableOpacity>
-              </View>
+                  <Text style={styles.presetLabel}>Add project</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={projTitle}
+                    onChangeText={setProjTitle}
+                    placeholder="Project title"
+                    placeholderTextColor="rgba(255,255,255,0.28)"
+                  />
+                  <TextInput
+                    style={[styles.input, styles.inputSpaced]}
+                    value={projClient}
+                    onChangeText={setProjClient}
+                    placeholder="Client"
+                    placeholderTextColor="rgba(255,255,255,0.28)"
+                  />
+                  <TextInput
+                    style={[styles.input, styles.inputSpaced]}
+                    value={projLink}
+                    onChangeText={setProjLink}
+                    placeholder="Link (Vimeo, YouTube, website …)"
+                    placeholderTextColor="rgba(255,255,255,0.28)"
+                    autoCapitalize="none"
+                  />
+                  <TouchableOpacity style={[styles.primaryBtn, styles.addProjectBtn]} onPress={addPortfolioProject}>
+                    <Text style={styles.primaryBtnText}>Add project</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
 
               <TouchableOpacity
                 style={[styles.primaryBtn, savingPortfolio && styles.btnDisabled]}

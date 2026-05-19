@@ -363,7 +363,7 @@ export function PinboardFeedScreen() {
                 <Text style={styles.ctaPrimaryText}>{PINBOARD_UPDATES_COPY.createListingLabel}</Text>
               </TouchableOpacity>
             ) : null}
-            {isCompanyProfile(role ?? undefined) ||
+            {!isCompanyProfile(role ?? undefined) &&
             canFreelancerCreatePrivateProjects(freelancerPlan) ? (
               <TouchableOpacity
                 style={styles.ctaSecondary}

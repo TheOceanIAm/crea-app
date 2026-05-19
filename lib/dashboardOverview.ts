@@ -3,16 +3,23 @@ import {
   Briefcase,
   CalendarDays,
   ClipboardList,
+  FileText,
   Layers,
   MessageCircle,
   PlusCircle,
   Receipt,
   Settings2,
+  Shield,
   Users,
+  Wallet,
 } from 'lucide-react-native'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
+import {
+  resolveCompanySubscriptionPlanFromSources,
+  type CompanySubscriptionPlanDb,
+} from '@/lib/companyPlanFromSession'
 import {
   canFreelancerCreatePrivateProjects,
   isFreelancerTalentPoolPlan,
@@ -30,6 +37,8 @@ export type DashboardQuickAction = {
   label: string
   icon: LucideIcon
   href?: `/(tabs)/${string}`
+  /** Company-only tools that live on the web app (contracts, Crea Pay, …). */
+  webPath?: string
   disabled?: boolean
   hint?: string
 }
@@ -52,6 +61,7 @@ export type DashboardOverviewData = {
   ceoSnap: CeoSnapshot | null
   ceoRpcError: string | null
   freelancerPlan: FreelancerPlan
+  companyPlan: CompanySubscriptionPlanDb
   trialEndsAt: string | null
   accountCreatedAt: string | null
   hasStripeCustomer: boolean
@@ -121,9 +131,11 @@ export function parseCeoSnapshot(raw: unknown): CeoSnapshot {
 
 export function quickActionsForRole(
   role: string | null,
-  opts?: { freelancerPlan?: FreelancerPlan }
+  opts?: { freelancerPlan?: FreelancerPlan; companyPlan?: CompanySubscriptionPlanDb }
 ): DashboardQuickAction[] {
   if (isCompanyProfile(role ?? undefined)) {
+    const plan = opts?.companyPlan ?? 'studio'
+    const businessPlus = plan === 'business' || plan === 'enterprise'
     return [
       { label: 'Post project', icon: PlusCircle, href: '/(tabs)/company-post-job' },
       { label: 'Applications', icon: ClipboardList, href: '/(tabs)/company-applications' },
@@ -131,6 +143,16 @@ export function quickActionsForRole(
       { label: 'Talent pool', icon: Users, href: '/(tabs)/talent-pool' },
       { label: 'Messages', icon: MessageCircle, href: '/(tabs)/messages' },
       { label: 'Invoices', icon: Receipt, href: '/(tabs)/invoices' },
+      { label: 'Hiring tools', icon: Layers, href: '/(tabs)/company-hub' },
+      { label: 'Contracts', icon: FileText, webPath: '/resources' },
+      { label: 'Crea Pay', icon: Wallet, webPath: '/company-dashboard/payments' },
+      {
+        label: 'Legal partners',
+        icon: Shield,
+        webPath: '/company-dashboard/partners',
+        disabled: !businessPlus,
+        hint: businessPlus ? undefined : 'Business plan and above',
+      },
       { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
     ]
   }
@@ -259,6 +281,7 @@ export async function loadDashboardOverview(
     ceoSnap: null,
     ceoRpcError: null,
     freelancerPlan: isFreelancerProfile(resolvedRole) ? resolvedFreelancerPlan : 'starter',
+    companyPlan: 'studio',
     trialEndsAt,
     accountCreatedAt,
     hasStripeCustomer: userHasStripeCustomer(user),
@@ -273,7 +296,13 @@ export async function loadDashboardOverview(
   }
 
   if (isCompanyProfile(resolvedRole)) {
-    const [{ count: jobCount }, { count: invCount }, { data: myJobRows }] = await Promise.all([
+    const [
+      { count: jobCount },
+      { count: invCount },
+      { data: myJobRows },
+      { data: invs },
+      { data: companyProfileRow },
+    ] = await Promise.all([
       supabase
         .from('jobs')
         .select('*', { count: 'exact', head: true })
@@ -285,7 +314,17 @@ export async function loadDashboardOverview(
         .eq('company_id', userId)
         .eq('status', 'pending'),
       supabase.from('jobs').select('id').eq('company_id', userId),
+      supabase
+        .from('invoices')
+        .select('amount, currency, status, due_date')
+        .eq('company_id', userId),
+      supabase.from('company_profiles').select('subscription_plan').eq('id', userId).maybeSingle(),
     ])
+    const companyPlan = resolveCompanySubscriptionPlanFromSources(
+      user,
+      profile?.subscription_tier,
+      companyProfileRow?.subscription_plan
+    )
     const jobIds = (myJobRows ?? []).map((r) => r.id as string).filter(Boolean)
     let pendingApps = 0
     if (jobIds.length > 0) {
@@ -298,11 +337,13 @@ export async function loadDashboardOverview(
     }
     return {
       ...base,
+      companyPlan,
       stats: [
         { label: 'Active projects', value: String(jobCount ?? 0), sub: 'Open' },
         { label: 'Pending apps', value: String(pendingApps), sub: 'To review' },
         { label: 'Open invoices', value: String(invCount ?? 0), sub: 'Pending' },
       ],
+      income: computeIncomeTotals(invs ?? []),
     }
   }
 

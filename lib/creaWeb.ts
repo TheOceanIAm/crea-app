@@ -20,6 +20,19 @@ export function getWebAuthConfirmRedirectUrl(): string | null {
   return `${base.replace(/\/$/, '')}/auth/confirm`
 }
 
+/** Open a path on the Crea web app (company contracts, Crea Pay, etc.). */
+export async function openCreaWebPath(path: string): Promise<boolean> {
+  const base = getCreaWebBaseUrl().trim().replace(/\/$/, '')
+  if (!base) return false
+  const suffix = path.startsWith('/') ? path : `/${path}`
+  try {
+    await Linking.openURL(`${base}${suffix}`)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function openProjectOnWeb(projectId: string, path = ''): void {
   const base = getCreaWebBaseUrl()
   if (!base) {

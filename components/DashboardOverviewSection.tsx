@@ -26,7 +26,7 @@ import {
 } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { money } from '@/lib/invoiceFormatting'
-import { getCreaWebBaseUrl } from '@/lib/creaWeb'
+import { getCreaWebBaseUrl, openCreaWebPath } from '@/lib/creaWeb'
 import { isDevDemoWorkspaceRouteEnabled } from '@/lib/devDemoWorkspace'
 import {
   isCeoProfile,
@@ -66,10 +66,11 @@ export function DashboardOverviewSection({
   const stats = overview?.stats ?? []
   const income = overview?.income
   const freelancerPlan = overview?.freelancerPlan ?? 'starter'
+  const companyPlan = overview?.companyPlan ?? 'studio'
 
   const quickActions = useMemo(
-    () => quickActionsForRole(role, { freelancerPlan }),
-    [role, freelancerPlan]
+    () => quickActionsForRole(role, { freelancerPlan, companyPlan }),
+    [role, freelancerPlan, companyPlan]
   )
 
   const workspaceOnly =
@@ -309,7 +310,9 @@ export function DashboardOverviewSection({
 
       {!workspaceOnly && income ? (
         <>
-          <Text style={styles.sectionTitle}>Income overview</Text>
+          <Text style={styles.sectionTitle}>
+            {isCompanyProfile(role ?? undefined) ? 'Invoice overview' : 'Income overview'}
+          </Text>
           <View style={styles.incomeRow}>
             <View style={styles.incomeCard}>
               <Text style={styles.incomeLabel}>Paid</Text>
@@ -366,7 +369,12 @@ export function DashboardOverviewSection({
               activeOpacity={0.7}
               disabled={!!a.disabled}
               onPress={() => {
-                if (!a.disabled && a.href) router.navigate(a.href as Href)
+                if (a.disabled) return
+                if (a.href) {
+                  router.navigate(a.href as Href)
+                  return
+                }
+                if (a.webPath) void openCreaWebPath(a.webPath)
               }}
             >
               <View style={styles.actionIconWrap}>

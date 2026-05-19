@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useCallback, useState } from 'react'
 import { useFocusEffect, useRouter, type Href } from 'expo-router'
@@ -11,15 +11,28 @@ import {
   PlusCircle,
   Receipt,
   Settings2,
+  Shield,
   Users,
+  Wallet,
+  FileText,
 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { companyHasBryterAndAxa } from '@/lib/company-plan'
+import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
+import { openCreaWebPath } from '@/lib/creaWeb'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 
-type ToolRow = { label: string; sub: string; icon: LucideIcon; href: Href }
+type ToolRow = {
+  label: string
+  sub: string
+  icon: LucideIcon
+  href?: Href
+  webPath?: string
+  disabled?: boolean
+}
 
-const TOOLS: ToolRow[] = [
+const NATIVE_TOOLS: ToolRow[] = [
   {
     label: 'Post a project',
     sub: 'Create a new listing for freelancers to apply.',
@@ -64,9 +77,32 @@ const TOOLS: ToolRow[] = [
   },
 ]
 
+const WEB_TOOLS: ToolRow[] = [
+  {
+    label: 'Contracts',
+    sub: 'Generate and export production agreements on the web.',
+    icon: FileText,
+    webPath: '/resources',
+  },
+  {
+    label: 'Crea Pay',
+    sub: 'Pay crew invoices and track milestone releases.',
+    icon: Wallet,
+    webPath: '/company-dashboard/payments',
+  },
+  {
+    label: 'Legal & insurance partners',
+    sub: 'Bryter and AXA resources for Business plans.',
+    icon: Shield,
+    webPath: '/company-dashboard/partners',
+    disabled: true,
+  },
+]
+
 export default function CompanyHubScreen() {
   const router = useRouter()
   const [allowed, setAllowed] = useState<boolean | null>(null)
+  const [tools, setTools] = useState<ToolRow[]>(NATIVE_TOOLS)
 
   useFocusEffect(
     useCallback(() => {
@@ -80,9 +116,34 @@ export default function CompanyHubScreen() {
           }
           return
         }
-        const { data: p } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+        const { data: p } = await supabase
+          .from('profiles')
+          .select('role, subscription_tier')
+          .eq('id', user.id)
+          .single()
+        const { data: cp } = await supabase
+          .from('company_profiles')
+          .select('subscription_plan')
+          .eq('id', user.id)
+          .maybeSingle()
         const role = resolveAppRole(p?.role, user)
-        if (!cancelled) setAllowed(isCompanyProfile(role))
+        const plan = resolveCompanySubscriptionPlanFromSources(
+          user,
+          p?.subscription_tier,
+          cp?.subscription_plan
+        )
+        const businessPlus = companyHasBryterAndAxa(plan)
+        if (!cancelled) {
+          setAllowed(isCompanyProfile(role))
+          setTools([
+            ...NATIVE_TOOLS,
+            ...WEB_TOOLS.map((t) =>
+              t.webPath === '/company-dashboard/partners'
+                ? { ...t, disabled: !businessPlus }
+                : t
+            ),
+          ])
+        }
       })()
       return () => {
         cancelled = true
@@ -131,14 +192,37 @@ export default function CompanyHubScreen() {
           Post projects, review applications, track incoming invoices, and keep your company profile up to date.
         </Text>
 
-        {TOOLS.map((t) => {
+        {tools.map((t) => {
           const Icon = t.icon
           return (
             <TouchableOpacity
               key={t.label}
-              style={styles.card}
+              style={[styles.card, t.disabled && styles.cardDisabled]}
               activeOpacity={0.75}
-              onPress={() => router.push(t.href)}
+              disabled={t.disabled}
+              onPress={() => {
+                if (t.disabled) {
+                  Alert.alert(
+                    'Business plan required',
+                    'Legal & insurance partners are included with Business and Enterprise on creaservices.de.'
+                  )
+                  return
+                }
+                if (t.href) {
+                  router.push(t.href)
+                  return
+                }
+                if (t.webPath) {
+                  void openCreaWebPath(t.webPath).then((ok) => {
+                    if (!ok) {
+                      Alert.alert(
+                        'Open on web',
+                        'Set EXPO_PUBLIC_CREA_WEB_URL or open creaservices.de in your browser.'
+                      )
+                    }
+                  })
+                }
+              }}
             >
               <View style={styles.iconWrap}>
                 <Icon size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
@@ -171,6 +255,7 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 26, fontWeight: '900', color: '#ffffff', marginBottom: 8 },
   sub: { fontSize: 14, color: 'rgba(255,255,255,0.38)', lineHeight: 20, marginBottom: 24 },
+  cardDisabled: { opacity: 0.45 },
   card: {
     flexDirection: 'row',
     alignItems: 'flex-start',
