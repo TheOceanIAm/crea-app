@@ -8,9 +8,10 @@ import { useAppBootstrapOverlay } from '@/contexts/AppBootstrapOverlayContext'
 import { resolveSessionForAppBootstrap } from '@/lib/authSession'
 import { consumeInitialSupabaseAuthUrlForBootstrap } from '@/lib/authDeepLink'
 import { profileNeedsOnboarding } from '@/lib/onboardingGate'
+import { cacheDashboardOverview, loadDashboardOverview } from '@/lib/dashboardOverview'
 
 /** Avoid an endless native splash if Supabase/storage never resolves (offline, bad URL, etc.). */
-const SESSION_BOOTSTRAP_MS = 14_000
+const SESSION_BOOTSTRAP_MS = 8_000
 
 type SessionRace =
   | { kind: 'ok'; session: Session | null }
@@ -60,13 +61,6 @@ export default function Index() {
   }, [showBootstrapOverlay])
 
   useEffect(() => {
-    if (loading) return
-    if (!session || !onboardingDone) {
-      hideBootstrapOverlay()
-    }
-  }, [loading, session, onboardingDone, hideBootstrapOverlay])
-
-  useEffect(() => {
     let cancelled = false
 
     const run = async () => {
@@ -80,6 +74,7 @@ export default function Index() {
           initial.result.ok &&
           initial.result.destination === 'reset-password'
         ) {
+          hideBootstrapOverlay()
           router.replace('/auth/reset-password')
           setLoading(false)
           return
@@ -113,6 +108,11 @@ export default function Index() {
         }
 
         setSession(sessionToUse)
+        hideBootstrapOverlay()
+
+        void loadDashboardOverview(sessionToUse.user.id).then((overview) => {
+          if (overview) cacheDashboardOverview(overview)
+        })
 
         const { data: profile, error } = await supabase
           .from('profiles')
@@ -136,7 +136,8 @@ export default function Index() {
         if (!cancelled) setSession(null)
       } finally {
         if (cancelled) return
-        if (!cancelled) setLoading(false)
+        setLoading(false)
+        hideBootstrapOverlay()
       }
     }
 

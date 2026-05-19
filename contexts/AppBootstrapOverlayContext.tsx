@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { StyleSheet, View } from 'react-native'
 import { AppBootstrapLoading } from '@/components/AppBootstrapLoading'
 
-const FAILSAFE_MS = 45_000
+const FAILSAFE_MS = 12_000
 
 type AppBootstrapOverlayContextValue = {
   /** Turns the full-screen overlay on and (re-)arms the stuck-state failsafe timer. */

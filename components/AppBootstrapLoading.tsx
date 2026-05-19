@@ -7,7 +7,7 @@ const CREA_BLACK = '#0a0a0a'
 const CREA_YELLOW = '#FFDC00'
 
 const PULSE_MS = 1100
-const REVEAL_MS = 1500
+const REVEAL_MS = 700
 
 /** Full-screen bootstrap: native Gaussian-ish blur (BlurView) fades off over {@link REVEAL_MS}, then wordmark pulses. */
 export function AppBootstrapLoading() {
@@ -94,9 +94,9 @@ export function AppBootstrapLoading() {
     }
   }, [pulseOpacity, pulseScale, smearReveal, softReveal])
 
-  if (!fontsLoaded) {
-    return <View style={styles.root} accessibilityRole="progressbar" accessibilityLabel="Loading CREA" />
-  }
+  const logoStyle = fontsLoaded
+    ? styles.logo
+    : [styles.logo, { fontFamily: undefined, fontWeight: '900' as const }]
 
   return (
     <View style={styles.root} accessibilityRole="progressbar" accessibilityLabel="Loading CREA">
@@ -109,7 +109,7 @@ export function AppBootstrapLoading() {
         >
           <Animated.Text
             style={[
-              styles.logo,
+              logoStyle,
               {
                 textShadowColor: 'rgba(255, 220, 0, 0.85)',
                 textShadowOffset: { width: 0, height: 0 },

@@ -30,6 +30,7 @@ import {
 import { replyToBookingMessage } from '@/lib/replyToBookingMessage'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
+import { applyToJobViaWebApi, fetchJobApplicationStatus } from '@/lib/applyToJobApi'
 
 type BookingDeepState =
   | { kind: 'none' }
@@ -197,19 +198,11 @@ export default function JobDetailScreen() {
     }
 
     if (user) {
-      const { data: existing } = await supabase
-        .from('job_applications')
-        .select('id')
-        .eq('job_id', id)
-        .eq('freelancer_id', user.id)
-        .maybeSingle()
-      setApplied(!!existing)
-
-      const { count } = await supabase
-        .from('job_applications')
-        .select('*', { count: 'exact', head: true })
-        .eq('job_id', id)
-      setApplicantsCount(count ?? 0)
+      const appStatus = await fetchJobApplicationStatus(id)
+      if (!appStatus.error) {
+        setApplied(appStatus.applied)
+        setApplicantsCount(appStatus.applicantCount)
+      }
 
       const ownerIdRow = String((row as JobRow).company_id || '').trim()
       if (resolvedRole && isCompanyProfile(resolvedRole) && ownerIdRow === user.id) {
@@ -381,24 +374,56 @@ export default function JobDetailScreen() {
   const onApply = async () => {
     if (!uid || !job) return
     setApplyBusy(true)
-    const { data: insertedApp, error } = await supabase
-      .from('job_applications')
-      .insert({
-        job_id: job.id,
-        freelancer_id: uid,
-        status: 'pending',
-      })
-      .select('id')
-      .single()
+    const result = await applyToJobViaWebApi(job.id)
     setApplyBusy(false)
-    if (error) {
-      Alert.alert('Could not apply', error.message)
+    if (!result.ok) {
+      const msg = result.error ?? ''
+      if (msg === 'already_applied') {
+        Alert.alert('Already applied', 'You have already applied to this job.')
+        setApplied(true)
+        return
+      }
+      if (msg === 'cannot_apply_to_own_job') {
+        Alert.alert('Could not apply', 'You cannot apply to your own job listing.')
+        return
+      }
+      if (msg === 'job_not_active' || msg === 'job_not_found') {
+        Alert.alert('Could not apply', 'This job is no longer open for applications.')
+        return
+      }
+      if (msg === 'freelancer_profile_required') {
+        Alert.alert(
+          'Profile required',
+          'Complete your freelancer profile before applying to marketplace jobs.'
+        )
+        return
+      }
+      if (msg === 'beta_trial_ended_new_job_work_not_allowed') {
+        Alert.alert(
+          'Trial ended',
+          'Your beta trial has ended. Upgrade your plan to apply to new jobs.'
+        )
+        return
+      }
+      if (msg === 'missing_web_url' || msg === 'network_error') {
+        Alert.alert(
+          'Could not apply',
+          'Could not reach CREA. Check your connection and try again.'
+        )
+        return
+      }
+      Alert.alert('Could not apply', msg || 'Something went wrong. Please try again.')
+      return
+    }
+    if (result.alreadyApplied) {
+      Alert.alert('Already applied', 'You have already applied to this job.')
+      setApplied(true)
       return
     }
     setApplied(true)
     setApplicantsCount((c) => c + 1)
-    if (insertedApp?.id) {
-      void notifyExpoEvent({ kind: 'job_application', applicationId: insertedApp.id })
+    if (result.applicationId) {
+      void notifyExpoEvent({ kind: 'job_application', applicationId: result.applicationId })
     }
     Alert.alert('Applied', 'The company will see your application.')
   }
