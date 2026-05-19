@@ -887,7 +887,7 @@ export default function ProjectWorkspaceScreen() {
       router.back()
       return
     }
-    router.replace('/(tabs)/dashboard')
+    router.replace('/(tabs)/feed')
   }, [router])
 
   if (loading) {

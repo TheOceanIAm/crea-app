@@ -48,3 +48,8 @@ export function isFreelancerTalentPoolPlan(plan: FreelancerPlan): boolean {
 export function canFreelancerCreatePrivateProjects(plan: FreelancerPlan): boolean {
   return plan !== 'starter'
 }
+
+/** Marketplace job listings: Pro or Premium. */
+export function freelancerCanPostJobs(plan: FreelancerPlan): boolean {
+  return plan === 'pro' || plan === 'premium'
+}

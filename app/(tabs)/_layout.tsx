@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, Platform, StyleSheet, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import { Tabs } from 'expo-router'
-import { Bell, Briefcase, House, MessageCircle, UserRound } from 'lucide-react-native'
+import { Bell, Briefcase, House, LayoutDashboard, UserRound } from 'lucide-react-native'
+import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import { countUnreadAlerts } from '@/lib/notificationsFeed'
 import { subscribeAlertsInvalidate } from '@/lib/invalidateAlerts'
-import { subscribeDmBadgeInvalidate } from '@/lib/invalidateDmBadge'
 import { registerPushTokenSilently } from '@/lib/registerPushOnLaunch'
 import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
 import { GoodNewsDailyModal } from '@/components/GoodNewsDailyModal'
@@ -23,55 +23,13 @@ export default function TabLayout() {
   const [workspaceOnlyTabs, setWorkspaceOnlyTabs] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [goodNewsPopup, setGoodNewsPopup] = useState<{ body: string; source?: string } | null>(null)
-  const [unreadDmCount, setUnreadDmCount] = useState(0)
   const [unreadAlertsCount, setUnreadAlertsCount] = useState(0)
-  /** Company accounts: workspace project list in tab bar. CEO: no workspace Projects tab (Jobs + Home etc. only). */
+  /** Company: workspace projects tab. Freelancer/CEO: marketplace job pool tab. */
   const [showWorkspaceProjectsTab, setShowWorkspaceProjectsTab] = useState(false)
   const [showMarketplaceJobsTab, setShowMarketplaceJobsTab] = useState(false)
-  const unreadDmInFlight = useRef<Promise<void> | null>(null)
   const unreadAlertsInFlight = useRef<Promise<void> | null>(null)
-
-  const loadUnreadDmCount = useCallback(async (uid: string) => {
-    if (unreadDmInFlight.current) return unreadDmInFlight.current
-    unreadDmInFlight.current = (async () => {
-      const { data: convs, error: convErr } = await supabase
-        .from('conversations')
-        .select('id, participant_1, participant_2')
-        .or(`participant_1.eq.${uid},participant_2.eq.${uid}`)
-        .limit(200)
-      if (convErr || !convs?.length) {
-        setUnreadDmCount(0)
-        return
-      }
-      const allIds = convs.map((c) => String(c.id))
-      let ids = allIds
-      const { data: archivedRows } = await supabase
-        .from('conversation_archives')
-        .select('conversation_id')
-        .eq('user_id', uid)
-        .eq('archived', true)
-      if (archivedRows?.length) {
-        const archived = new Set(archivedRows.map((r) => String(r.conversation_id)))
-        ids = allIds.filter((id) => !archived.has(id))
-      }
-      if (!ids.length) {
-        setUnreadDmCount(0)
-        return
-      }
-      const { count } = await supabase
-        .from('messages')
-        .select('*', { count: 'exact', head: true })
-        .in('conversation_id', ids)
-        .eq('read', false)
-        .neq('sender_id', uid)
-      setUnreadDmCount(count ?? 0)
-    })()
-    try {
-      await unreadDmInFlight.current
-    } finally {
-      unreadDmInFlight.current = null
-    }
-  }, [])
+  const dmEnabled = Boolean(userId) && !workspaceOnlyTabs
+  const { unreadDmCount } = useUnreadDmCount(userId, dmEnabled)
 
   const loadUnreadAlertsCount = useCallback(async (uid: string) => {
     if (unreadAlertsInFlight.current) return unreadAlertsInFlight.current
@@ -98,7 +56,6 @@ export default function TabLayout() {
       if (!user) {
         setWorkspaceOnlyTabs(false)
         setUserId(null)
-        setUnreadDmCount(0)
         setUnreadAlertsCount(0)
         return
       }
@@ -116,36 +73,29 @@ export default function TabLayout() {
       setShowWorkspaceProjectsTab(isCompanyAccount)
       setShowMarketplaceJobsTab(!workspaceOnly && !isCompanyAccount)
       if (!workspaceOnly) {
-        await Promise.all([loadUnreadDmCount(user.id), loadUnreadAlertsCount(user.id)])
+        await loadUnreadAlertsCount(user.id)
       }
       if (Platform.OS !== 'web') {
         void registerPushTokenSilently()
       }
     }
     void load()
-  }, [loadUnreadAlertsCount, loadUnreadDmCount])
+  }, [loadUnreadAlertsCount])
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active' && userId && !workspaceOnlyTabs) {
-        void loadUnreadDmCount(userId)
         void loadUnreadAlertsCount(userId)
       }
     })
     return () => sub.remove()
-  }, [loadUnreadAlertsCount, loadUnreadDmCount, userId, workspaceOnlyTabs])
+  }, [loadUnreadAlertsCount, userId, workspaceOnlyTabs])
 
   useEffect(() => {
     return subscribeAlertsInvalidate(() => {
       if (userId && !workspaceOnlyTabs) void loadUnreadAlertsCount(userId)
     })
   }, [loadUnreadAlertsCount, userId, workspaceOnlyTabs])
-
-  useEffect(() => {
-    return subscribeDmBadgeInvalidate(() => {
-      if (userId && !workspaceOnlyTabs) void loadUnreadDmCount(userId)
-    })
-  }, [loadUnreadDmCount, userId, workspaceOnlyTabs])
 
   /** iOS home-screen badge mirrors unread DM + Alerts (tab dots stay source of truth). */
   useEffect(() => {
@@ -179,33 +129,6 @@ export default function TabLayout() {
     await markGoodNewsModalShownToday()
     setGoodNewsPopup(null)
   }, [])
-
-  /** Polling fallback when Realtime is off or WebSocket misses events (badges stay fresh). */
-  useEffect(() => {
-    if (!userId || workspaceOnlyTabs) return
-    const id = setInterval(() => void loadUnreadDmCount(userId), 10000)
-    return () => clearInterval(id)
-  }, [loadUnreadDmCount, userId, workspaceOnlyTabs])
-
-  useEffect(() => {
-    if (!userId || workspaceOnlyTabs) return
-    const topic = `tabs-unread-dm-${userId}-${++realtimeTopicSeq}`
-    const channel = supabase
-      .channel(topic)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
-        void loadUnreadDmCount(userId)
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
-        void loadUnreadDmCount(userId)
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_archives' }, () => {
-        void loadUnreadDmCount(userId)
-      })
-      .subscribe()
-    return () => {
-      void supabase.removeChannel(channel)
-    }
-  }, [loadUnreadDmCount, userId, workspaceOnlyTabs])
 
   useEffect(() => {
     if (!userId || workspaceOnlyTabs) return
@@ -255,6 +178,7 @@ export default function TabLayout() {
         onDismiss={dismissGoodNewsPopup}
       />
       <Tabs
+        initialRouteName="feed"
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
@@ -275,11 +199,20 @@ export default function TabLayout() {
         }}
       >
         <Tabs.Screen
-          name="dashboard"
+          name="feed"
           options={{
-            title: 'Home',
+            title: 'Feed',
             tabBarIcon: ({ color, size }) => (
               <House size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="dashboard"
+          options={{
+            title: 'Dashboard',
+            tabBarIcon: ({ color, size }) => (
+              <LayoutDashboard size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
             ),
           }}
         />
@@ -306,32 +239,13 @@ export default function TabLayout() {
         <Tabs.Screen
           name="messages"
           options={{
-            href: workspaceOnlyTabs ? null : '/messages',
+            href: null,
             title: 'Messages',
-            tabBarIcon: ({ color, size }) => (
-              <View>
-                <MessageCircle size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
-                {unreadDmCount > 0 ? (
-                  <View
-                    style={{
-                      position: 'absolute',
-                      top: -2,
-                      right: -4,
-                      width: 9,
-                      height: 9,
-                      borderRadius: 999,
-                      backgroundColor: '#ff2d55',
-                    }}
-                  />
-                ) : null}
-              </View>
-            ),
           }}
         />
         <Tabs.Screen
           name="notifications"
           options={{
-            href: workspaceOnlyTabs ? null : '/notifications',
             title: 'Alerts',
             tabBarIcon: ({ color, size }) => (
               <View>

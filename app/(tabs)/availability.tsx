@@ -261,7 +261,7 @@ export default function AvailabilityScreen() {
     }
 
     Alert.alert('Saved', 'Your availability calendar was updated.', [
-      { text: 'OK', onPress: () => router.replace('/(tabs)/dashboard') },
+      { text: 'OK', onPress: () => router.replace('/(tabs)/feed') },
     ])
   }
 
@@ -279,7 +279,7 @@ export default function AvailabilityScreen() {
         <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => router.replace('/(tabs)/dashboard')}
+            onPress={() => router.replace('/(tabs)/feed')}
             hitSlop={12}
           >
             <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
@@ -305,7 +305,7 @@ export default function AvailabilityScreen() {
         <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => router.replace('/(tabs)/dashboard')}
+            onPress={() => router.replace('/(tabs)/feed')}
             hitSlop={12}
           >
             <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />

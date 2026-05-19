@@ -60,9 +60,12 @@ import {
   parsePortfolioProjects,
 } from '@/lib/profileSettingsExtras'
 import { registerForExpoPushTokenAsync } from '@/lib/pushNotifications'
+import { CreaProfileTabSkeleton } from '@/components/CreaLoading'
+import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
 import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
 import { resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { postTrialPlan } from '@/lib/trialPlanApi'
+import { setBillingNotice } from '@/lib/billingNotice'
 import {
   fetchFreelancerStripeConnectFromSupabase,
   fetchFreelancerStripeConnectStatus,
@@ -83,7 +86,8 @@ import {
   isWithinPlatformTrialPeriod,
 } from '@/lib/platformTrial'
 
-const SUPPORT_MAIL = 'mailto:support@crea.app?subject=CREA%20App%20Support'
+const SUPPORT_EMAIL = 'support@creaservices.com'
+const SUPPORT_MAILTO = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('CREA App Support')}`
 const TAB_BAR_HEIGHT = 80
 
 type MenuId =
@@ -326,6 +330,7 @@ export default function ProfileScreen() {
   const ceo = isCeoProfile(role)
   const company = isCompanyProfile(role)
   const workspacePlan = freelancer && subscriptionTier === 'workspace'
+  const { unreadDmCount } = useUnreadDmCount(authUserId, !workspacePlan)
   const trialEndLabel = useMemo(
     () => formatPlatformTrialEndDate(trialEndsAt, accountCreatedAt),
     [trialEndsAt, accountCreatedAt]
@@ -709,6 +714,7 @@ export default function ProfileScreen() {
                 : res.error === 'network_error'
                   ? 'Network error while switching plan. Please try again.'
                   : res.error || 'Please try again later.'
+          void setBillingNotice(errorCopy)
           Alert.alert(
             'Could not switch plan',
             errorCopy
@@ -1103,8 +1109,16 @@ export default function ProfileScreen() {
   }
 
   const openHelp = () => {
-    Linking.openURL(SUPPORT_MAIL).catch(() => {
-      Alert.alert('Help', 'Please email support@crea.app')
+    void Linking.openURL(SUPPORT_MAILTO).catch(() => {
+      Alert.alert('Contact support', `Could not open Mail. Email us at ${SUPPORT_EMAIL}`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Open Mail',
+          onPress: () => {
+            void Linking.openURL(SUPPORT_MAILTO)
+          },
+        },
+      ])
     })
   }
 
@@ -1166,9 +1180,9 @@ export default function ProfileScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <CreaProfileTabSkeleton />
+      </SafeAreaView>
     )
   }
 
@@ -1191,6 +1205,17 @@ export default function ProfileScreen() {
         <View style={styles.headerRow}>
           <Text style={styles.brand}>Crea</Text>
           <View style={styles.headerRight}>
+            {!workspacePlan ? (
+              <TouchableOpacity
+                style={styles.headerShareBtn}
+                onPress={() => router.push('/(tabs)/messages')}
+                hitSlop={10}
+                accessibilityLabel="Messages"
+              >
+                <MessageCircle size={20} color="rgba(255,255,255,0.55)" strokeWidth={ICON_STROKE} />
+                {unreadDmCount > 0 ? <View style={styles.headerMsgDot} /> : null}
+              </TouchableOpacity>
+            ) : null}
             {(freelancer || company) && authUserId ? (
               <TouchableOpacity
                 style={styles.headerShareBtn}
@@ -2749,7 +2774,16 @@ const styles = StyleSheet.create({
   },
   brand: { fontSize: 22, fontWeight: '900', color: '#FFDC00', letterSpacing: 1 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  headerShareBtn: { padding: 4 },
+  headerShareBtn: { padding: 4, position: 'relative' },
+  headerMsgDot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#ff2d55',
+  },
   roleBadge: {
     backgroundColor: 'rgba(255,220,0,0.1)',
     borderRadius: 100,

@@ -21,6 +21,12 @@ import { invalidateAlertsBadge } from '@/lib/invalidateAlerts'
 import { getCache, setCache } from '@/lib/appCache'
 import { runTimed } from '@/lib/perfMarks'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
+import { TabScreenHeader } from '@/components/TabScreenHeader'
+import {
+  isFreelancerWorkspaceOnlyPlan,
+  resolveFreelancerPlanFromUserAndProfileTier,
+} from '@/lib/freelancerPlan'
+import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 
 function timeAgo(str: string) {
   const t = new Date(str).getTime()
@@ -41,6 +47,7 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
+  const [showMessages, setShowMessages] = useState(true)
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadInFlight = useRef<Promise<void> | null>(null)
 
@@ -59,6 +66,16 @@ export default function NotificationsScreen() {
             return
           }
           setUserId(user.id)
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role, subscription_tier')
+            .eq('id', user.id)
+            .maybeSingle()
+          const role = resolveAppRole(profile?.role, user)
+          const plan = resolveFreelancerPlanFromUserAndProfileTier(user, profile?.subscription_tier)
+          const workspaceOnly =
+            isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(plan)
+          setShowMessages(!workspaceOnly)
           const cacheKey = `notifications:${user.id}`
           const cached = getCache<{ rows: NotificationRow[]; reads: string[] }>(cacheKey)
           if (cached) {
@@ -177,8 +194,8 @@ export default function NotificationsScreen() {
   const showInitialSkeleton = loading && rows.length === 0
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <Text style={styles.title}>Alerts</Text>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <TabScreenHeader title="Alerts" showMessages={showMessages} />
       <FlatList
         data={rows}
         keyExtractor={(r) => r.id}
@@ -233,16 +250,7 @@ export default function NotificationsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
-  title: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: '#ffffff',
-    letterSpacing: 1,
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
-  },
-  list: { paddingHorizontal: 20, paddingBottom: 36, flexGrow: 1 },
+  list: { paddingHorizontal: 20, paddingBottom: 36, flexGrow: 1, paddingTop: 4 },
   card: {
     borderRadius: 14,
     borderWidth: 1,

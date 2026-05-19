@@ -398,7 +398,7 @@ export default function InvoicesListScreen() {
         <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => router.replace('/(tabs)/dashboard')}
+            onPress={() => router.replace('/(tabs)/feed')}
             hitSlop={12}
           >
             <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />

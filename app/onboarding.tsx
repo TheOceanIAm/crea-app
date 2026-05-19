@@ -75,13 +75,13 @@ export default function OnboardingScreen() {
           'Database update needed',
           'Run supabase/sql/add_profile_onboarding.sql in the Supabase SQL Editor, then reopen the app.'
         )
-        router.replace('/(tabs)/dashboard')
+        router.replace('/(tabs)/feed')
         return
       }
     }
 
     if (!profileNeedsOnboarding(profile)) {
-      router.replace('/(tabs)/dashboard')
+      router.replace('/(tabs)/feed')
       return
     }
     setChecking(false)
@@ -200,7 +200,7 @@ export default function OnboardingScreen() {
       console.warn('[onboarding] auth.updateUser metadata:', metaErr.message)
     }
 
-    router.replace('/(tabs)/dashboard')
+    router.replace('/(tabs)/feed')
   }
 
   const goBack = () => {

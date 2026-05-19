@@ -9,7 +9,7 @@ import { getDevDemoLinkedProjectId, isDevDemoWorkspaceRouteEnabled } from '@/lib
  */
 export default function DevDemoProjectScreen() {
   if (!isDevDemoWorkspaceRouteEnabled()) {
-    return <Redirect href="/(tabs)/dashboard" />
+    return <Redirect href="/(tabs)/feed" />
   }
   const realId = getDevDemoLinkedProjectId()
   if (realId) {
