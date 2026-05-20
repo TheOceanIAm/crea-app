@@ -10,6 +10,7 @@ import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
 import { AppBootstrapOverlayProvider } from '@/contexts/AppBootstrapOverlayContext'
+import { RevenueCatProvider } from '@/contexts/RevenueCatContext'
 import {
   consumeInitialSupabaseAuthUrlForBootstrap,
   handleSupabaseAuthCallbackUrl,
@@ -108,6 +109,7 @@ export default function RootLayout() {
         urlScheme="crea"
       >
         <AppBootstrapOverlayProvider>
+          <RevenueCatProvider>
             <BootstrapAuthGate>
             <AuthDeepLinkBridge />
             <SubscriptionPaywallGate />
@@ -146,8 +148,16 @@ export default function RootLayout() {
             <Stack.Screen name="profile/[userId]" />
             <Stack.Screen name="conversation/[id]" />
             <Stack.Screen name="project" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="paywall"
+              options={{
+                animation: 'slide_from_bottom',
+                presentation: 'modal',
+              }}
+            />
           </Stack>
           </BootstrapAuthGate>
+          </RevenueCatProvider>
         </AppBootstrapOverlayProvider>
       </StripeProvider>
     </GestureHandlerRootView>

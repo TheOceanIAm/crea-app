@@ -415,71 +415,74 @@ export default function JobDetailScreen() {
   const submitApplication = async (appliedRole: string | null) => {
     if (!uid || !job) return
     setApplyBusy(true)
-    const result = await applyToJobViaWebApi(job.id, appliedRole)
-    setApplyBusy(false)
-    if (!result.ok) {
-      const msg = result.error ?? ''
-      if (msg === 'applied_role_required') {
-        Alert.alert('Choose a role', 'Please select which role you are applying for.')
-        setRolePickerOpen(true)
+    try {
+      const result = await applyToJobViaWebApi(job.id, appliedRole)
+      if (!result.ok) {
+        const msg = result.error ?? ''
+        if (msg === 'applied_role_required') {
+          Alert.alert('Choose a role', 'Please select which role you are applying for.')
+          setRolePickerOpen(true)
+          return
+        }
+        if (msg === 'invalid_applied_role') {
+          Alert.alert('Invalid role', 'That role is not listed on this job.')
+          return
+        }
+        if (msg === 'already_applied') {
+          Alert.alert('Already applied', 'You have already applied to this job.')
+          setApplied(true)
+          setApplicationStatus('pending')
+          return
+        }
+        if (msg === 'cannot_apply_to_own_job') {
+          Alert.alert('Could not apply', 'You cannot apply to your own job listing.')
+          return
+        }
+        if (msg === 'job_not_active' || msg === 'job_not_found') {
+          Alert.alert('Could not apply', 'This job is no longer open for applications.')
+          return
+        }
+        if (msg === 'freelancer_profile_required') {
+          Alert.alert(
+            'Profile required',
+            'Complete your freelancer profile before applying to marketplace jobs.'
+          )
+          return
+        }
+        if (msg === 'beta_trial_ended_new_job_work_not_allowed') {
+          Alert.alert(
+            'Trial ended',
+            'Your beta trial has ended. Upgrade your plan to apply to new jobs.'
+          )
+          return
+        }
+        if (msg === 'missing_web_url' || msg === 'network_error' || msg === 'network_timeout') {
+          Alert.alert(
+            'Could not apply',
+            'Could not reach CREA. Check your connection and try again.'
+          )
+          return
+        }
+        Alert.alert('Could not apply', msg || 'Something went wrong. Please try again.')
         return
       }
-      if (msg === 'invalid_applied_role') {
-        Alert.alert('Invalid role', 'That role is not listed on this job.')
-        return
-      }
-      if (msg === 'already_applied') {
+      if (result.alreadyApplied) {
         Alert.alert('Already applied', 'You have already applied to this job.')
         setApplied(true)
         setApplicationStatus('pending')
         return
       }
-      if (msg === 'cannot_apply_to_own_job') {
-        Alert.alert('Could not apply', 'You cannot apply to your own job listing.')
-        return
-      }
-      if (msg === 'job_not_active' || msg === 'job_not_found') {
-        Alert.alert('Could not apply', 'This job is no longer open for applications.')
-        return
-      }
-      if (msg === 'freelancer_profile_required') {
-        Alert.alert(
-          'Profile required',
-          'Complete your freelancer profile before applying to marketplace jobs.'
-        )
-        return
-      }
-      if (msg === 'beta_trial_ended_new_job_work_not_allowed') {
-        Alert.alert(
-          'Trial ended',
-          'Your beta trial has ended. Upgrade your plan to apply to new jobs.'
-        )
-        return
-      }
-      if (msg === 'missing_web_url' || msg === 'network_error') {
-        Alert.alert(
-          'Could not apply',
-          'Could not reach CREA. Check your connection and try again.'
-        )
-        return
-      }
-      Alert.alert('Could not apply', msg || 'Something went wrong. Please try again.')
-      return
-    }
-    if (result.alreadyApplied) {
-      Alert.alert('Already applied', 'You have already applied to this job.')
       setApplied(true)
       setApplicationStatus('pending')
-      return
+      setRolePickerOpen(false)
+      setApplicantsCount((c) => c + 1)
+      if (result.applicationId) {
+        void notifyExpoEvent({ kind: 'job_application', applicationId: result.applicationId })
+      }
+      Alert.alert('Applied', 'The company will see your application.')
+    } finally {
+      setApplyBusy(false)
     }
-    setApplied(true)
-    setApplicationStatus('pending')
-    setRolePickerOpen(false)
-    setApplicantsCount((c) => c + 1)
-    if (result.applicationId) {
-      void notifyExpoEvent({ kind: 'job_application', applicationId: result.applicationId })
-    }
-    Alert.alert('Applied', 'The company will see your application.')
   }
 
   const onApply = () => {

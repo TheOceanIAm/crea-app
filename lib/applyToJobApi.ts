@@ -3,6 +3,17 @@ import { supabase } from '@/lib/supabase'
 
 export type JobApplicationStatus = 'none' | 'pending' | 'accepted' | 'declined'
 
+const APPLY_FETCH_TIMEOUT_MS = 12_000
+
+const RPC_APPLY_ERRORS = new Set([
+  'already_applied',
+  'job_not_found',
+  'cannot_apply_to_own_job',
+  'job_not_active',
+  'authentication required',
+  'freelancer_profile_required',
+])
+
 function webBases(): string[] {
   const base = getCreaWebBaseUrl()
   if (!base) return []
@@ -29,6 +40,34 @@ async function authHeaders(): Promise<{ headers: Record<string, string>; error?:
 function normalizeApplicationStatus(raw: unknown): JobApplicationStatus {
   if (raw === 'pending' || raw === 'accepted' || raw === 'declined') return raw
   return 'none'
+}
+
+function parseApplyErrorMessage(error: {
+  message?: string | null
+  details?: string | null
+  hint?: string | null
+  code?: string | null
+}): string {
+  const blob = [error.message, error.details, error.hint].filter(Boolean).join(' ').toLowerCase()
+  if (blob.includes('already_applied')) return 'already_applied'
+  if (blob.includes('job_not_found')) return 'job_not_found'
+  if (blob.includes('cannot_apply_to_own_job')) return 'cannot_apply_to_own_job'
+  if (blob.includes('job_not_active')) return 'job_not_active'
+  if (blob.includes('authentication required')) return 'no_session'
+  if (blob.includes('freelancer_profile_required')) return 'freelancer_profile_required'
+  if (blob.includes('beta_trial_ended')) return 'beta_trial_ended_new_job_work_not_allowed'
+  if (error.code === '42883' || blob.includes('does not exist')) return 'rpc_unavailable'
+  return error.message?.trim() || 'apply_failed'
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), APPLY_FETCH_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** Read application + workspace access via Supabase (RLS), not the web API — reliable in dev/offline web. */
@@ -94,7 +133,55 @@ export async function fetchJobApplicationStatus(jobId: string): Promise<{
   }
 }
 
-export async function applyToJobViaWebApi(
+async function applyToJobViaSupabaseRpc(
+  jobId: string,
+  appliedRole?: string | null
+): Promise<{
+  ok: boolean
+  applicationId?: string
+  error?: string
+  alreadyApplied?: boolean
+  fallback?: boolean
+}> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'no_session' }
+
+  const roleParam = appliedRole && String(appliedRole).trim() ? String(appliedRole).trim() : null
+  const { data, error } = await supabase.rpc('freelancer_apply_to_job', {
+    p_job_id: jobId,
+    p_applied_role: roleParam,
+  })
+
+  if (!error) {
+    const applicationId = typeof data === 'string' ? data : data != null ? String(data) : undefined
+    return { ok: true, applicationId }
+  }
+
+  const code = parseApplyErrorMessage(error)
+  if (code === 'already_applied') {
+    const { data: existing } = await supabase
+      .from('job_applications')
+      .select('id')
+      .eq('job_id', jobId)
+      .eq('freelancer_id', user.id)
+      .maybeSingle()
+    return {
+      ok: true,
+      alreadyApplied: true,
+      applicationId: typeof existing?.id === 'string' ? existing.id : undefined,
+    }
+  }
+
+  if (RPC_APPLY_ERRORS.has(code)) {
+    return { ok: false, error: code }
+  }
+
+  return { ok: false, error: code, fallback: true }
+}
+
+async function applyToJobViaWebApiInternal(
   jobId: string,
   appliedRole?: string | null
 ): Promise<{
@@ -108,9 +195,11 @@ export async function applyToJobViaWebApi(
   const { headers, error: authError } = await authHeaders()
   if (authError) return { ok: false, error: authError }
 
+  let lastError = 'network_error'
+
   for (const base of bases) {
     try {
-      const res = await fetch(`${base}/api/freelancer/apply-to-job`, {
+      const res = await fetchWithTimeout(`${base}/api/freelancer/apply-to-job`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -126,12 +215,39 @@ export async function applyToJobViaWebApi(
         return { ok: true, alreadyApplied: true, applicationId: j.applicationId }
       }
       if (!res.ok) {
-        return { ok: false, error: j.error || `HTTP ${res.status}` }
+        lastError = j.error || `HTTP ${res.status}`
+        continue
       }
       return { ok: true, applicationId: j.applicationId }
-    } catch {
+    } catch (e) {
+      lastError = e instanceof Error && e.name === 'AbortError' ? 'network_timeout' : 'network_error'
       continue
     }
   }
-  return { ok: false, error: 'network_error' }
+
+  return { ok: false, error: lastError }
+}
+
+/** Apply via Supabase RPC first; web API is fallback when RPC is unavailable. */
+export async function applyToJobViaWebApi(
+  jobId: string,
+  appliedRole?: string | null
+): Promise<{
+  ok: boolean
+  applicationId?: string
+  error?: string
+  alreadyApplied?: boolean
+}> {
+  const rpc = await applyToJobViaSupabaseRpc(jobId, appliedRole)
+  if (rpc.ok || !rpc.fallback) {
+    return rpc
+  }
+
+  const web = await applyToJobViaWebApiInternal(jobId, appliedRole)
+  if (web.ok) return web
+
+  return {
+    ok: false,
+    error: web.error === 'missing_web_url' ? rpc.error ?? web.error : web.error ?? rpc.error,
+  }
 }

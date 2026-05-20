@@ -42,10 +42,10 @@ import { LocationAutocompleteInput } from '@/components/LocationAutocompleteInpu
 import { supabase } from '@/lib/supabase'
 import { deleteAccountViaApi } from '@/lib/deleteAccountApi'
 import {
-  IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY,
   openCreaWebsiteInBrowser,
   getCreaMarketingSiteUrl,
 } from '@/lib/iosAppStoreCompliance'
+import { useSubscription } from '@/hooks/useSubscription'
 import { ICON_STROKE, ICON_STROKE_LARGE } from '@/lib/iconTheme'
 import { pickAndUploadProfileAvatar } from '@/lib/uploadProfileAvatar'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
@@ -339,6 +339,7 @@ export default function ProfileScreen() {
   const company = isCompanyProfile(role)
   const workspacePlan = freelancer && subscriptionTier === 'workspace'
   const { unreadDmCount } = useUnreadDmCount(authUserId, !workspacePlan)
+  const { isSubscribed: iosStoreSubscribed, currentPlan: iosStorePlan } = useSubscription()
   const trialEndLabel = useMemo(
     () => formatPlatformTrialEndDate(trialEndsAt, accountCreatedAt),
     [trialEndsAt, accountCreatedAt]
@@ -1267,7 +1268,7 @@ export default function ProfileScreen() {
     )
   }
 
-  const bottomPad = TAB_BAR_HEIGHT + insets.bottom + 28
+  const bottomPad = TAB_BAR_HEIGHT + insets.bottom + (activeMenu === 'plan' ? 48 : 28)
 
   const placeholder = (title: string, body: string) => (
     <View style={styles.sectionCard}>
@@ -2079,33 +2080,45 @@ export default function ProfileScreen() {
           )}
 
           {activeMenu === 'plan' ? (
-            IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY ? (
+            Platform.OS === 'ios' ? (
               <View style={styles.sectionCard}>
                 <Text style={styles.cardTitle}>Plan</Text>
                 <Text style={styles.cardSubtitle}>
-                  Your tier and the options below explain what each plan includes. Paid upgrades, downgrades, and billing
-                  are handled on creaservices.de (required on iOS).
+                  Your current tier and what each plan includes. Subscribe or upgrade in the app with Apple In-App
+                  Purchase. Plan changes and billing details on the web open in your browser.
                 </Text>
 
                 <CurrentPlanSummary
                   company={company}
                   companyPlanTier={companyPlanTier}
-                  subscriptionTier={subscriptionTier}
+                  subscriptionTier={
+                    iosStoreSubscribed && iosStorePlan !== 'free'
+                      ? iosStorePlan === 'starter'
+                        ? 'starter'
+                        : iosStorePlan === 'pro'
+                          ? 'pro'
+                          : iosStorePlan === 'studio'
+                            ? 'studio'
+                            : iosStorePlan === 'agency'
+                              ? 'agency'
+                              : subscriptionTier
+                      : subscriptionTier
+                  }
                 />
 
-                {!ceo && !stripeCustomerId && inPlatformTrial ? (
+                {!ceo && !iosStoreSubscribed && inPlatformTrial ? (
                   <View style={[styles.trialBanner, { marginTop: 14 }]}>
                     <Text style={styles.trialBannerText}>
                       <Text style={styles.trialBannerStrong}>Trial</Text> until{' '}
                       <Text style={styles.trialBannerStrong}>{trialEndLabel}</Text>
-                      {' — '}same window as on the web. Subscribe on creaservices.de when you are ready.
+                      {' — '}new subscribers get 3 months free via the App Store, then monthly billing.
                     </Text>
                   </View>
-                ) : !ceo && !stripeCustomerId ? (
+                ) : !ceo && !iosStoreSubscribed ? (
                   <View style={[styles.trialBanner, { marginTop: 14 }]}>
                     <Text style={styles.trialBannerText}>
-                      <Text style={styles.trialBannerStrong}>Trial ended.</Text> Upgrade or manage billing on
-                      creaservices.de.
+                      <Text style={styles.trialBannerStrong}>Trial ended.</Text> Choose a plan below to subscribe with
+                      your Apple ID.
                     </Text>
                   </View>
                 ) : null}
@@ -2117,127 +2130,77 @@ export default function ProfileScreen() {
                   activeOpacity={0.7}
                   hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
                 >
-                  <Text style={styles.planIosPricingHeading}>Pricing &amp; features</Text>
+                  <Text style={styles.planIosPricingHeading}>Full feature comparison</Text>
                 </TouchableOpacity>
 
                 {company ? (
                   <>
                     <PlanRow
                       title="Studio"
-                      price="€89 / month"
+                      price="App Store pricing"
                       desc="Up to 5 active project listings, crew pool up to 20, contract generator, standard support."
-                      cta={companyPlanTier === 'studio' ? 'Your plan' : 'Change on web'}
-                      current={companyPlanTier === 'studio'}
-                      disabled={companyPlanTier === 'studio'}
-                      onPress={() =>
-                        void Linking.openURL(
-                          `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/settings/company`
-                        ).catch(() => {})
-                      }
+                      cta={iosStorePlan === 'studio' ? 'Your plan' : 'View in App Store'}
+                      current={iosStorePlan === 'studio'}
+                      disabled={iosStorePlan === 'studio'}
+                      onPress={() => router.push('/paywall')}
                     />
                     <PlanRow
                       title="Agency"
-                      price="€129 / month"
+                      price="App Store pricing"
                       desc="Up to 15 listings, crew pool up to 50, team access (up to 3 users), integrations + priority support."
-                      cta={companyPlanTier === 'agency' ? 'Your plan' : 'Change on web'}
-                      current={companyPlanTier === 'agency'}
-                      disabled={companyPlanTier === 'agency'}
-                      onPress={() =>
-                        void Linking.openURL(
-                          `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/settings/company`
-                        ).catch(() => {})
-                      }
-                    />
-                    <PlanRow
-                      title="Business"
-                      price="€249 / month"
-                      desc="Unlimited listings/pool, legal automation, company insurance, team access (up to 5 users)."
-                      cta="Coming soon"
-                      current={companyPlanTier === 'business'}
-                      disabled
-                      onPress={() =>
-                        Alert.alert('Business', 'This tier is coming soon — check creaservices.de for updates.')
-                      }
-                    />
-                    <PlanRow
-                      title="Enterprise"
-                      price="Custom pricing"
-                      desc="Tailored setup for large companies: dedicated account manager, custom legal setup and integrations."
-                      cta={companyPlanTier === 'enterprise' ? 'Your plan' : 'Contact sales'}
-                      current={companyPlanTier === 'enterprise'}
-                      disabled={companyPlanTier === 'enterprise'}
-                      onPress={() => {
-                        if (companyPlanTier === 'enterprise') return
-                        Linking.openURL(
-                          'mailto:sales@creaservices.de?subject=Enterprise%20Plan%20Inquiry%20-%20Crea'
-                        ).catch(() => {})
-                      }}
+                      cta={iosStorePlan === 'agency' ? 'Your plan' : 'View in App Store'}
+                      current={iosStorePlan === 'agency'}
+                      disabled={iosStorePlan === 'agency'}
+                      onPress={() => router.push('/paywall')}
                     />
                   </>
                 ) : (
                   <>
                     <PlanRow
-                      title="Workspace"
-                      price="€0 / month"
-                      desc="Solo workspace mode: private workflow, no talent-pool visibility, no marketplace DMs."
-                      cta={subscriptionTier === 'workspace' ? 'Your plan' : 'Change on web'}
-                      current={subscriptionTier === 'workspace'}
-                      disabled={subscriptionTier === 'workspace'}
-                      onPress={() =>
-                        void Linking.openURL(
-                          `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/settings/freelancer`
-                        ).catch(() => {})
-                      }
-                    />
-                    <PlanRow
                       title="Starter"
-                      price="€9 / month"
+                      price="App Store pricing"
                       desc="Basic profile, basic project feed, 2 active bookings/month, standard support."
-                      cta={subscriptionTier === 'starter' ? 'Your plan' : 'Change on web'}
-                      current={subscriptionTier === 'starter'}
-                      disabled={subscriptionTier === 'starter'}
-                      onPress={() =>
-                        void Linking.openURL(
-                          `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/settings/freelancer`
-                        ).catch(() => {})
-                      }
+                      cta={iosStorePlan === 'starter' ? 'Your plan' : 'View in App Store'}
+                      current={iosStorePlan === 'starter'}
+                      disabled={iosStorePlan === 'starter'}
+                      onPress={() => router.push('/paywall')}
                     />
                     <PlanRow
                       title="Pro"
-                      price="€19 / month"
+                      price="App Store pricing"
                       desc="Everything in Starter + post project listings, 5 active bookings/month, Project feed+."
-                      cta={subscriptionTier === 'pro' ? 'Your plan' : 'Change on web'}
-                      current={subscriptionTier === 'pro'}
-                      disabled={subscriptionTier === 'pro'}
-                      onPress={() =>
-                        void Linking.openURL(
-                          `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/settings/freelancer`
-                        ).catch(() => {})
-                      }
-                    />
-                    <PlanRow
-                      title="Premium"
-                      price="€49 / month"
-                      desc="Everything in Pro, plus verified badge, liability insurance, legal docs and tax/accounting tools."
-                      cta="Coming soon"
-                      current={subscriptionTier === 'premium'}
-                      disabled
-                      onPress={() => Alert.alert('Premium', 'This tier is coming soon — see creaservices.de for updates.')}
+                      cta={iosStorePlan === 'pro' ? 'Your plan' : 'View in App Store'}
+                      current={iosStorePlan === 'pro'}
+                      disabled={iosStorePlan === 'pro'}
+                      onPress={() => router.push('/paywall')}
                     />
                   </>
                 )}
 
-                <Text style={styles.stripeFoot}>
-                  Use Plan &amp; billing under Settings on the website to switch tiers or update payment details.
-                </Text>
+                <View style={styles.planIosFooter}>
+                  <Text style={[styles.stripeFoot, styles.planIosStripeFoot]}>
+                    Subscriptions are managed through your Apple Account. For plan changes on the web, use
+                    creaservices.de in Safari.
+                  </Text>
 
-                <TouchableOpacity
-                  style={styles.primaryBtn}
-                  onPress={() => void openCreaWebsiteInBrowser()}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.primaryBtnText}>Open creaservices.de</Text>
-                </TouchableOpacity>
+                  {!ceo && !iosStoreSubscribed ? (
+                    <TouchableOpacity
+                      style={[styles.primaryBtn, styles.planIosFooterBtn]}
+                      onPress={() => router.push('/paywall')}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.primaryBtnText}>Subscribe in app</Text>
+                    </TouchableOpacity>
+                  ) : null}
+
+                  <TouchableOpacity
+                    style={[styles.secondaryBtn, styles.planIosFooterBtn, styles.planIosFooterBtnLast]}
+                    onPress={() => void openCreaWebsiteInBrowser()}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.secondaryBtnText}>Manage on creaservices.de</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             ) : (
             <>
@@ -3188,6 +3151,23 @@ const styles = StyleSheet.create({
   currentPlanDesc: { fontSize: 13, color: 'rgba(255,255,255,0.45)', lineHeight: 18 },
   stripeHint: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginBottom: 10, lineHeight: 17 },
   stripeFoot: { fontSize: 11, color: 'rgba(255,255,255,0.28)', marginTop: 16, lineHeight: 16 },
+  planIosFooter: {
+    marginTop: 12,
+    gap: 16,
+    paddingBottom: 8,
+  },
+  planIosStripeFoot: {
+    marginTop: 0,
+    marginBottom: 4,
+    lineHeight: 18,
+  },
+  planIosFooterBtn: {
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  planIosFooterBtnLast: {
+    marginBottom: 4,
+  },
   planRowCard: {
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',

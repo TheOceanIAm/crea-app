@@ -2,10 +2,10 @@ import { Linking, Platform } from 'react-native'
 import { getCreaWebBaseUrl } from '@/lib/creaWeb'
 
 /**
- * Apple Guideline 3.1.1: do not present subscription purchase, plan comparison,
- * or in-app Stripe checkout for paid tiers on iOS — send users to the website.
+ * iOS uses RevenueCat / App Store subscriptions in-app (`/paywall`).
+ * Stripe checkout for subscriptions stays on Android and web.
  */
-export const IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY = Platform.OS === 'ios'
+export const IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY = false
 
 /**
  * When true, Login/Register show “sign up on creaservices.de” instead of the in-app form.

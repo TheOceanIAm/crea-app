@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { Platform } from "react-native";
 import { usePathname, useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { mustSubscribeToContinue } from "@/lib/mustSubscribeToContinue";
+import { getSubscriptionStatus } from "@/lib/subscriptionStatus";
 
 function normalizePath(pathname: string | null | undefined): string {
   if (!pathname?.trim()) return "/";
@@ -10,7 +12,6 @@ function normalizePath(pathname: string | null | undefined): string {
   return t.length > 1 && t.endsWith("/") ? t.slice(0, -1) : t;
 }
 
-/** Main Profile tab (Plan & billing). Covers file route `/profile` and group segments like `/(tabs)/profile`. */
 function isProfilePlanTabPath(path: string): boolean {
   const n = normalizePath(path);
   if (n.includes("profile-preview")) return false;
@@ -19,20 +20,20 @@ function isProfilePlanTabPath(path: string): boolean {
   return last === "profile";
 }
 
-/** Routes that stay reachable without Stripe after platform trial (matches web paywall exemptions in spirit). */
 function isPaywallAllowedRoute(path: string): boolean {
   const n = normalizePath(path);
   if (n === "/" || n === "/index") return true;
   if (n === "/login" || n === "/register" || n === "/forgot-password") return true;
   if (n.startsWith("/auth")) return true;
   if (n === "/onboarding") return true;
+  if (n === "/paywall") return true;
   if (isProfilePlanTabPath(n)) return true;
   return false;
 }
 
 /**
- * After platform trial, freelancer/company users must subscribe (Stripe) before using product surfaces.
- * Keeps auth/onboarding and the Profile tab reachable so they can complete checkout.
+ * After platform trial, freelancer/company users must subscribe before using product surfaces.
+ * iOS: RevenueCat App Store subscription; Android/web: Stripe (metadata).
  */
 export function SubscriptionPaywallGate() {
   const router = useRouter();
@@ -51,10 +52,34 @@ export function SubscriptionPaywallGate() {
       }
       const { data: pr } = await supabase
         .from("profiles")
-        .select("role, trial_ends_at, beta_invite, created_at, beta_access_days")
+        .select("role, trial_ends_at, beta_invite, created_at, beta_access_days, subscription_tier")
         .eq("id", user.id)
         .maybeSingle();
+
+      let companyPlan: string | null = null;
+      const role = String(pr?.role ?? "").toLowerCase();
+      if (role === "company") {
+        const { data: cp } = await supabase
+          .from("company_profiles")
+          .select("subscription_plan")
+          .eq("id", user.id)
+          .maybeSingle();
+        companyPlan = (cp as { subscription_plan?: string } | null)?.subscription_plan ?? null;
+      }
+
+      const status = await getSubscriptionStatus({
+        user,
+        profile: pr,
+        companySubscriptionPlan: companyPlan,
+      });
+
       if (cancelled) return;
+
+      if (status.isSubscribed) {
+        setPaywall(false);
+        return;
+      }
+
       setPaywall(mustSubscribeToContinue(user, pr));
     };
     void run();
@@ -73,6 +98,10 @@ export function SubscriptionPaywallGate() {
     if (!paywall) return;
     const p = pathname ?? "";
     if (isPaywallAllowedRoute(p)) return;
+    if (Platform.OS === "ios") {
+      router.replace("/paywall");
+      return;
+    }
     router.replace("/(tabs)/profile");
   }, [paywall, pathname, router]);
 
