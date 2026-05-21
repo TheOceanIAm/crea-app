@@ -5,6 +5,7 @@ import {
   Linking,
 } from 'react-native'
 import { router } from 'expo-router'
+import Purchases from 'react-native-purchases'
 import { supabase } from '@/lib/supabase'
 import {
   IOS_SIGNUP_ON_WEB_ONLY,
@@ -19,9 +20,16 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     if (!email || !password) return
     setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     setLoading(false)
     if (error) { Alert.alert('Error', error.message); return }
+    if (data.user?.id) {
+      try {
+        await Purchases.logIn(data.user.id)
+      } catch (e) {
+        console.warn('[RevenueCat] logIn after login failed', e)
+      }
+    }
     router.replace('/')
   }
 

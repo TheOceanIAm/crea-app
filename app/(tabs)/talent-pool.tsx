@@ -17,6 +17,7 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { ChevronLeft, MapPin, Star } from 'lucide-react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '@/lib/supabase'
+import { getCache, setCache } from '@/lib/appCache'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { isFreelancerTalentPoolPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -45,6 +46,14 @@ type Folder = {
 
 const foldersStorageKey = (uid: string) => `crea_app_talent_pool_folders_v1:${uid}`
 const FOLDERS_TABLE = 'talent_pool_folders'
+const TALENT_POOL_MAX_ROWS = 60
+const TALENT_POOL_CACHE_TTL_MS = 60_000
+
+type TalentPoolCache = {
+  rows: TalentRow[]
+  favoriteProfileIds: string[]
+  folders: Folder[]
+}
 
 function initial(name: string) {
   const t = name.trim()
@@ -67,8 +76,8 @@ function rowMatchesSkillsQuery(row: TalentRow, tokens: string[]): boolean {
 }
 
 async function loadFreelancerDirectoryRows(options: { excludeUserId: string; maxRows?: number; pageSize?: number }) {
-  const maxRows = options.maxRows ?? 5000
-  const pageSize = Math.max(1, Math.min(options.pageSize ?? 500, maxRows))
+  const maxRows = options.maxRows ?? TALENT_POOL_MAX_ROWS
+  const pageSize = Math.max(1, Math.min(options.pageSize ?? 100, maxRows))
   const out: FreelancerDirectoryRow[] = []
   let offset = 0
 
@@ -87,6 +96,146 @@ async function loadFreelancerDirectoryRows(options: { excludeUserId: string; max
   }
 
   return { rows: out, error: null as string | null }
+}
+
+async function loadProfilesForTalentIds(ids: string[]) {
+  if (ids.length === 0) return { profiles: [] as Array<Record<string, unknown>>, error: null as string | null }
+  const chunkSize = 100
+  const chunks: string[][] = []
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    chunks.push(ids.slice(i, i + chunkSize))
+  }
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      supabase
+        .from('profiles')
+        .select('id, name, headline, location, avatar_url, role, skills')
+        .in('id', chunk)
+        .neq('role', 'company')
+        .neq('role', 'ceo')
+        .order('name', { ascending: true })
+    )
+  )
+  const profilesOut: Array<Record<string, unknown>> = []
+  for (const { data, error } of results) {
+    if (error) return { profiles: [] as Array<Record<string, unknown>>, error: error.message }
+    profilesOut.push(...((data ?? []) as Array<Record<string, unknown>>))
+  }
+  return { profiles: profilesOut, error: null as string | null }
+}
+
+function buildTalentRows(
+  candidates: FreelancerDirectoryRow[],
+  profilesOut: Array<Record<string, unknown>>
+): TalentRow[] {
+  const fpById = new Map<string, FreelancerDirectoryRow>()
+  for (const fp of candidates) {
+    if (typeof fp.id === 'string' && fp.id.trim()) fpById.set(fp.id.trim(), fp)
+  }
+  return profilesOut.map((r) => {
+    const id = String(r.id)
+    const fp = fpById.get(id)
+    const url = (r.avatar_url as string | null)?.trim()
+    const profileLoc = String(r.location ?? '').trim()
+    const fpLoc = fp?.location ? String(fp.location).trim() : ''
+    const rawSkills = (r as { skills?: unknown }).skills
+    const skills = Array.isArray(rawSkills)
+      ? rawSkills.map((x) => String(x ?? '').trim()).filter(Boolean)
+      : []
+    return {
+      id,
+      name: String(r.name ?? '').trim() || 'Freelancer',
+      headline: String(r.headline ?? '').trim(),
+      location: profileLoc || fpLoc,
+      avatarUrl: url && /^https?:\/\//i.test(url) ? url : null,
+      role: typeof r.role === 'string' ? r.role : null,
+      skills,
+    }
+  })
+}
+
+async function loadTalentPoolFavorites(
+  userId: string,
+  favUi: boolean,
+  mode: 'company' | 'freelancer' | null
+): Promise<{ favoriteProfileIds: string[]; folders: Folder[] }> {
+  if (!favUi || !mode) {
+    return { favoriteProfileIds: [], folders: [] }
+  }
+
+  let favIds: string[] = []
+  try {
+    if (mode === 'company') {
+      const { data: favRows, error: favErr } = await supabase
+        .from('pool_saves')
+        .select('freelancer_id')
+        .eq('company_id', userId)
+        .limit(500)
+      if (!favErr && favRows) {
+        favIds = favRows
+          .map((r) => String((r as { freelancer_id?: string }).freelancer_id ?? '').trim())
+          .filter(Boolean)
+      }
+    } else {
+      const { data: favRows, error: favErr } = await supabase
+        .from('talent_pool_favorites')
+        .select('favorite_profile_id')
+        .eq('owner_id', userId)
+        .limit(500)
+      if (!favErr && favRows) {
+        favIds = favRows
+          .map((r) => String((r as { favorite_profile_id?: string }).favorite_profile_id ?? '').trim())
+          .filter(Boolean)
+      }
+    }
+  } catch {
+    /* table may not exist until SQL is deployed */
+  }
+
+  let folders: Folder[] = []
+  try {
+    const raw = await AsyncStorage.getItem(foldersStorageKey(userId))
+    let localFolders: Folder[] = []
+    if (raw) {
+      const parsed = JSON.parse(raw) as Folder[]
+      localFolders = (Array.isArray(parsed) ? parsed : [])
+        .filter((f) => typeof f?.id === 'string' && typeof f?.name === 'string')
+        .map((f) => ({
+          id: f.id,
+          name: f.name,
+          profileIds: Array.isArray(f.profileIds) ? f.profileIds.map((x) => String(x)).filter(Boolean) : [],
+        }))
+    }
+    try {
+      const { data: remoteRows, error: remoteErr } = await supabase
+        .from(FOLDERS_TABLE)
+        .select('id,name,position,profile_ids')
+        .eq('owner_id', userId)
+        .order('position', { ascending: true })
+        .limit(100)
+      if (!remoteErr && Array.isArray(remoteRows)) {
+        const remoteFolders: Folder[] = remoteRows
+          .filter((r) => typeof r?.id === 'string' && typeof r?.name === 'string')
+          .map((r) => ({
+            id: String(r.id),
+            name: String(r.name),
+            profileIds: Array.isArray((r as { profile_ids?: unknown }).profile_ids)
+              ? ((r as { profile_ids?: unknown[] }).profile_ids ?? []).map((x) => String(x)).filter(Boolean)
+              : [],
+          }))
+        if (remoteFolders.length > 0 || localFolders.length === 0) {
+          localFolders = remoteFolders
+        }
+      }
+    } catch {
+      // Table missing is fine; local-only remains active.
+    }
+    folders = localFolders
+  } catch {
+    folders = []
+  }
+
+  return { favoriteProfileIds: favIds, folders }
 }
 
 export default function TalentPoolScreen() {
@@ -110,7 +259,7 @@ export default function TalentPoolScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const realtimeReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { force?: boolean }) => {
     setLoadError(null)
     const {
       data: { user },
@@ -150,85 +299,28 @@ export default function TalentPoolScreen() {
         : null
     setFavoriteMode(mode)
 
-    let favIds: string[] = []
-    if (favUi) {
-      try {
-        if (mode === 'company') {
-          const { data: favRows, error: favErr } = await supabase
-            .from('pool_saves')
-            .select('freelancer_id')
-            .eq('company_id', user.id)
-          if (!favErr && favRows) {
-            favIds = favRows
-              .map((r) => String((r as { freelancer_id?: string }).freelancer_id ?? '').trim())
-              .filter(Boolean)
-          }
-        } else {
-          const { data: favRows, error: favErr } = await supabase
-            .from('talent_pool_favorites')
-            .select('favorite_profile_id')
-            .eq('owner_id', user.id)
-          if (!favErr && favRows) {
-            favIds = favRows
-              .map((r) => String((r as { favorite_profile_id?: string }).favorite_profile_id ?? '').trim())
-              .filter(Boolean)
-          }
-        }
-      } catch {
-        /* table may not exist until SQL is deployed */
+    const cacheKey = `talent-pool:${user.id}`
+    if (!opts?.force) {
+      const cached = getCache<TalentPoolCache>(cacheKey)
+      if (cached) {
+        setRows(cached.rows)
+        setFavoriteProfileIds(cached.favoriteProfileIds)
+        setFolders(cached.folders)
+        setLoading(false)
       }
-      setFavoriteProfileIds(favIds)
-      try {
-        const raw = await AsyncStorage.getItem(foldersStorageKey(user.id))
-        let localFolders: Folder[] = []
-        if (raw) {
-          const parsed = JSON.parse(raw) as Folder[]
-          localFolders = (Array.isArray(parsed) ? parsed : [])
-            .filter((f) => typeof f?.id === 'string' && typeof f?.name === 'string')
-            .map((f) => ({
-              id: f.id,
-              name: f.name,
-              profileIds: Array.isArray(f.profileIds) ? f.profileIds.map((x) => String(x)).filter(Boolean) : [],
-            }))
-        }
-        // Optional cross-device sync: if table exists, prefer remote copy.
-        try {
-          const { data: remoteRows, error: remoteErr } = await supabase
-            .from(FOLDERS_TABLE)
-            .select('id,name,position,profile_ids')
-            .eq('owner_id', user.id)
-            .order('position', { ascending: true })
-          if (!remoteErr && Array.isArray(remoteRows)) {
-            const remoteFolders: Folder[] = remoteRows
-              .filter((r) => typeof r?.id === 'string' && typeof r?.name === 'string')
-              .map((r) => ({
-                id: String(r.id),
-                name: String(r.name),
-                profileIds: Array.isArray((r as { profile_ids?: unknown }).profile_ids)
-                  ? ((r as { profile_ids?: unknown[] }).profile_ids ?? []).map((x) => String(x)).filter(Boolean)
-                  : [],
-              }))
-            if (remoteFolders.length > 0 || localFolders.length === 0) {
-              localFolders = remoteFolders
-            }
-          }
-        } catch {
-          // Table missing is fine; local-only remains active.
-        }
-        setFolders(localFolders)
-      } catch {
-        setFolders([])
-      }
-    } else {
-      setFavoriteProfileIds([])
-      setFolders([])
     }
 
-    const { rows: fpRows, error: fpErr } = await loadFreelancerDirectoryRows({
-      excludeUserId: user.id,
-      maxRows: 5000,
-      pageSize: 500,
-    })
+    const [{ rows: fpRows, error: fpErr }, favoritesPayload] = await Promise.all([
+      loadFreelancerDirectoryRows({
+        excludeUserId: user.id,
+        maxRows: TALENT_POOL_MAX_ROWS,
+        pageSize: 100,
+      }),
+      loadTalentPoolFavorites(user.id, favUi, mode),
+    ])
+
+    setFavoriteProfileIds(favoritesPayload.favoriteProfileIds)
+    setFolders(favoritesPayload.folders)
 
     if (fpErr) {
       setLoadError(fpErr)
@@ -244,58 +336,25 @@ export default function TalentPoolScreen() {
       ]
       if (ids.length === 0) {
         setRows([])
-        setLoading(false)
-        return
-      }
-      const profilesOut: Array<Record<string, unknown>> = []
-      const chunkSize = 100
-      let profilesErr: string | null = null
-      for (let i = 0; i < ids.length; i += chunkSize) {
-        const chunk = ids.slice(i, i + chunkSize)
-        const { data: profileChunk, error: pErr } = await supabase
-          .from('profiles')
-          .select('id, name, headline, location, avatar_url, role, skills')
-          .in('id', chunk)
-          .neq('role', 'company')
-          .neq('role', 'ceo')
-          .order('name', { ascending: true })
-        if (pErr) {
-          profilesErr = pErr.message
-          break
-        }
-        profilesOut.push(...((profileChunk ?? []) as Array<Record<string, unknown>>))
-      }
-
-      if (profilesErr) {
-        setLoadError(profilesErr)
-        setRows([])
+        setCache(cacheKey, { rows: [], favoriteProfileIds: favoritesPayload.favoriteProfileIds, folders: favoritesPayload.folders }, TALENT_POOL_CACHE_TTL_MS)
       } else {
-        const fpById = new Map<string, FreelancerDirectoryRow>()
-        for (const fp of candidates) {
-          if (typeof fp.id === 'string' && fp.id.trim()) fpById.set(fp.id.trim(), fp)
+        const { profiles: profilesOut, error: profilesErr } = await loadProfilesForTalentIds(ids)
+        if (profilesErr) {
+          setLoadError(profilesErr)
+          setRows([])
+        } else {
+          const nextRows = buildTalentRows(candidates, profilesOut)
+          setRows(nextRows)
+          setCache(
+            cacheKey,
+            {
+              rows: nextRows,
+              favoriteProfileIds: favoritesPayload.favoriteProfileIds,
+              folders: favoritesPayload.folders,
+            },
+            TALENT_POOL_CACHE_TTL_MS
+          )
         }
-        setRows(
-          profilesOut.map((r) => {
-            const id = String(r.id)
-            const fp = fpById.get(id)
-            const url = (r.avatar_url as string | null)?.trim()
-            const profileLoc = String(r.location ?? '').trim()
-            const fpLoc = fp?.location ? String(fp.location).trim() : ''
-            const rawSkills = (r as { skills?: unknown }).skills
-            const skills = Array.isArray(rawSkills)
-              ? rawSkills.map((x) => String(x ?? '').trim()).filter(Boolean)
-              : []
-            return {
-              id,
-              name: String(r.name ?? '').trim() || 'Freelancer',
-              headline: String(r.headline ?? '').trim(),
-              location: profileLoc || fpLoc,
-              avatarUrl: url && /^https?:\/\//i.test(url) ? url : null,
-              role: typeof r.role === 'string' ? r.role : null,
-              skills,
-            }
-          })
-        )
       }
     }
     setLoading(false)
@@ -310,7 +369,7 @@ export default function TalentPoolScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
-      await load()
+      await load({ force: true })
     } finally {
       setRefreshing(false)
     }
@@ -658,6 +717,10 @@ export default function TalentPoolScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        initialNumToRender={12}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        removeClippedSubviews
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor="#FFDC00" />}
         ListEmptyComponent={
           !loadError ? (

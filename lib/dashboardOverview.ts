@@ -246,16 +246,19 @@ export function quickActionsForRole(
   return base
 }
 
+const INVOICE_STATS_LIMIT = 500
+
 export async function loadDashboardOverview(
   userId: string
 ): Promise<DashboardOverviewData | null> {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('name, role, avatar_url, trial_ends_at, created_at')
-    .eq('id', userId)
-    .single()
-
-  const { data: { user } } = await supabase.auth.getUser()
+  const [{ data: profile }, { data: { user } }] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('name, role, avatar_url, trial_ends_at, created_at, subscription_tier')
+      .eq('id', userId)
+      .single(),
+    supabase.auth.getUser(),
+  ])
   if (!user || user.id !== userId) return null
 
   const resolvedRole = resolveAppRole(profile?.role, user)
@@ -299,7 +302,7 @@ export async function loadDashboardOverview(
     const [
       { count: jobCount },
       { count: invCount },
-      { data: myJobRows },
+      { count: pendingAppsCount },
       { data: invs },
       { data: companyProfileRow },
     ] = await Promise.all([
@@ -313,11 +316,17 @@ export async function loadDashboardOverview(
         .select('*', { count: 'exact', head: true })
         .eq('company_id', userId)
         .eq('status', 'pending'),
-      supabase.from('jobs').select('id').eq('company_id', userId),
+      supabase
+        .from('job_applications')
+        .select('id, jobs!inner(company_id)', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .eq('jobs.company_id', userId),
       supabase
         .from('invoices')
         .select('amount, currency, status, due_date')
-        .eq('company_id', userId),
+        .eq('company_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(INVOICE_STATS_LIMIT),
       supabase.from('company_profiles').select('subscription_plan').eq('id', userId).maybeSingle(),
     ])
     const companyPlan = resolveCompanySubscriptionPlanFromSources(
@@ -325,16 +334,7 @@ export async function loadDashboardOverview(
       profile?.subscription_tier,
       companyProfileRow?.subscription_plan
     )
-    const jobIds = (myJobRows ?? []).map((r) => r.id as string).filter(Boolean)
-    let pendingApps = 0
-    if (jobIds.length > 0) {
-      const { count: appCount } = await supabase
-        .from('job_applications')
-        .select('*', { count: 'exact', head: true })
-        .in('job_id', jobIds)
-        .eq('status', 'pending')
-      pendingApps = appCount ?? 0
-    }
+    const pendingApps = pendingAppsCount ?? 0
     return {
       ...base,
       companyPlan,
@@ -364,7 +364,9 @@ export async function loadDashboardOverview(
     supabase
       .from('invoices')
       .select('amount, currency, status, due_date')
-      .eq('freelancer_id', userId),
+      .eq('freelancer_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(INVOICE_STATS_LIMIT),
   ])
 
   return {

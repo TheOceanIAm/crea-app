@@ -11,7 +11,8 @@ import {
   Alert,
   Linking,
 } from 'react-native'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
+import Purchases from 'react-native-purchases'
 import { supabase } from '@/lib/supabase'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { getWebAuthConfirmRedirectUrl } from '@/lib/creaWeb'
@@ -50,6 +51,8 @@ function RegisterIosWebOnly() {
 }
 
 function RegisterForm() {
+  const { fromPurchase } = useLocalSearchParams<{ fromPurchase?: string; plan?: string }>()
+  const showPurchaseBanner = fromPurchase === 'true'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -78,7 +81,13 @@ function RegisterForm() {
       return
     }
     if (data.session) {
-      router.replace('/')
+      const userId = data.session.user.id
+      try {
+        await Purchases.logIn(userId)
+      } catch (e) {
+        console.warn('[RevenueCat] logIn after register failed', e)
+      }
+      router.replace(showPurchaseBanner ? '/onboarding' : '/')
       return
     }
     Alert.alert(
@@ -95,6 +104,13 @@ function RegisterForm() {
     >
       <View style={styles.inner}>
         <Text style={styles.logo}>CREA</Text>
+        {showPurchaseBanner ? (
+          <View style={styles.purchaseBanner}>
+            <Text style={styles.purchaseBannerText}>
+              Your subscription is active — create your account to get started.
+            </Text>
+          </View>
+        ) : null}
         <Text style={styles.subtitle}>Create your account</Text>
 
         <View style={styles.form}>
@@ -177,6 +193,20 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.35)',
     letterSpacing: 1,
     marginBottom: 48,
+  },
+  purchaseBanner: {
+    marginBottom: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.25)',
+    backgroundColor: 'rgba(255,220,0,0.08)',
+    padding: 14,
+  },
+  purchaseBannerText: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
   },
   form: { gap: 12 },
   input: {

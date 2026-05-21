@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -333,6 +333,8 @@ export default function ProfileScreen() {
   const [shareProfileOpen, setShareProfileOpen] = useState(false)
   /** Extra company_profiles columns for completion (industry, size, YouTube, etc.). */
   const [companyCpExtras, setCompanyCpExtras] = useState<CompanyProfileCompletionRow | null>(null)
+  const profileLoadedAtRef = useRef(0)
+  const PROFILE_STALE_MS = 30_000
 
   const freelancer = isFreelancerProfile(role)
   const ceo = isCeoProfile(role)
@@ -490,7 +492,14 @@ export default function ProfileScreen() {
     if (hidden.length && hidden.includes(activeMenu)) setActiveMenu('profile')
   }, [ceo, company, workspacePlan, activeMenu])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { force?: boolean }) => {
+    if (
+      !opts?.force &&
+      profileLoadedAtRef.current > 0 &&
+      Date.now() - profileLoadedAtRef.current < PROFILE_STALE_MS
+    ) {
+      return
+    }
     setLoadError(null)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
@@ -508,20 +517,22 @@ export default function ProfileScreen() {
     const cid = user.user_metadata?.stripe_customer_id
     setStripeCustomerId(typeof cid === 'string' && cid.trim() ? cid.trim() : null)
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select(
-        'name, role, headline, location, bio, skills, equipment, avatar_url, day_rate_amount, half_day_rate_amount, rates_currency, rates_notes, open_to_remote, open_to_travel, portfolio_website, portfolio_instagram, portfolio_linkedin, portfolio_vimeo, portfolio_behance, portfolio_projects, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, tax_number, vat_registered, notification_settings, subscription_tier, trial_ends_at'
-      )
-      .eq('id', user.id)
-      .single()
-    const { data: freelancerRates, data: freelancerMirror } = await supabase
-      .from('freelancer_profiles')
-      .select(
-        'day_rate, half_day_rate, job_title, bio, location, skills, essentials, open_to_remote, open_to_travel, website, instagram, linkedin, vimeo, behance, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, steuer_id, vat_registered'
-      )
-      .eq('id', user.id)
-      .maybeSingle()
+    const [{ data, error }, { data: freelancerRates, data: freelancerMirror }] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select(
+          'name, role, headline, location, bio, skills, equipment, avatar_url, day_rate_amount, half_day_rate_amount, rates_currency, rates_notes, open_to_remote, open_to_travel, portfolio_website, portfolio_instagram, portfolio_linkedin, portfolio_vimeo, portfolio_behance, portfolio_projects, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, tax_number, vat_registered, notification_settings, subscription_tier, trial_ends_at'
+        )
+        .eq('id', user.id)
+        .single(),
+      supabase
+        .from('freelancer_profiles')
+        .select(
+          'day_rate, half_day_rate, job_title, bio, location, skills, essentials, open_to_remote, open_to_travel, website, instagram, linkedin, vimeo, behance, bank_account_holder, bank_iban, bank_bic, paypal_email, invoice_address, steuer_id, vat_registered'
+        )
+        .eq('id', user.id)
+        .maybeSingle(),
+    ])
 
     if (error) {
       setLoadError(error.message)
@@ -580,7 +591,19 @@ export default function ProfileScreen() {
       setPortfolioLinkedin(String(data?.portfolio_linkedin ?? fp?.linkedin ?? ''))
       setPortfolioVimeo(String(data?.portfolio_vimeo ?? fp?.vimeo ?? ''))
       setPortfolioBehance(String(data?.portfolio_behance ?? fp?.behance ?? ''))
-      const mergedPortfolio = await loadPortfolioProjectsForSettings(user.id)
+      const appRole = resolveAppRole(data?.role, user)
+      const [mergedPortfolio, companyProfileResult] = await Promise.all([
+        loadPortfolioProjectsForSettings(user.id),
+        appRole === 'company'
+          ? supabase
+              .from('company_profiles')
+              .select(
+                'subscription_plan, company_name, industry, size, website, logo_url, bio, location, instagram, linkedin, vimeo, behance, youtube, twitter_x, billing_address, billing_email, vat_id'
+              )
+              .eq('id', user.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null as CompanyProfileCompletionRow | null }),
+      ])
       setPortfolioProjects(mergedPortfolio)
       setBankHolder(String(data?.bank_account_holder ?? fp?.bank_account_holder ?? ''))
       setBankIban(String(data?.bank_iban ?? fp?.bank_iban ?? ''))
@@ -594,14 +617,13 @@ export default function ProfileScreen() {
         .trim()
         .toLowerCase()
       const authTier = resolveFreelancerPlanFromUser(user)
-      const appRole = resolveAppRole(data?.role, user)
       // Freelancers: JWT `freelancer_plan` (same as web). Companies: JWT `company_plan` → company_profiles → profiles (crea-services webhook order).
       let effectiveTier: string
       if (appRole === 'freelancer') {
         setCompanyCpExtras(null)
         effectiveTier = authTier
       } else if (appRole === 'company') {
-        const { data: cp } = await supabase.from('company_profiles').select('*').eq('id', user.id).maybeSingle()
+        const cp = companyProfileResult.data
         setCompanyCpExtras(cp && typeof cp === 'object' ? (cp as CompanyProfileCompletionRow) : null)
         effectiveTier = resolveCompanySubscriptionPlanFromSources(
           user,
@@ -630,11 +652,12 @@ export default function ProfileScreen() {
       setTrialEndsAt(typeof rawTrial === 'string' && rawTrial.trim() ? rawTrial.trim() : null)
 
       if (isFreelancerProfile(resolveAppRole(data?.role, user))) {
-        await mirrorProfilesToFreelancerProfiles(user.id)
+        void mirrorProfilesToFreelancerProfiles(user.id)
       }
     }
 
     setLoading(false)
+    profileLoadedAtRef.current = Date.now()
   }, [])
 
   useFocusEffect(

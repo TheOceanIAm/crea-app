@@ -99,9 +99,7 @@ export default function MessagesScreen() {
     useCallback(() => {
       void refreshList()
       invalidateDmBadge()
-      const poll = setInterval(() => void refreshList(), 8000)
       return () => {
-        clearInterval(poll)
         if (reloadTimer.current) clearTimeout(reloadTimer.current)
       }
     }, [refreshList])

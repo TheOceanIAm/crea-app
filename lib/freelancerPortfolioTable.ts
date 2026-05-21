@@ -118,6 +118,8 @@ function sortPortfolioRows(rows: Record<string, unknown>[]): void {
   })
 }
 
+const PORTFOLIO_ROW_LIMIT = 24
+
 export async function fetchFreelancerPortfolioTableRows(freelancerId: string): Promise<Record<string, unknown>[]> {
   const uid = freelancerId.trim()
   if (!uid) return []
@@ -126,9 +128,10 @@ export async function fetchFreelancerPortfolioTableRows(freelancerId: string): P
   for (const table of PORTFOLIO_TABLE_CANDIDATES) {
     const { data, error } = await supabase
       .from(table)
-      .select('*')
+      .select('id, title, role_in_project, video_url, photo_paths, sort_order, created_at')
       .eq('freelancer_id', uid)
       .order('created_at', { ascending: false })
+      .limit(PORTFOLIO_ROW_LIMIT)
     if (error) continue
     if (!Array.isArray(data) || data.length === 0) continue
     const rows = data as Record<string, unknown>[]
@@ -147,40 +150,41 @@ export async function fetchFreelancerPortfolioTableRows(freelancerId: string): P
 export async function buildPortfolioProjectsFromTableRows(
   rows: Record<string, unknown>[]
 ): Promise<PortfolioProject[]> {
-  const out: PortfolioProject[] = []
-  for (const row of rows) {
-    const parsed = parsePortfolioProjects([row])
-    const p = parsed[0]
-    if (!p) continue
-    const link = typeof p.link === 'string' ? p.link.trim() : ''
+  const resolved = await Promise.all(
+    rows.map(async (row) => {
+      const parsed = parsePortfolioProjects([row])
+      const p = parsed[0]
+      if (!p) return null
+      const link = typeof p.link === 'string' ? p.link.trim() : ''
 
-    let image_url: string | undefined =
-      typeof p.image_url === 'string' && /^https?:\/\//i.test(p.image_url.trim())
-        ? p.image_url.trim()
-        : undefined
+      let image_url: string | undefined =
+        typeof p.image_url === 'string' && /^https?:\/\//i.test(p.image_url.trim())
+          ? p.image_url.trim()
+          : undefined
 
-    if (!image_url) {
-      image_url = resolvePhotoPathsThumbnail(row.photo_paths)
-    }
-    if (!image_url && link) {
-      image_url = await resolveVideoPosterUrl(link)
-    }
+      if (!image_url) {
+        image_url = resolvePhotoPathsThumbnail(row.photo_paths)
+      }
+      if (!image_url && link) {
+        image_url = await resolveVideoPosterUrl(link)
+      }
 
-    if (!link && !image_url) continue
-    const client =
-      (typeof p.client === 'string' && p.client.trim()) ||
-      (typeof row.role_in_project === 'string' && row.role_in_project.trim()) ||
-      ''
-    const rowId = typeof row.id === 'string' && row.id.trim() ? row.id.trim() : undefined
-    out.push({
-      ...p,
-      id: rowId,
-      client,
-      link,
-      image_url,
+      if (!link && !image_url) return null
+      const client =
+        (typeof p.client === 'string' && p.client.trim()) ||
+        (typeof row.role_in_project === 'string' && row.role_in_project.trim()) ||
+        ''
+      const rowId = typeof row.id === 'string' && row.id.trim() ? row.id.trim() : undefined
+      return {
+        ...p,
+        id: rowId,
+        client,
+        link,
+        image_url,
+      } as PortfolioProject
     })
-  }
-  return out
+  )
+  return resolved.filter((p): p is PortfolioProject => p !== null)
 }
 
 /** Web settings + public profile use `freelancer_portfolio_projects`; app also keeps JSON on `profiles`. */
@@ -367,19 +371,18 @@ export async function loadPortfolioProjectsForSettings(
 export async function enrichPortfolioProjectsThumbnails(
   projects: PortfolioProject[]
 ): Promise<PortfolioProject[]> {
-  const out: PortfolioProject[] = []
-  for (const p of projects) {
-    const existing =
-      typeof p.image_url === 'string' && /^https?:\/\//i.test(p.image_url.trim())
-        ? p.image_url.trim()
-        : undefined
-    if (existing) {
-      out.push({ ...p, image_url: existing })
-      continue
-    }
-    const link = typeof p.link === 'string' ? p.link.trim() : ''
-    const image_url = link ? await resolveVideoPosterUrl(link) : undefined
-    out.push(image_url ? { ...p, image_url } : p)
-  }
-  return out
+  return Promise.all(
+    projects.map(async (p) => {
+      const existing =
+        typeof p.image_url === 'string' && /^https?:\/\//i.test(p.image_url.trim())
+          ? p.image_url.trim()
+          : undefined
+      if (existing) {
+        return { ...p, image_url: existing }
+      }
+      const link = typeof p.link === 'string' ? p.link.trim() : ''
+      const image_url = link ? await resolveVideoPosterUrl(link) : undefined
+      return image_url ? { ...p, image_url } : p
+    })
+  )
 }

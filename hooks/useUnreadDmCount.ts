@@ -82,12 +82,6 @@ export function useUnreadDmCount(userId: string | null, enabled = true) {
 
   useEffect(() => {
     if (!userId || !enabled) return
-    const id = setInterval(() => void refresh(userId), 10_000)
-    return () => clearInterval(id)
-  }, [enabled, refresh, userId])
-
-  useEffect(() => {
-    if (!userId || !enabled) return
     const topic = `unread-dm-${userId}-${++realtimeTopicSeq}`
     const channel = supabase
       .channel(topic)

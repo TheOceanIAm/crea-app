@@ -328,10 +328,6 @@ export default function InvoicesListScreen() {
     setRefreshing(false)
   }, [])
 
-  useEffect(() => {
-    load()
-  }, [load])
-
   useFocusEffect(
     useCallback(() => {
       void load()

@@ -18,6 +18,7 @@ import Purchases, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { supabase } from '@/lib/supabase'
 import { useSubscription } from '@/hooks/useSubscription'
+import { useRevenueCat } from '@/contexts/RevenueCatContext'
 import {
   RC_DEFAULT_OFFERING_ID,
   RC_PACKAGE_AGENCY,
@@ -74,6 +75,7 @@ export default function PaywallScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const { refresh, currentPlan } = useSubscription()
+  const { ready } = useRevenueCat()
   const [role, setRole] = useState<'freelancer' | 'company' | ''>('')
   const [packages, setPackages] = useState<PurchasesPackage[]>([])
   const [loadingOfferings, setLoadingOfferings] = useState(true)
@@ -114,20 +116,27 @@ export default function PaywallScreen() {
       const {
         data: { user },
       } = await supabase.auth.getUser()
-      if (!user) {
-        router.replace('/login')
-        return
+      if (user) {
+        const { data: pr } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle()
+        const r = resolveAppRole(pr?.role, user)
+        setRole(r === 'company' ? 'company' : 'freelancer')
+      } else {
+        setRole('freelancer')
       }
-      const { data: pr } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle()
-      const r = resolveAppRole(pr?.role, user)
-      setRole(r === 'company' ? 'company' : 'freelancer')
-      await loadOfferings()
+      if (ready) {
+        await loadOfferings()
+      }
     })()
-  }, [loadOfferings, router])
+  }, [loadOfferings, ready])
+
+  useEffect(() => {
+    if (!ready) return
+    void loadOfferings()
+  }, [ready, loadOfferings])
 
   const packageForCard = useCallback(
     (packageKey: string) => {
@@ -141,12 +150,22 @@ export default function PaywallScreen() {
     [packages]
   )
 
-  const purchase = async (pkg: PurchasesPackage) => {
+  const purchase = async (pkg: PurchasesPackage, planKey: SubscriptionPlanKey) => {
     setBusyPackageId(pkg.identifier)
     try {
       await Purchases.purchasePackage(pkg)
-      await refresh()
-      router.replace('/(tabs)/feed')
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (user) {
+        await refresh()
+        router.replace('/(tabs)/feed')
+      } else {
+        router.replace({
+          pathname: '/register',
+          params: { fromPurchase: 'true', plan: planKey },
+        })
+      }
     } catch (e) {
       const err = e as PurchasesError
       if (isPurchaseCancelled(err)) return
@@ -223,7 +242,7 @@ export default function PaywallScreen() {
                 <TouchableOpacity
                   style={[styles.primaryBtn, (!pkg || busy || isCurrent) && styles.btnDisabled]}
                   disabled={!pkg || busy || isCurrent}
-                  onPress={() => pkg && void purchase(pkg)}
+                  onPress={() => pkg && void purchase(pkg, card.key)}
                 >
                   <Text style={styles.primaryBtnText}>
                     {isCurrent ? 'Active' : busy ? 'Processing…' : 'Subscribe'}

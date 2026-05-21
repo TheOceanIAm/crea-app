@@ -60,6 +60,8 @@ export default function CompanyApplicationsScreen() {
       .from('jobs')
       .select('id, title')
       .eq('company_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(100)
     if (jerr || !jobs?.length) {
       setRows([])
       setLoading(false)

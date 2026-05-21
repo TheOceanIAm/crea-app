@@ -15,7 +15,6 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
-import { ensureSoloWorkspaceProjectRow } from '@/lib/ensureSoloWorkspaceProject'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import {
   canFreelancerCreatePrivateProjects,
@@ -224,7 +223,9 @@ export default function WorkspaceProjectsScreen() {
           supabase
             .from('projects')
             .select('id, job_id, title, status, updated_at, budget_amount, budget_type, budget_currency')
-            .eq('company_id', user.id),
+            .eq('company_id', user.id)
+            .order('updated_at', { ascending: false })
+            .limit(150),
           supabase
             .from('company_profiles')
             .select('logo_url, website')
@@ -336,24 +337,14 @@ export default function WorkspaceProjectsScreen() {
     const [{ error: syncErr }, { data: soloJobRows }, { data: apps }, { data: pmRows }, { data: leadProjRows }] =
       await Promise.all([
         supabase.rpc('sync_solo_workspace_projects_for_owner'),
-        supabase.from('jobs').select('id').eq('company_id', user.id).eq('is_solo_workspace', true),
-        supabase.from('job_applications').select('job_id').eq('freelancer_id', user.id).eq('status', 'accepted'),
-        supabase.from('project_members').select('project_id').eq('profile_id', user.id),
-        supabase.from('projects').select('job_id').eq('freelancer_id', user.id).not('job_id', 'is', null),
+        supabase.from('jobs').select('id').eq('company_id', user.id).eq('is_solo_workspace', true).limit(100),
+        supabase.from('job_applications').select('job_id').eq('freelancer_id', user.id).eq('status', 'accepted').limit(200),
+        supabase.from('project_members').select('project_id').eq('profile_id', user.id).limit(200),
+        supabase.from('projects').select('job_id').eq('freelancer_id', user.id).not('job_id', 'is', null).limit(200),
       ])
     if (syncErr && __DEV__) {
       console.warn('[workspace-projects] sync_solo_workspace_projects_for_owner', syncErr.message)
     }
-
-    await Promise.all(
-      (soloJobRows ?? []).map(async (jr) => {
-      const jid = String((jr as { id: string }).id)
-      const ens = await ensureSoloWorkspaceProjectRow(supabase, { projectOrJobId: jid, userId: user.id })
-      if (__DEV__ && !ens.ok && ens.reason && ens.reason !== 'not_solo_owner') {
-        console.warn('[workspace-projects] ensureSoloWorkspaceProjectRow', jid, ens.reason)
-      }
-      })
-    )
 
     const crewJobIds = [...new Set((apps ?? []).map((a) => a.job_id).filter(Boolean))] as string[]
     const membershipJobIds: string[] = []
@@ -415,6 +406,8 @@ export default function WorkspaceProjectsScreen() {
       .from('projects')
       .select('id, title, status, updated_at, job_id, budget_amount, budget_type, budget_currency, brief_ai_context, brief_ai_outputs')
       .eq('company_id', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(150)
 
     const projectById = Object.fromEntries((projectRows ?? []).map((r) => [String(r.id), r]))
 
