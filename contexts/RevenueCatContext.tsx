@@ -12,6 +12,7 @@ import { Platform } from 'react-native'
 import Purchases, { type CustomerInfo } from 'react-native-purchases'
 import { supabase } from '@/lib/supabase'
 import { revenueCatApiKey } from '@/lib/revenuecat/config'
+import { purchasesUnavailableUserMessage } from '@/lib/revenuecat/purchasesEnvironment'
 import {
   isSubscribedFromCustomerInfo,
   resolveSubscriptionPlanFromCustomerInfo,
@@ -29,9 +30,6 @@ type RevenueCatContextValue = {
 }
 
 const RevenueCatContext = createContext<RevenueCatContextValue | null>(null)
-
-const DEV_BUILD_HINT =
-  'In-app subscriptions need a development build on iOS (Expo Go does not include StoreKit). Run: npx expo run:ios'
 
 export function RevenueCatProvider({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(Platform.OS !== 'ios')
@@ -74,7 +72,7 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
         Purchases.setLogLevel(__DEV__ ? Purchases.LOG_LEVEL.DEBUG : Purchases.LOG_LEVEL.WARN)
         await Purchases.configure({ apiKey })
         if (!Purchases.isConfigured()) {
-          throw new Error(DEV_BUILD_HINT)
+          throw new Error('StoreKit native module not available')
         }
         configuredRef.current = true
         setConfigured(true)
@@ -94,10 +92,9 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
 
         if (!cancelled) setReady(true)
       } catch (e) {
-        const message = e instanceof Error ? e.message : 'RevenueCat configure failed'
         console.warn('[RevenueCat] configure failed', e)
         if (!cancelled) {
-          setConfigError(message.includes('StoreKit') ? message : `${message}. ${DEV_BUILD_HINT}`)
+          setConfigError(purchasesUnavailableUserMessage(e))
           setReady(true)
         }
       }
@@ -159,7 +156,7 @@ export function useRevenueCat(): RevenueCatContextValue {
     return {
       ready: true,
       configured: false,
-      configError: DEV_BUILD_HINT,
+      configError: purchasesUnavailableUserMessage(),
       customerInfo: null,
       currentPlan: 'free',
       isSubscribed: false,

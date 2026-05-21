@@ -29,6 +29,10 @@ import {
   type SubscriptionPlanKey,
 } from '@/lib/revenuecat/config'
 import { resolveAppRole } from '@/lib/profileRole'
+import {
+  OFFERINGS_EMPTY_MESSAGE,
+  purchasesUnavailableUserMessage,
+} from '@/lib/revenuecat/purchasesEnvironment'
 
 type PlanCard = {
   key: SubscriptionPlanKey
@@ -95,10 +99,7 @@ export default function PaywallScreen() {
       return
     }
     if (!configured) {
-      setLoadError(
-        configError ||
-          'Subscriptions are not available in this build. Use a development build (npx expo run:ios), not Expo Go.'
-      )
+      setLoadError(configError || purchasesUnavailableUserMessage())
       setLoadingOfferings(false)
       return
     }
@@ -110,7 +111,7 @@ export default function PaywallScreen() {
         offerings.all[RC_DEFAULT_OFFERING_ID] ?? offerings.current ?? null
       setPackages(offering?.availablePackages ?? [])
       if (!offering?.availablePackages?.length) {
-        setLoadError('No subscription packages are available yet. Try again later.')
+        setLoadError(OFFERINGS_EMPTY_MESSAGE)
       }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Could not load plans.')
