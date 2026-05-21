@@ -23,7 +23,7 @@ export default function LoginScreen() {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     setLoading(false)
     if (error) { Alert.alert('Error', error.message); return }
-    if (data.user?.id) {
+    if (data.user?.id && Purchases.isConfigured()) {
       try {
         await Purchases.logIn(data.user.id)
       } catch (e) {

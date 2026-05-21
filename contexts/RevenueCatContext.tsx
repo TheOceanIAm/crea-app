@@ -20,6 +20,8 @@ import type { SubscriptionPlanKey } from '@/lib/revenuecat/config'
 
 type RevenueCatContextValue = {
   ready: boolean
+  configured: boolean
+  configError: string | null
   customerInfo: CustomerInfo | null
   currentPlan: SubscriptionPlanKey
   isSubscribed: boolean
@@ -28,8 +30,13 @@ type RevenueCatContextValue = {
 
 const RevenueCatContext = createContext<RevenueCatContextValue | null>(null)
 
+const DEV_BUILD_HINT =
+  'In-app subscriptions need a development build on iOS (Expo Go does not include StoreKit). Run: npx expo run:ios'
+
 export function RevenueCatProvider({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(Platform.OS !== 'ios')
+  const [configured, setConfigured] = useState(false)
+  const [configError, setConfigError] = useState<string | null>(null)
   const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null)
   const configuredRef = useRef(false)
 
@@ -59,13 +66,19 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
     const configure = async () => {
       const apiKey = revenueCatApiKey()
       if (!apiKey) {
+        setConfigError('Missing EXPO_PUBLIC_REVENUECAT_IOS_API_KEY.')
         setReady(true)
         return
       }
       try {
         Purchases.setLogLevel(__DEV__ ? Purchases.LOG_LEVEL.DEBUG : Purchases.LOG_LEVEL.WARN)
         await Purchases.configure({ apiKey })
+        if (!Purchases.isConfigured()) {
+          throw new Error(DEV_BUILD_HINT)
+        }
         configuredRef.current = true
+        setConfigured(true)
+        setConfigError(null)
         Purchases.addCustomerInfoUpdateListener(listener)
 
         const {
@@ -81,8 +94,12 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
 
         if (!cancelled) setReady(true)
       } catch (e) {
+        const message = e instanceof Error ? e.message : 'RevenueCat configure failed'
         console.warn('[RevenueCat] configure failed', e)
-        if (!cancelled) setReady(true)
+        if (!cancelled) {
+          setConfigError(message.includes('StoreKit') ? message : `${message}. ${DEV_BUILD_HINT}`)
+          setReady(true)
+        }
       }
     }
 
@@ -123,12 +140,14 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
   const value = useMemo(
     () => ({
       ready,
+      configured,
+      configError,
       customerInfo,
       currentPlan,
       isSubscribed,
       refresh,
     }),
-    [ready, customerInfo, currentPlan, isSubscribed, refresh]
+    [ready, configured, configError, customerInfo, currentPlan, isSubscribed, refresh]
   )
 
   return <RevenueCatContext.Provider value={value}>{children}</RevenueCatContext.Provider>
@@ -139,6 +158,8 @@ export function useRevenueCat(): RevenueCatContextValue {
   if (!ctx) {
     return {
       ready: true,
+      configured: false,
+      configError: DEV_BUILD_HINT,
       customerInfo: null,
       currentPlan: 'free',
       isSubscribed: false,

@@ -82,10 +82,12 @@ function RegisterForm() {
     }
     if (data.session) {
       const userId = data.session.user.id
-      try {
-        await Purchases.logIn(userId)
-      } catch (e) {
-        console.warn('[RevenueCat] logIn after register failed', e)
+      if (Purchases.isConfigured()) {
+        try {
+          await Purchases.logIn(userId)
+        } catch (e) {
+          console.warn('[RevenueCat] logIn after register failed', e)
+        }
       }
       router.replace(showPurchaseBanner ? '/onboarding' : '/')
       return

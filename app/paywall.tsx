@@ -75,7 +75,7 @@ export default function PaywallScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const { refresh, currentPlan } = useSubscription()
-  const { ready } = useRevenueCat()
+  const { ready, configured, configError } = useRevenueCat()
   const [role, setRole] = useState<'freelancer' | 'company' | ''>('')
   const [packages, setPackages] = useState<PurchasesPackage[]>([])
   const [loadingOfferings, setLoadingOfferings] = useState(true)
@@ -94,6 +94,14 @@ export default function PaywallScreen() {
       setLoadingOfferings(false)
       return
     }
+    if (!configured) {
+      setLoadError(
+        configError ||
+          'Subscriptions are not available in this build. Use a development build (npx expo run:ios), not Expo Go.'
+      )
+      setLoadingOfferings(false)
+      return
+    }
     setLoadingOfferings(true)
     setLoadError(null)
     try {
@@ -109,7 +117,7 @@ export default function PaywallScreen() {
     } finally {
       setLoadingOfferings(false)
     }
-  }, [])
+  }, [configured, configError])
 
   useEffect(() => {
     void (async () => {
@@ -127,11 +135,8 @@ export default function PaywallScreen() {
       } else {
         setRole('freelancer')
       }
-      if (ready) {
-        await loadOfferings()
-      }
     })()
-  }, [loadOfferings, ready])
+  }, [])
 
   useEffect(() => {
     if (!ready) return
@@ -151,6 +156,10 @@ export default function PaywallScreen() {
   )
 
   const purchase = async (pkg: PurchasesPackage, planKey: SubscriptionPlanKey) => {
+    if (!configured) {
+      Alert.alert('Unavailable', configError || 'Subscriptions are not available in this build.')
+      return
+    }
     setBusyPackageId(pkg.identifier)
     try {
       await Purchases.purchasePackage(pkg)
@@ -176,6 +185,10 @@ export default function PaywallScreen() {
   }
 
   const restore = async () => {
+    if (!configured) {
+      Alert.alert('Unavailable', configError || 'Subscriptions are not available in this build.')
+      return
+    }
     setRestoring(true)
     try {
       await Purchases.restorePurchases()
