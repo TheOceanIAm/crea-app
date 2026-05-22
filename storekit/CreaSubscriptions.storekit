@@ -1,0 +1,156 @@
+{
+  "identifier" : "CreaSubscriptions",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "de_DE",
+    "_storefront" : "DEU",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "22101656",
+      "localizations" : [
+        {
+          "description" : "CREA subscription plans",
+          "displayName" : "CREA Plans",
+          "locale" : "de"
+        }
+      ],
+      "name" : "Crea Plans",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "10.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "56912026",
+          "introductoryOffer" : {
+            "internalID" : "starter_trial_3m",
+            "numberOfPeriods" : 3,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1M"
+          },
+          "localizations" : [
+            {
+              "description" : "Ideal für Freelancer die starten.",
+              "displayName" : "Crea Starter",
+              "locale" : "de"
+            }
+          ],
+          "productID" : "56912026",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "crea_starter_monthly",
+          "subscriptionGroupID" : "22101656",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "19.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "165846",
+          "introductoryOffer" : {
+            "internalID" : "pro_trial_3m",
+            "numberOfPeriods" : 3,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1M"
+          },
+          "localizations" : [
+            {
+              "description" : "Pro features for freelancers.",
+              "displayName" : "Crea Pro",
+              "locale" : "de"
+            }
+          ],
+          "productID" : "165846",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "crea_pro_monthly",
+          "subscriptionGroupID" : "22101656",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "49.99",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "156715",
+          "introductoryOffer" : {
+            "internalID" : "studio_trial_3m",
+            "numberOfPeriods" : 3,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1M"
+          },
+          "localizations" : [
+            {
+              "description" : "Studio plan for companies.",
+              "displayName" : "Crea Studio",
+              "locale" : "de"
+            }
+          ],
+          "productID" : "156715",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "crea_studio_monthly",
+          "subscriptionGroupID" : "22101656",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "99.99",
+          "familyShareable" : false,
+          "groupNumber" : 4,
+          "internalID" : "1156474",
+          "introductoryOffer" : {
+            "internalID" : "agency_trial_3m",
+            "numberOfPeriods" : 3,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1M"
+          },
+          "localizations" : [
+            {
+              "description" : "Agency plan for companies.",
+              "displayName" : "Crea Agency",
+              "locale" : "de"
+            }
+          ],
+          "productID" : "1156474",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "crea_agency_monthly",
+          "subscriptionGroupID" : "22101656",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

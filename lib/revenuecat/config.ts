@@ -11,10 +11,10 @@ export const RC_PACKAGE_STUDIO = 'crea_studio'
 export const RC_PACKAGE_AGENCY = 'crea_agency'
 
 /** App Store product identifiers (subscriptions in App Store Connect). */
-export const RC_PRODUCT_STARTER = 'crea_starter_monthly'
-export const RC_PRODUCT_PRO = 'crea_pro_monthly'
-export const RC_PRODUCT_STUDIO = 'crea_studio_monthly'
-export const RC_PRODUCT_AGENCY = 'crea_agency_monthly'
+export const RC_PRODUCT_STARTER = '56912026'
+export const RC_PRODUCT_PRO = '165846'
+export const RC_PRODUCT_STUDIO = '156715'
+export const RC_PRODUCT_AGENCY = '1156474'
 
 export const RC_DEFAULT_OFFERING_ID = 'default'
 

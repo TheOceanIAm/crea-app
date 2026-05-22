@@ -31,6 +31,7 @@ import {
 import { resolveAppRole } from '@/lib/profileRole'
 import {
   OFFERINGS_EMPTY_MESSAGE,
+  offeringsLoadErrorMessage,
   purchasesUnavailableUserMessage,
 } from '@/lib/revenuecat/purchasesEnvironment'
 
@@ -114,7 +115,7 @@ export default function PaywallScreen() {
         setLoadError(OFFERINGS_EMPTY_MESSAGE)
       }
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : 'Could not load plans.')
+      setLoadError(offeringsLoadErrorMessage(e))
     } finally {
       setLoadingOfferings(false)
     }

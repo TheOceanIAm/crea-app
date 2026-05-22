@@ -23,5 +23,20 @@ export function purchasesUnavailableUserMessage(cause?: unknown): string {
 }
 
 export const OFFERINGS_EMPTY_MESSAGE =
-  'No subscription plans loaded from the App Store. Complete subscription metadata in App Store Connect ' +
-  '(products must not show Missing Metadata), or add a StoreKit Configuration file in Xcode for simulator testing.'
+  'App Store products are not available yet (status: Ready for Submission / Developer Action Needed). ' +
+  'For simulator testing: open ios/CREA.xcworkspace in Xcode → Product → Scheme → Edit Scheme → Run → Options → ' +
+  'StoreKit Configuration → storekit/CreaSubscriptions.storekit, then run npx expo run:ios again. ' +
+  'For production: submit the app version with all subscriptions linked in App Store Connect.'
+
+export function offeringsLoadErrorMessage(cause: unknown): string {
+  const raw = cause instanceof Error ? cause.message : String(cause ?? '')
+  if (
+    raw.includes('could not be fetched from App Store Connect') ||
+    raw.includes('why-are-offerings-empty') ||
+    raw.includes('DEVELOPER_ACTION_NEEDED') ||
+    raw.includes('configuration')
+  ) {
+    return OFFERINGS_EMPTY_MESSAGE
+  }
+  return raw.trim() || 'Could not load subscription plans.'
+}
