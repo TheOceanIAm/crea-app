@@ -8,11 +8,13 @@ import {
   isFreelancerPlan,
   type SubscriptionPlanKey,
 } from '@/lib/revenuecat/config'
+
+export type { SubscriptionPlanKey } from '@/lib/revenuecat/config'
 import {
   isSubscribedFromCustomerInfo,
   resolveSubscriptionPlanFromCustomerInfo,
 } from '@/lib/revenuecat/customerInfo'
-import type { FreelancerPlan } from '@/lib/freelancerPlan'
+import type { NormalizedFreelancerPlan } from '@/lib/billingDisplay'
 import { resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
 import { resolveAppRole, isCeoProfile } from '@/lib/profileRole'
@@ -23,7 +25,7 @@ export type SubscriptionStatus = {
   currentPlan: SubscriptionPlanKey
   isSubscribed: boolean
   source: SubscriptionStatusSource
-  /** App-tier string used in profile UI (freelancer or company). */
+  /** App-tier string used in profile UI (free | pro). */
   appTier: string
 }
 
@@ -41,14 +43,10 @@ function stripePlanFromUser(
 ): SubscriptionPlanKey {
   if (role === 'company') {
     const cp = resolveCompanySubscriptionPlanFromSources(user, profileTier, companyPlan)
-    if (cp === 'agency') return 'agency'
-    if (cp === 'studio') return 'studio'
-    return 'free'
+    return cp === 'pro' ? 'pro' : 'free'
   }
   const fp = resolveFreelancerPlanFromUser(user)
-  if (fp === 'pro' || fp === 'premium') return 'pro'
-  if (fp === 'starter') return 'starter'
-  return 'free'
+  return fp === 'pro' ? 'pro' : 'free'
 }
 
 /**
@@ -66,7 +64,7 @@ export async function getSubscriptionStatus(params: {
   const role = String(resolveAppRole(profile?.role, user) ?? '').toLowerCase()
 
   if (!user || isCeoProfile(role)) {
-    return { currentPlan: 'free', isSubscribed: false, source: 'free', appTier: 'starter' }
+    return { currentPlan: 'free', isSubscribed: false, source: 'free', appTier: 'free' }
   }
 
   if (Platform.OS === 'ios') {
@@ -97,8 +95,8 @@ export async function getSubscriptionStatus(params: {
         ? companyPlanFromSubscription(plan)
         : freelancerPlanFromSubscription(plan)
     return {
-      currentPlan: plan === 'free' ? 'free' : plan,
-      isSubscribed: plan !== 'free',
+      currentPlan: plan,
+      isSubscribed: plan === 'pro',
       source: 'stripe',
       appTier,
     }
@@ -119,6 +117,6 @@ export function subscriptionPlanMatchesRole(plan: SubscriptionPlanKey, role: str
   return true
 }
 
-export function freelancerPlanForStatus(plan: SubscriptionPlanKey): FreelancerPlan {
+export function freelancerPlanForStatus(plan: SubscriptionPlanKey): NormalizedFreelancerPlan {
   return freelancerPlanFromSubscription(plan)
 }

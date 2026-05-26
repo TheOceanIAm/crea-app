@@ -19,6 +19,10 @@ import {
 } from '@/lib/revenuecat/customerInfo'
 import type { SubscriptionPlanKey } from '@/lib/revenuecat/config'
 
+function isAnonymousRevenueCatUser(appUserId: string | undefined): boolean {
+  return !appUserId || appUserId.startsWith('$RCAnonymousID')
+}
+
 type RevenueCatContextValue = {
   ready: boolean
   configured: boolean
@@ -111,8 +115,13 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
           const { customerInfo: info } = await Purchases.logIn(session.user.id)
           applyCustomerInfo(info)
         } else {
-          await Purchases.logOut()
-          setCustomerInfo(null)
+          const info = await Purchases.getCustomerInfo()
+          if (!isAnonymousRevenueCatUser(info.originalAppUserId)) {
+            const { customerInfo: loggedOut } = await Purchases.logOut()
+            applyCustomerInfo(loggedOut)
+          } else {
+            applyCustomerInfo(info)
+          }
         }
       } catch (e) {
         console.warn('[RevenueCat] auth sync failed', e)

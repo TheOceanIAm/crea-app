@@ -17,6 +17,7 @@ import Purchases, {
 } from 'react-native-purchases'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { supabase } from '@/lib/supabase'
+import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { useSubscription } from '@/hooks/useSubscription'
 import { useRevenueCat } from '@/contexts/RevenueCatContext'
 import {
@@ -30,7 +31,7 @@ import {
 } from '@/lib/revenuecat/config'
 import { resolveAppRole } from '@/lib/profileRole'
 import {
-  OFFERINGS_EMPTY_MESSAGE,
+  offeringsEmptyMessage,
   offeringsLoadErrorMessage,
   purchasesUnavailableUserMessage,
 } from '@/lib/revenuecat/purchasesEnvironment'
@@ -44,31 +45,21 @@ type PlanCard = {
 
 const FREELANCER_PLANS: PlanCard[] = [
   {
-    key: 'starter',
-    packageKey: RC_PACKAGE_STARTER,
-    title: 'Starter',
-    description: 'Basic profile, project feed, 2 active bookings/month, standard support.',
-  },
-  {
     key: 'pro',
     packageKey: RC_PACKAGE_PRO,
     title: 'Pro',
-    description: 'Everything in Starter + post listings, 5 active bookings/month, Project feed+.',
+    description:
+      'Apply to jobs, post listings, full Workspace, Sun Planner, Brief AI, and Invoicing. €8.99/mo or €59.99/yr.',
   },
 ]
 
 const COMPANY_PLANS: PlanCard[] = [
   {
-    key: 'studio',
-    packageKey: RC_PACKAGE_STUDIO,
-    title: 'Studio',
-    description: 'Up to 5 active listings, crew pool up to 20, contract generator, standard support.',
-  },
-  {
-    key: 'agency',
+    key: 'pro',
     packageKey: RC_PACKAGE_AGENCY,
-    title: 'Agency',
-    description: 'Up to 15 listings, crew pool up to 50, team access, integrations + priority support.',
+    title: 'Pro',
+    description:
+      'Unlimited listings & pool, 2 team seats included, all hiring tools. €89/mo or €649.99/yr.',
   },
 ]
 
@@ -112,7 +103,7 @@ export default function PaywallScreen() {
         offerings.all[RC_DEFAULT_OFFERING_ID] ?? offerings.current ?? null
       setPackages(offering?.availablePackages ?? [])
       if (!offering?.availablePackages?.length) {
-        setLoadError(OFFERINGS_EMPTY_MESSAGE)
+        setLoadError(offeringsEmptyMessage())
       }
     } catch (e) {
       setLoadError(offeringsLoadErrorMessage(e))
@@ -195,8 +186,17 @@ export default function PaywallScreen() {
     try {
       await Purchases.restorePurchases()
       await refresh()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       Alert.alert('Restored', 'Your purchases were restored.', [
-        { text: 'OK', onPress: () => router.replace('/(tabs)/feed') },
+        {
+          text: 'OK',
+          onPress: () => {
+            if (user) router.replace('/(tabs)/feed')
+            else router.replace('/register')
+          },
+        },
       ])
     } catch (e) {
       const err = e as PurchasesError
@@ -206,12 +206,20 @@ export default function PaywallScreen() {
     }
   }
 
+  const canGoBack = router.canGoBack()
+
+  const goBack = useCallback(() => {
+    if (canGoBack) router.back()
+  }, [canGoBack, router])
+
   return (
     <View style={[styles.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
-          <Text style={styles.back}>← Back</Text>
-        </TouchableOpacity>
+        {canGoBack ? (
+          <TouchableOpacity onPress={goBack} hitSlop={12}>
+            <Text style={styles.back}>← Back</Text>
+          </TouchableOpacity>
+        ) : null}
         <Text style={styles.title}>Choose your plan</Text>
         <Text style={styles.subtitle}>CREA Services — subscribe with your Apple ID</Text>
       </View>
@@ -253,6 +261,7 @@ export default function PaywallScreen() {
                   ) : null}
                 </View>
                 <Text style={styles.cardPrice}>{price}</Text>
+                <Text style={styles.cardTerm}>1 month, auto-renewing subscription</Text>
                 <Text style={styles.cardDesc}>{card.description}</Text>
                 <TouchableOpacity
                   style={[styles.primaryBtn, (!pkg || busy || isCurrent) && styles.btnDisabled]}
@@ -268,9 +277,28 @@ export default function PaywallScreen() {
           })}
 
           <Text style={styles.legal}>
-            Subscription is managed through your Apple Account. You can cancel or change your plan in
-            Settings → Apple ID → Subscriptions. Payment is charged to your Apple ID at confirmation.
+            Payment is charged to your Apple ID at confirmation. Subscriptions auto-renew each month until
+            cancelled in Settings → Apple ID → Subscriptions at least 24 hours before the end of the current period.
           </Text>
+
+          <View style={styles.legalLinks}>
+            <TouchableOpacity onPress={openTerms} hitSlop={8}>
+              <Text style={styles.legalLink}>Terms of Use (EULA)</Text>
+            </TouchableOpacity>
+            <Text style={styles.legalDot}>·</Text>
+            <TouchableOpacity onPress={openPrivacy} hitSlop={8}>
+              <Text style={styles.legalLink}>Privacy Policy</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.guestHint}>
+            No account required to subscribe. After purchase you can create an account to sync your subscription
+            across devices — or log in if you already have one.
+          </Text>
+
+          <TouchableOpacity onPress={() => router.push('/login')} hitSlop={8}>
+            <Text style={styles.loginLink}>Already have an account? Log in</Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.secondaryBtn, restoring && styles.btnDisabled]}
@@ -326,6 +354,7 @@ const styles = StyleSheet.create({
   },
   currentPillText: { color: '#FFDC00', fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
   cardPrice: { color: '#FFDC00', fontSize: 22, fontWeight: '800', marginTop: 8 },
+  cardTerm: { color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 4 },
   cardDesc: { color: 'rgba(255,255,255,0.45)', fontSize: 12, lineHeight: 18, marginTop: 8 },
   primaryBtn: {
     marginTop: 14,
@@ -351,6 +380,31 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     marginTop: 8,
     textAlign: 'center',
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  legalLink: { color: '#FFDC00', fontSize: 12, fontWeight: '600' },
+  legalDot: { color: 'rgba(255,255,255,0.25)', fontSize: 12 },
+  guestHint: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'center',
+    marginTop: 14,
+    paddingHorizontal: 8,
+  },
+  loginLink: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 12,
+    marginBottom: 4,
+    fontWeight: '600',
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   loadingText: { color: 'rgba(255,255,255,0.4)', fontSize: 13 },

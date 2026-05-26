@@ -22,11 +22,7 @@ import { getCache, setCache } from '@/lib/appCache'
 import { runTimed } from '@/lib/perfMarks'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 import { TabScreenHeader } from '@/components/TabScreenHeader'
-import {
-  isFreelancerWorkspaceOnlyPlan,
-  resolveFreelancerPlanFromUserAndProfileTier,
-} from '@/lib/freelancerPlan'
-import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
+import { resolveAppRole } from '@/lib/profileRole'
 
 function timeAgo(str: string) {
   const t = new Date(str).getTime()
@@ -72,10 +68,7 @@ export default function NotificationsScreen() {
             .eq('id', user.id)
             .maybeSingle()
           const role = resolveAppRole(profile?.role, user)
-          const plan = resolveFreelancerPlanFromUserAndProfileTier(user, profile?.subscription_tier)
-          const workspaceOnly =
-            isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(plan)
-          setShowMessages(!workspaceOnly)
+          setShowMessages(true)
           const cacheKey = `notifications:${user.id}`
           const cached = getCache<{ rows: NotificationRow[]; reads: string[] }>(cacheKey)
           if (cached) {

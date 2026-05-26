@@ -19,7 +19,7 @@ import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { formatDate, invoiceStatusLabel, money, statusVariant } from '@/lib/invoiceFormatting'
 import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
-import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { freelancerHasInvoicing, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 
 type InvoiceRow = {
   id: string
@@ -171,6 +171,7 @@ export default function InvoicesListScreen() {
   const [annualBudgetCurrency, setAnnualBudgetCurrency] = useState('EUR')
   const [annualBudgetYear, setAnnualBudgetYear] = useState(String(new Date().getFullYear()))
   const [savingAnnualBudget, setSavingAnnualBudget] = useState(false)
+  const [invoicingAllowed, setInvoicingAllowed] = useState(true)
   const [readyToInvoice, setReadyToInvoice] = useState<ReadyInvoiceJob[]>([])
 
   const load = useCallback(async () => {
@@ -187,8 +188,10 @@ export default function InvoicesListScreen() {
     const role = isCompanyProfile(resolvedRole) ? 'company' : 'freelancer'
     setPerspective(role)
     const freelancerPlan = resolveFreelancerPlanFromUser(user)
-    const budgetAllowed = role === 'company' || !isFreelancerWorkspaceOnlyPlan(freelancerPlan)
+    const budgetAllowed = role === 'company' || freelancerHasInvoicing(freelancerPlan)
+    const canUseInvoicing = role === 'company' || freelancerHasInvoicing(freelancerPlan)
     setShowBudgetOverview(budgetAllowed)
+    setInvoicingAllowed(canUseInvoicing)
 
     let q = supabase
       .from('invoices')
@@ -379,6 +382,36 @@ export default function InvoicesListScreen() {
       <View style={styles.center}>
         <ActivityIndicator color="#FFDC00" size="large" />
       </View>
+    )
+  }
+
+  if (perspective === 'freelancer' && !invoicingAllowed) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.replace('/(tabs)/feed')}
+            hitSlop={12}
+          >
+            <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+            <Text style={styles.backLabel}>Dashboard</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.upgradeCenter}>
+          <Text style={styles.upgradeTitle}>Invoicing is a Pro feature</Text>
+          <Text style={styles.upgradeSub}>
+            Upgrade to Pro to create invoices, track earnings, and send payouts from the app.
+          </Text>
+          <TouchableOpacity
+            style={styles.upgradeBtn}
+            activeOpacity={0.85}
+            onPress={() => router.push('/paywall')}
+          >
+            <Text style={styles.upgradeBtnText}>Upgrade to Pro</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     )
   }
 
@@ -713,6 +746,22 @@ export default function InvoicesListScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
   center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center' },
+  upgradeCenter: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingBottom: 48,
+  },
+  upgradeTitle: { fontSize: 20, fontWeight: '800', color: '#fff', marginBottom: 10 },
+  upgradeSub: { fontSize: 14, color: 'rgba(255,255,255,0.55)', lineHeight: 21, marginBottom: 20 },
+  upgradeBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFDC00',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  upgradeBtnText: { fontSize: 14, fontWeight: '800', color: '#0a0a0a' },
   topBar: { paddingHorizontal: 12, paddingBottom: 4 },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 8 },
   backLabel: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },

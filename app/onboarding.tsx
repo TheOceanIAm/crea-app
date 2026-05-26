@@ -22,23 +22,23 @@ import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 import { pickAndUploadAvatarOnly } from '@/lib/uploadProfileAvatar'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { postTrialPlan } from '@/lib/trialPlanApi'
-import { IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY } from '@/lib/iosAppStoreCompliance'
+import { IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY, getLoggedOutEntryRoute } from '@/lib/iosAppStoreCompliance'
+import {
+  freelancerPlanDescription,
+  freelancerPlanLabel,
+  companyStripePlanDescription,
+  companyStripePlanLabel,
+  type NormalizedFreelancerPlan,
+} from '@/lib/billingDisplay'
+import type { CompanySubscriptionPlanDb } from '@/lib/companyPlanFromSession'
 
 type RoleChoice = 'freelancer' | 'company'
 
-type TrialFreelancerPlanKey = 'workspace' | 'starter' | 'pro'
-type TrialCompanyPlanKey = 'studio' | 'agency'
+type TrialFreelancerPlanKey = NormalizedFreelancerPlan
+type TrialCompanyPlanKey = CompanySubscriptionPlanDb
 
-const FREELANCER_TRIAL_OPTIONS: { key: TrialFreelancerPlanKey; title: string; desc: string }[] = [
-  { key: 'workspace', title: 'Workspace', desc: 'Solo projects — not listed in the pool.' },
-  { key: 'starter', title: 'Starter', desc: 'Core marketplace — limited postings.' },
-  { key: 'pro', title: 'Pro', desc: 'Full marketplace & collaboration.' },
-]
-
-const COMPANY_TRIAL_OPTIONS: { key: TrialCompanyPlanKey; title: string; desc: string }[] = [
-  { key: 'studio', title: 'Studio', desc: 'Smaller hiring footprint.' },
-  { key: 'agency', title: 'Agency', desc: 'More listings & pool depth.' },
-]
+const FREELANCER_TRIAL_OPTIONS: TrialFreelancerPlanKey[] = ['free', 'pro']
+const COMPANY_TRIAL_OPTIONS: TrialCompanyPlanKey[] = ['free', 'pro']
 
 export default function OnboardingScreen() {
   const [checking, setChecking] = useState(true)
@@ -51,13 +51,13 @@ export default function OnboardingScreen() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [termsAccepted, setTermsAccepted] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [trialFreelancerPlan, setTrialFreelancerPlan] = useState<TrialFreelancerPlanKey>('workspace')
-  const [trialCompanyPlan, setTrialCompanyPlan] = useState<TrialCompanyPlanKey>('studio')
+  const [trialFreelancerPlan, setTrialFreelancerPlan] = useState<TrialFreelancerPlanKey>('free')
+  const [trialCompanyPlan, setTrialCompanyPlan] = useState<TrialCompanyPlanKey>('free')
 
   const verifySession = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
-      router.replace('/login')
+      router.replace(getLoggedOutEntryRoute())
       return
     }
     setUserId(user.id)
@@ -145,7 +145,7 @@ export default function OnboardingScreen() {
 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
-      router.replace('/login')
+      router.replace(getLoggedOutEntryRoute())
       return
     }
 
@@ -189,7 +189,6 @@ export default function OnboardingScreen() {
       return
     }
 
-    // Supabase Dashboard → Authentication → Users shows "Display name" from JWT user_metadata, not profiles.name.
     const { error: metaErr } = await supabase.auth.updateUser({
       data: {
         name,
@@ -237,7 +236,7 @@ export default function OnboardingScreen() {
     step === 0
       ? 'You can change details later in settings.'
       : step === 1
-        ? 'During your platform trial (same dates as creaservices.de) you can switch tiers on the web under Settings → Plan. Premium / Business / Enterprise unlock after checkout or via sales.'
+        ? 'During your 30-day platform trial you can preview Free vs Pro. Switch anytime under Profile → Plan (same as creaservices.de).'
         : step === 2
           ? roleChoice === 'company'
             ? 'This is how you appear to freelancers.'
@@ -271,7 +270,7 @@ export default function OnboardingScreen() {
                 <View style={styles.roleIconWrap}>
                   <Briefcase size={28} color="#FFDC00" strokeWidth={ICON_STROKE} />
                 </View>
-                <Text style={styles.roleTitle}>I’m a freelancer</Text>
+                <Text style={styles.roleTitle}>I'm a freelancer</Text>
                 <Text style={styles.roleDesc}>Find jobs, send invoices, share your portfolio.</Text>
               </TouchableOpacity>
 
@@ -297,33 +296,42 @@ export default function OnboardingScreen() {
               </TouchableOpacity>
 
               <View style={styles.roleGrid}>
-                {roleChoice === 'freelancer'
-                  ? FREELANCER_TRIAL_OPTIONS.map((opt) => (
-                      <TouchableOpacity
-                        key={opt.key}
-                        style={[
-                          styles.roleCard,
-                          trialFreelancerPlan === opt.key && styles.roleCardSelected,
-                        ]}
-                        onPress={() => setTrialFreelancerPlan(opt.key)}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.roleTitle}>{opt.title}</Text>
-                        <Text style={styles.roleDesc}>{opt.desc}</Text>
-                      </TouchableOpacity>
-                    ))
-                  : COMPANY_TRIAL_OPTIONS.map((opt) => (
-                      <TouchableOpacity
-                        key={opt.key}
-                        style={[styles.roleCard, trialCompanyPlan === opt.key && styles.roleCardSelected]}
-                        onPress={() => setTrialCompanyPlan(opt.key)}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.roleTitle}>{opt.title}</Text>
-                        <Text style={styles.roleDesc}>{opt.desc}</Text>
-                      </TouchableOpacity>
-                    ))}
+                {(roleChoice === 'freelancer' ? FREELANCER_TRIAL_OPTIONS : COMPANY_TRIAL_OPTIONS).map((key) => {
+                  const selected =
+                    roleChoice === 'freelancer'
+                      ? trialFreelancerPlan === key
+                      : trialCompanyPlan === key
+                  const titleLabel =
+                    roleChoice === 'freelancer'
+                      ? freelancerPlanLabel(key as TrialFreelancerPlanKey)
+                      : companyStripePlanLabel(key as TrialCompanyPlanKey)
+                  const desc =
+                    roleChoice === 'freelancer'
+                      ? freelancerPlanDescription(key as TrialFreelancerPlanKey)
+                      : companyStripePlanDescription(key as TrialCompanyPlanKey)
+                  return (
+                    <TouchableOpacity
+                      key={key}
+                      style={[styles.roleCard, selected && styles.roleCardSelected]}
+                      onPress={() =>
+                        roleChoice === 'freelancer'
+                          ? setTrialFreelancerPlan(key as TrialFreelancerPlanKey)
+                          : setTrialCompanyPlan(key as TrialCompanyPlanKey)
+                      }
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.roleTitle}>{titleLabel}</Text>
+                      <Text style={styles.roleDesc}>{desc}</Text>
+                    </TouchableOpacity>
+                  )
+                })}
               </View>
+              {roleChoice === 'company' ? (
+                <Text style={styles.trialFootnote}>
+                  During the 30-day platform trial, both options give full Pro features. After trial, companies need Pro
+                  to continue.
+                </Text>
+              ) : null}
             </>
           ) : null}
 
@@ -466,7 +474,7 @@ export default function OnboardingScreen() {
             style={styles.signOutRow}
             onPress={async () => {
               await supabase.auth.signOut({ scope: 'local' })
-              router.replace('/login')
+              router.replace(getLoggedOutEntryRoute())
             }}
             hitSlop={12}
           >
@@ -519,6 +527,13 @@ const styles = StyleSheet.create({
   },
   roleTitle: { fontSize: 18, fontWeight: '800', color: '#ffffff', marginBottom: 6 },
   roleDesc: { fontSize: 13, color: 'rgba(255,255,255,0.4)', lineHeight: 18 },
+  trialFootnote: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.28)',
+    lineHeight: 16,
+    marginTop: -12,
+    marginBottom: 8,
+  },
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 20, alignSelf: 'flex-start' },
   backText: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },
   fieldLabel: {

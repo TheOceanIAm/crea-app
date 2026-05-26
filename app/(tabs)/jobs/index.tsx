@@ -20,10 +20,13 @@ import { useFocusEffect, useRouter } from 'expo-router'
 import { PlusCircle } from 'lucide-react-native'
 import * as Linking from 'expo-linking'
 import { supabase } from '@/lib/supabase'
-import { isCeoProfile, isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
+import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
-import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
+import {
+  freelancerCanApplyToJobs,
+  resolveFreelancerPlanFromUserAndProfileTier,
+} from '@/lib/freelancerPlan'
 import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
 import { publishCeoExternalJob } from '@/lib/ceoExternalJobsApi'
 import { getCache, setCache } from '@/lib/appCache'
@@ -101,7 +104,7 @@ export default function JobsListScreen() {
   const [loading, setLoading] = useState(true)
   const [isCompanyUser, setIsCompanyUser] = useState(false)
   const [isCeoUser, setIsCeoUser] = useState(false)
-  const [workspaceOnly, setWorkspaceOnly] = useState(false)
+  const [isFreeFreelancer, setIsFreeFreelancer] = useState(false)
   const [feedTab, setFeedTab] = useState<'crea' | 'external'>('crea')
   const [search, setSearch] = useState('')
   const [externalJobs, setExternalJobs] = useState<ExternalJob[]>([])
@@ -145,19 +148,10 @@ export default function JobsListScreen() {
           .eq('id', user.id)
           .maybeSingle()
         role = resolveAppRole(prof?.role, user)
-        const isWorkspaceFreelancer =
-          role === 'freelancer' &&
-          isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier))
-        setWorkspaceOnly(isWorkspaceFreelancer)
-        if (isWorkspaceFreelancer) {
-          setIsCeoUser(false)
-          setJobs([])
-          setExternalJobs([])
-          setLoading(false)
-          return
-        }
+        const plan = resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier)
+        setIsFreeFreelancer(isFreelancerProfile(role) && !freelancerCanApplyToJobs(plan))
       } else {
-        setWorkspaceOnly(false)
+        setIsFreeFreelancer(false)
         setIsCeoUser(false)
       }
       const companyOnly = Boolean(user && isCompanyProfile(role))
@@ -323,7 +317,7 @@ export default function JobsListScreen() {
   const feedListData: (Job | ExternalJob)[] = showExternalFeed ? filteredExternalJobs : filteredCreaJobs
 
   const showInitialSkeleton =
-    loading && !workspaceOnly && (showExternalFeed ? externalJobs.length === 0 : jobs.length === 0)
+    loading && (showExternalFeed ? externalJobs.length === 0 : jobs.length === 0)
 
   async function submitCeoExternalListing() {
     const t = ceoTitle.trim()
@@ -394,7 +388,7 @@ export default function JobsListScreen() {
         </TouchableOpacity>
       ) : null}
 
-      {isCeoUser && !workspaceOnly ? (
+      {isCeoUser ? (
         <TouchableOpacity
           style={styles.ceoAddExternalBtn}
           activeOpacity={0.85}
@@ -407,7 +401,7 @@ export default function JobsListScreen() {
         </TouchableOpacity>
       ) : null}
 
-      {!isCompanyUser && !workspaceOnly ? (
+      {!isCompanyUser ? (
         <View style={styles.feedTabs}>
           <TouchableOpacity
             style={[styles.feedTabBtn, feedTab === 'crea' && styles.feedTabBtnActive]}
@@ -448,9 +442,7 @@ export default function JobsListScreen() {
         windowSize={8}
         removeClippedSubviews
         refreshControl={
-          workspaceOnly ? undefined : (
-            <RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor="#FFDC00" />
-          )
+          <RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor="#FFDC00" />
         }
         contentContainerStyle={[styles.list, feedListData.length === 0 && styles.listEmpty]}
         showsVerticalScrollIndicator={false}
@@ -564,19 +556,34 @@ export default function JobsListScreen() {
             ) : null}
           </TouchableOpacity>
         )}
+        ListHeaderComponent={
+          isFreeFreelancer ? (
+            <View style={styles.freePlanBanner}>
+              <Text style={styles.freePlanBannerTitle}>Browse mode</Text>
+              <Text style={styles.freePlanBannerText}>
+                You can browse all listings on Free. Upgrade to Pro to apply to jobs.
+              </Text>
+              <TouchableOpacity
+                style={styles.freePlanBannerBtn}
+                activeOpacity={0.85}
+                onPress={() => router.push('/paywall')}
+              >
+                <Text style={styles.freePlanBannerBtnText}>Upgrade to Pro</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           showInitialSkeleton ? (
             <ScreenListSkeleton rows={5} />
           ) : (
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyText}>
-                {workspaceOnly
-                  ? 'Workspace plan: marketplace jobs are hidden.'
-                  : isCompanyUser
-                    ? 'No projects yet. Post one above.'
-                    : feedTab === 'external'
-                      ? 'No external jobs found'
-                      : 'No jobs found'}
+                {isCompanyUser
+                  ? 'No projects yet. Post one above.'
+                  : feedTab === 'external'
+                    ? 'No external jobs found'
+                    : 'No jobs found'}
               </Text>
             </View>
           )
@@ -901,6 +908,24 @@ const styles = StyleSheet.create({
   },
   statusPillText: { fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.55)', letterSpacing: 0.5 },
   emptyWrap: { paddingVertical: 32, alignItems: 'center' },
+  freePlanBanner: {
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,220,0,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.22)',
+  },
+  freePlanBannerTitle: { fontSize: 13, fontWeight: '800', color: '#FFDC00', marginBottom: 6 },
+  freePlanBannerText: { fontSize: 13, color: 'rgba(255,255,255,0.65)', lineHeight: 19, marginBottom: 12 },
+  freePlanBannerBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFDC00',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  freePlanBannerBtnText: { fontSize: 13, fontWeight: '800', color: '#0a0a0a' },
   cardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',

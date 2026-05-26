@@ -44,6 +44,7 @@ import { deleteAccountViaApi } from '@/lib/deleteAccountApi'
 import {
   openCreaWebsiteInBrowser,
   getCreaMarketingSiteUrl,
+  getLoggedOutEntryRoute,
 } from '@/lib/iosAppStoreCompliance'
 import { useSubscription } from '@/hooks/useSubscription'
 import { ICON_STROKE, ICON_STROKE_LARGE } from '@/lib/iconTheme'
@@ -71,7 +72,26 @@ import { registerForExpoPushTokenAsync } from '@/lib/pushNotifications'
 import { CreaProfileTabSkeleton } from '@/components/CreaLoading'
 import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
 import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
-import { resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { resolveFreelancerPlanFromUser, isFreelancerPro } from '@/lib/freelancerPlan'
+import {
+  freelancerPlanDescription,
+  freelancerPlanLabel,
+  companyStripePlanDescription,
+  companyStripePlanLabel,
+  normalizeFreelancerPlanKey,
+  normalizeCompanyStripePlan,
+  type NormalizedFreelancerPlan,
+  type CompanyStripePlan,
+} from '@/lib/billingDisplay'
+import type { CompanySubscriptionPlanDb } from '@/lib/companyPlanFromSession'
+import {
+  companyPlanPriceLinePerMonth,
+  companyPlanPriceLinePerYear,
+  companySeatAddonPriceLine,
+  freelancerProPriceLineMonthly,
+  freelancerProPriceLineYearly,
+} from '@/lib/planCatalogPrices'
+import { openCompanySeatManagementOnWeb } from '@/lib/companySeatBilling'
 import { postTrialPlan } from '@/lib/trialPlanApi'
 import { setBillingNotice } from '@/lib/billingNotice'
 import {
@@ -89,9 +109,10 @@ import {
   computeCompanyBillingReadiness,
   type CompanyProfileCompletionRow,
 } from '@/lib/profile-completion'
+import { PlatformTrialBar } from '@/components/PlatformTrialBar'
 import {
-  formatPlatformTrialEndDate,
   isWithinPlatformTrialPeriod,
+  platformTrialDaysLeft,
 } from '@/lib/platformTrial'
 
 const SUPPORT_EMAIL = 'support@creaservices.com'
@@ -136,7 +157,6 @@ const MENU_ITEMS: MenuItem[] = [
 const CEO_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability', 'billing', 'plan']
 /** Rates, availability & links are freelancer-focused; companies edit website/social under Profile. */
 const COMPANY_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability']
-const WORKSPACE_PLAN_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability', 'billing']
 
 function roleLabel(role: string) {
   if (role === 'company') return 'Company'
@@ -210,52 +230,44 @@ function PlanRow({
   )
 }
 
+function CompanySeatWebPanel() {
+  return (
+    <View style={styles.seatWebPanel}>
+      <Text style={styles.seatWebTitle}>Team seats</Text>
+      <Text style={styles.seatWebText}>
+        Pro includes 2 seats. Additional seats ({companySeatAddonPriceLine()}) are purchased on creaservices.de
+        via Stripe — not in the App Store.
+      </Text>
+      <TouchableOpacity
+        style={styles.secondaryBtn}
+        onPress={() => void openCompanySeatManagementOnWeb()}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.secondaryBtnText}>Manage seats on web</Text>
+      </TouchableOpacity>
+    </View>
+  )
+}
+
 function CurrentPlanSummary({
   company,
-  companyPlanTier,
-  subscriptionTier,
+  freelancerPlan,
+  companyPlan,
 }: {
   company: boolean
-  companyPlanTier: string
-  subscriptionTier: string
+  freelancerPlan: NormalizedFreelancerPlan
+  companyPlan: CompanyStripePlan
 }) {
+  const name = company ? companyStripePlanLabel(companyPlan ?? 'free') : freelancerPlanLabel(freelancerPlan)
+  const desc = company
+    ? companyStripePlanDescription(companyPlan ?? 'free')
+    : freelancerPlanDescription(freelancerPlan)
+
   return (
     <View style={styles.currentPlanBox}>
       <Text style={styles.currentPlanLabel}>Current plan</Text>
-      <Text style={styles.currentPlanName}>
-        {company
-          ? companyPlanTier === 'enterprise'
-            ? 'Enterprise'
-            : companyPlanTier === 'business'
-              ? 'Business'
-              : companyPlanTier === 'agency'
-                ? 'Agency'
-                : 'Studio'
-          : subscriptionTier === 'workspace'
-            ? 'Workspace'
-            : subscriptionTier === 'pro'
-              ? 'Pro'
-              : subscriptionTier === 'premium'
-                ? 'Premium'
-                : 'Starter'}
-      </Text>
-      <Text style={styles.currentPlanDesc}>
-        {company
-          ? companyPlanTier === 'enterprise'
-            ? 'Custom package for large companies with dedicated account support.'
-            : companyPlanTier === 'business'
-              ? 'Scale plan with unlimited listings/pool and legal + insurance features.'
-              : companyPlanTier === 'agency'
-                ? 'Growth plan for agencies with more listings, larger crew pool and integrations.'
-                : 'Core plan for studios with essential hiring workflow and contract generator.'
-          : subscriptionTier === 'workspace'
-            ? 'Solo workspace for your own projects - not visible in the talent pool or marketplace.'
-            : subscriptionTier === 'pro'
-              ? 'Everything in Starter + post project listings, 5 active bookings/month, Project feed+.'
-              : subscriptionTier === 'premium'
-                ? 'Everything in Pro including verified badge, liability insurance, legal docs, and tax/accounting tools.'
-                : 'Basic profile, basic project feed, 2 active bookings/month, standard support.'}
-      </Text>
+      <Text style={styles.currentPlanName}>{name}</Text>
+      <Text style={styles.currentPlanDesc}>{desc}</Text>
     </View>
   )
 }
@@ -315,7 +327,7 @@ export default function ProfileScreen() {
   const [savingNotif, setSavingNotif] = useState(false)
   const [registeringPush, setRegisteringPush] = useState(false)
 
-  const [subscriptionTier, setSubscriptionTier] = useState('starter')
+  const [subscriptionTier, setSubscriptionTier] = useState<'free' | 'pro'>('free')
   /** ISO from `profiles.trial_ends_at` — platform exploration end (same as web). */
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null)
   const [accountCreatedAt, setAccountCreatedAt] = useState<string | null>(null)
@@ -339,30 +351,37 @@ export default function ProfileScreen() {
   const freelancer = isFreelancerProfile(role)
   const ceo = isCeoProfile(role)
   const company = isCompanyProfile(role)
-  const workspacePlan = freelancer && subscriptionTier === 'workspace'
-  const { unreadDmCount } = useUnreadDmCount(authUserId, !workspacePlan)
+  const { unreadDmCount } = useUnreadDmCount(authUserId, Boolean(authUserId))
   const { isSubscribed: iosStoreSubscribed, currentPlan: iosStorePlan } = useSubscription()
-  const trialEndLabel = useMemo(
-    () => formatPlatformTrialEndDate(trialEndsAt, accountCreatedAt),
-    [trialEndsAt, accountCreatedAt]
-  )
   const inPlatformTrial = useMemo(
     () => isWithinPlatformTrialPeriod(trialEndsAt, accountCreatedAt),
     [trialEndsAt, accountCreatedAt]
   )
 
-  const companyPlanTier = useMemo(() => {
-    if (!company) return ''
-    const t = String(subscriptionTier || '')
-      .trim()
-      .toLowerCase()
-    // Backward compatibility for older company rows still carrying freelancer tier names.
-    if (t === 'starter' || t === 'workspace') return 'studio'
-    if (t === 'pro') return 'agency'
-    if (t === 'premium') return 'business'
-    if (t === 'studio' || t === 'agency' || t === 'business' || t === 'enterprise') return t
-    return 'studio'
+  const normalizedFreelancerPlan = useMemo(
+    (): NormalizedFreelancerPlan =>
+      freelancer ? normalizeFreelancerPlanKey(subscriptionTier) : 'free',
+    [freelancer, subscriptionTier]
+  )
+
+  const normalizedCompanyPlan = useMemo((): CompanyStripePlan => {
+    if (!company) return null
+    return normalizeCompanyStripePlan(subscriptionTier) ?? 'free'
   }, [company, subscriptionTier])
+
+  const iosDisplayFreelancerPlan = useMemo((): NormalizedFreelancerPlan => {
+    if (iosStoreSubscribed && iosStorePlan !== 'free') {
+      return normalizeFreelancerPlanKey(iosStorePlan)
+    }
+    return normalizedFreelancerPlan
+  }, [iosStoreSubscribed, iosStorePlan, normalizedFreelancerPlan])
+
+  const iosDisplayCompanyPlan = useMemo((): CompanySubscriptionPlanDb => {
+    if (iosStoreSubscribed && iosStorePlan !== 'free') {
+      return normalizeCompanyStripePlan(iosStorePlan) ?? 'free'
+    }
+    return normalizedCompanyPlan ?? 'free'
+  }, [iosStoreSubscribed, iosStorePlan, normalizedCompanyPlan])
 
   const profileStrengthPct = useMemo(() => {
     if (ceo) return null
@@ -477,20 +496,13 @@ export default function ProfileScreen() {
   const visibleMenuItems = useMemo(() => {
     if (ceo) return MENU_ITEMS.filter((item) => !CEO_HIDDEN_MENU_IDS.includes(item.id))
     if (company) return MENU_ITEMS.filter((item) => !COMPANY_HIDDEN_MENU_IDS.includes(item.id))
-    if (workspacePlan) return MENU_ITEMS.filter((item) => !WORKSPACE_PLAN_HIDDEN_MENU_IDS.includes(item.id))
     return MENU_ITEMS
-  }, [ceo, company, workspacePlan])
+  }, [ceo, company])
 
   useEffect(() => {
-    const hidden = ceo
-      ? CEO_HIDDEN_MENU_IDS
-      : company
-        ? COMPANY_HIDDEN_MENU_IDS
-        : workspacePlan
-          ? WORKSPACE_PLAN_HIDDEN_MENU_IDS
-          : []
+    const hidden = ceo ? CEO_HIDDEN_MENU_IDS : company ? COMPANY_HIDDEN_MENU_IDS : []
     if (hidden.length && hidden.includes(activeMenu)) setActiveMenu('profile')
-  }, [ceo, company, workspacePlan, activeMenu])
+  }, [ceo, company, activeMenu])
 
   const load = useCallback(async (opts?: { force?: boolean }) => {
     if (
@@ -508,7 +520,7 @@ export default function ProfileScreen() {
       setTrialEndsAt(null)
       setAccountCreatedAt(null)
       setLoading(false)
-      router.replace('/login')
+      router.replace(getLoggedOutEntryRoute())
       return
     }
     setEmail(user.email ?? '')
@@ -558,7 +570,7 @@ export default function ProfileScreen() {
       setTaxNumber('')
       setVatRegistered(false)
       setNotif({ ...DEFAULT_NOTIFICATION_SETTINGS })
-      setSubscriptionTier('starter')
+      setSubscriptionTier('free')
       setTrialEndsAt(null)
       setDayRate('')
       setHalfDayRate('')
@@ -618,7 +630,7 @@ export default function ProfileScreen() {
         .toLowerCase()
       const authTier = resolveFreelancerPlanFromUser(user)
       // Freelancers: JWT `freelancer_plan` (same as web). Companies: JWT `company_plan` → company_profiles → profiles (crea-services webhook order).
-      let effectiveTier: string
+      let effectiveTier: 'free' | 'pro'
       if (appRole === 'freelancer') {
         setCompanyCpExtras(null)
         effectiveTier = authTier
@@ -632,10 +644,7 @@ export default function ProfileScreen() {
         )
       } else {
         setCompanyCpExtras(null)
-        effectiveTier =
-          dbTier === 'pro' || dbTier === 'premium'
-            ? dbTier
-            : 'starter'
+        effectiveTier = normalizeFreelancerPlanKey(dbTier)
       }
       setSubscriptionTier(effectiveTier)
       const dayRateCanonical =
@@ -687,7 +696,7 @@ export default function ProfileScreen() {
   }, [switchingTrialPlan])
 
   const switchTrialTier = useCallback(
-    async (target: 'starter' | 'pro' | 'studio' | 'agency') => {
+    async (target: 'free' | 'pro') => {
       if (switchingTrialPlan) return
       setSwitchingTrialPlan(true)
       const fallbackDirectTierUpdate = async (): Promise<boolean> => {
@@ -696,32 +705,28 @@ export default function ProfileScreen() {
         } = await supabase.auth.getUser()
         if (!user) return false
 
-        if (target === 'starter' || target === 'pro') {
-          const { error: metaErr } = await supabase.auth.updateUser({
-            data: { freelancer_plan: target },
-          })
-          if (metaErr) return false
-        } else {
+        if (company) {
           const { error: metaErr } = await supabase.auth.updateUser({
             data: { company_plan: target },
           })
           if (metaErr) return false
-        }
-
-        const profileTier = target === 'studio' ? 'studio' : target === 'agency' ? 'agency' : target
-        const { error: profileErr } = await supabase
-          .from('profiles')
-          .update({ subscription_tier: profileTier })
-          .eq('id', user.id)
-        if (profileErr) return false
-
-        if (target === 'studio' || target === 'agency') {
           const { error: companyErr } = await supabase
             .from('company_profiles')
             .update({ subscription_plan: target })
             .eq('id', user.id)
           if (companyErr) return false
+        } else {
+          const { error: metaErr } = await supabase.auth.updateUser({
+            data: { freelancer_plan: target },
+          })
+          if (metaErr) return false
         }
+
+        const { error: profileErr } = await supabase
+          .from('profiles')
+          .update({ subscription_tier: target })
+          .eq('id', user.id)
+        if (profileErr) return false
 
         return true
       }
@@ -732,23 +737,16 @@ export default function ProfileScreen() {
         ])
       }
       try {
-        const res =
-          target === 'starter' || target === 'pro'
-            ? await postTrialPlan({ freelancer_plan: target })
-            : await postTrialPlan({ company_plan: target })
+        const res = company
+          ? await postTrialPlan({ company_plan: target })
+          : await postTrialPlan({ freelancer_plan: target })
 
         if (!res.ok) {
           if (res.error === 'timeout' || res.error === 'network_error') {
             const localOk = await fallbackDirectTierUpdate()
             if (localOk) {
               await withTimeout(supabase.auth.refreshSession(), 6000)
-              if (target === 'starter' || target === 'pro') {
-                setSubscriptionTier(target)
-              } else if (target === 'studio') {
-                setSubscriptionTier('studio')
-              } else {
-                setSubscriptionTier('agency')
-              }
+              setSubscriptionTier(target)
               void load()
               Alert.alert(
                 'Plan updated',
@@ -766,29 +764,19 @@ export default function ProfileScreen() {
                   ? 'Network error while switching plan. Please try again.'
                   : res.error || 'Please try again later.'
           void setBillingNotice(errorCopy)
-          Alert.alert(
-            'Could not switch plan',
-            errorCopy
-          )
+          Alert.alert('Could not switch plan', errorCopy)
           return
         }
 
-        // Never block the CTA forever on slow auth/profile refreshes.
         await withTimeout(supabase.auth.refreshSession(), 6000)
-        if (target === 'starter' || target === 'pro') {
-          setSubscriptionTier(target)
-        } else if (target === 'studio') {
-          setSubscriptionTier('studio')
-        } else {
-          setSubscriptionTier('agency')
-        }
+        setSubscriptionTier(target)
         void load()
         Alert.alert('Plan updated', 'Your trial plan was updated.')
       } finally {
         setSwitchingTrialPlan(false)
       }
     },
-    [load, switchingTrialPlan]
+    [company, load, switchingTrialPlan]
   )
 
   const openStripeCustomerPortal = useCallback(async () => {
@@ -811,46 +799,40 @@ export default function ProfileScreen() {
     }
   }, [stripeCheckoutBusy, stripeCustomerId, company])
 
-  const startFreelancerPaidCheckout = useCallback(
-    async (plan: 'starter' | 'pro') => {
-      if (stripeCheckoutBusy) return
-      setStripeCheckoutBusy(true)
-      try {
-        const ok = await openCreaServicesStripeUrl({ apiPath: '/api/stripe/checkout', body: { plan } })
-        if (ok) {
-          Alert.alert(
-            'Stripe checkout',
-            'Complete payment in the browser. Apple Pay and cards are offered when supported. Then return here and open Plan again to refresh.'
-          )
-        }
-      } finally {
-        setStripeCheckoutBusy(false)
+  const startFreelancerPaidCheckout = useCallback(async () => {
+    if (stripeCheckoutBusy) return
+    setStripeCheckoutBusy(true)
+    try {
+      const ok = await openCreaServicesStripeUrl({ apiPath: '/api/stripe/checkout', body: { plan: 'pro' } })
+      if (ok) {
+        Alert.alert(
+          'Stripe checkout',
+          'Complete payment in the browser. Apple Pay and cards are offered when supported. Then return here and open Plan again to refresh.'
+        )
       }
-    },
-    [stripeCheckoutBusy]
-  )
+    } finally {
+      setStripeCheckoutBusy(false)
+    }
+  }, [stripeCheckoutBusy])
 
-  const startCompanyPaidCheckout = useCallback(
-    async (company_plan: 'studio' | 'agency') => {
-      if (stripeCheckoutBusy) return
-      setStripeCheckoutBusy(true)
-      try {
-        const ok = await openCreaServicesStripeUrl({
-          apiPath: '/api/stripe/checkout-company',
-          body: { company_plan },
-        })
-        if (ok) {
-          Alert.alert(
-            'Stripe checkout',
-            'Complete payment in the browser. Apple Pay and cards are offered when supported. Then return here and open Plan again to refresh.'
-          )
-        }
-      } finally {
-        setStripeCheckoutBusy(false)
+  const startCompanyPaidCheckout = useCallback(async () => {
+    if (stripeCheckoutBusy) return
+    setStripeCheckoutBusy(true)
+    try {
+      const ok = await openCreaServicesStripeUrl({
+        apiPath: '/api/stripe/checkout-company',
+        body: { company_plan: 'pro' },
+      })
+      if (ok) {
+        Alert.alert(
+          'Stripe checkout',
+          'Complete payment in the browser. Apple Pay and cards are offered when supported. Then return here and open Plan again to refresh.'
+        )
       }
-    },
-    [stripeCheckoutBusy]
-  )
+    } finally {
+      setStripeCheckoutBusy(false)
+    }
+  }, [stripeCheckoutBusy])
 
   const displayLetter = useMemo(
     () => (editName || email || '?').trim().charAt(0).toUpperCase() || '?',
@@ -1239,7 +1221,7 @@ export default function ProfileScreen() {
             Alert.alert('Sign out failed', error.message)
             return
           }
-          router.replace('/login')
+          router.replace(getLoggedOutEntryRoute())
         },
       },
     ])
@@ -1251,7 +1233,7 @@ export default function ProfileScreen() {
       const r = await deleteAccountViaApi()
       if (r.ok) {
         await supabase.auth.signOut({ scope: 'local' })
-        router.replace('/login')
+        router.replace(getLoggedOutEntryRoute())
       } else {
         Alert.alert('Delete failed', 'error' in r ? r.error : 'Unknown error')
       }
@@ -1310,17 +1292,15 @@ export default function ProfileScreen() {
         <View style={styles.headerRow}>
           <Text style={styles.brand}>Crea</Text>
           <View style={styles.headerRight}>
-            {!workspacePlan ? (
-              <TouchableOpacity
-                style={styles.headerShareBtn}
-                onPress={() => router.push('/(tabs)/messages')}
-                hitSlop={10}
-                accessibilityLabel="Messages"
-              >
-                <MessageCircle size={20} color="rgba(255,255,255,0.55)" strokeWidth={ICON_STROKE} />
-                {unreadDmCount > 0 ? <View style={styles.headerMsgDot} /> : null}
-              </TouchableOpacity>
-            ) : null}
+            <TouchableOpacity
+              style={styles.headerShareBtn}
+              onPress={() => router.push('/(tabs)/messages')}
+              hitSlop={10}
+              accessibilityLabel="Messages"
+            >
+              <MessageCircle size={20} color="rgba(255,255,255,0.55)" strokeWidth={ICON_STROKE} />
+              {unreadDmCount > 0 ? <View style={styles.headerMsgDot} /> : null}
+            </TouchableOpacity>
             {(freelancer || company) && authUserId ? (
               <TouchableOpacity
                 style={styles.headerShareBtn}
@@ -1971,19 +1951,9 @@ export default function ProfileScreen() {
 
               <View style={styles.sectionCard}>
                 <Text style={styles.cardTitle}>Invoice address &amp; tax</Text>
-                <Text style={styles.cardSubtitle}>Your sender details on PDF invoices.</Text>
-                <TouchableOpacity
-                  style={styles.premiumHint}
-                  activeOpacity={0.8}
-                  onPress={() =>
-                    Alert.alert('Premium', 'Advanced tax and accounting features will ship with Premium.')
-                  }
-                >
-                  <Text style={styles.premiumHintText}>
-                    Premium will add deeper tax &amp; accounting tools later.{' '}
-                    <Text style={styles.premiumHintLink}>View Premium</Text>
-                  </Text>
-                </TouchableOpacity>
+                <Text style={styles.cardSubtitle}>
+                  Pro unlocks invoicing and full tax fields. Free users can set up bank details for future use.
+                </Text>
                 <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>Invoice address</Text>
                 <TextInput
                   style={[styles.input, styles.bioInput]}
@@ -2107,94 +2077,55 @@ export default function ProfileScreen() {
               <View style={styles.sectionCard}>
                 <Text style={styles.cardTitle}>Plan</Text>
                 <Text style={styles.cardSubtitle}>
-                  Your current tier and what each plan includes. Subscribe or upgrade in the app with Apple In-App
-                  Purchase. Plan changes and billing details on the web open in your browser.
+                  Free or Pro — subscribe in the app with Apple In-App Purchase (same entitlements as creaservices.de).
                 </Text>
 
                 <CurrentPlanSummary
                   company={company}
-                  companyPlanTier={companyPlanTier}
-                  subscriptionTier={
-                    iosStoreSubscribed && iosStorePlan !== 'free'
-                      ? iosStorePlan === 'starter'
-                        ? 'starter'
-                        : iosStorePlan === 'pro'
-                          ? 'pro'
-                          : iosStorePlan === 'studio'
-                            ? 'studio'
-                            : iosStorePlan === 'agency'
-                              ? 'agency'
-                              : subscriptionTier
-                      : subscriptionTier
-                  }
+                  freelancerPlan={iosDisplayFreelancerPlan}
+                  companyPlan={iosDisplayCompanyPlan}
                 />
 
-                {!ceo && !iosStoreSubscribed && inPlatformTrial ? (
-                  <View style={[styles.trialBanner, { marginTop: 14 }]}>
-                    <Text style={styles.trialBannerText}>
-                      <Text style={styles.trialBannerStrong}>Trial</Text> until{' '}
-                      <Text style={styles.trialBannerStrong}>{trialEndLabel}</Text>
-                      {' — '}new subscribers get 3 months free via the App Store, then monthly billing.
-                    </Text>
-                  </View>
-                ) : !ceo && !iosStoreSubscribed ? (
-                  <View style={[styles.trialBanner, { marginTop: 14 }]}>
-                    <Text style={styles.trialBannerText}>
-                      <Text style={styles.trialBannerStrong}>Trial ended.</Text> Choose a plan below to subscribe with
-                      your Apple ID.
-                    </Text>
-                  </View>
+                {!ceo && !iosStoreSubscribed ? (
+                  <PlatformTrialBar
+                    trialEndsAt={trialEndsAt}
+                    accountCreatedAt={accountCreatedAt}
+                    embedded
+                    style={styles.trialBarEmbedded}
+                  />
                 ) : null}
-
-                <TouchableOpacity
-                  onPress={() =>
-                    Linking.openURL(`${getCreaMarketingSiteUrl().replace(/\/$/, '')}/pricing`).catch(() => {})
-                  }
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
-                >
-                  <Text style={styles.planIosPricingHeading}>Full feature comparison</Text>
-                </TouchableOpacity>
 
                 {company ? (
                   <>
                     <PlanRow
-                      title="Studio"
+                      title="Pro"
                       price="App Store pricing"
-                      desc="Up to 5 active project listings, crew pool up to 20, contract generator, standard support."
-                      cta={iosStorePlan === 'studio' ? 'Your plan' : 'View in App Store'}
-                      current={iosStorePlan === 'studio'}
-                      disabled={iosStorePlan === 'studio'}
+                      desc={companyStripePlanDescription('pro')}
+                      cta={iosDisplayCompanyPlan === 'pro' ? 'Your plan' : 'View in App Store'}
+                      current={iosDisplayCompanyPlan === 'pro'}
+                      disabled={iosDisplayCompanyPlan === 'pro'}
                       onPress={() => router.push('/paywall')}
                     />
-                    <PlanRow
-                      title="Agency"
-                      price="App Store pricing"
-                      desc="Up to 15 listings, crew pool up to 50, team access (up to 3 users), integrations + priority support."
-                      cta={iosStorePlan === 'agency' ? 'Your plan' : 'View in App Store'}
-                      current={iosStorePlan === 'agency'}
-                      disabled={iosStorePlan === 'agency'}
-                      onPress={() => router.push('/paywall')}
-                    />
+                    <CompanySeatWebPanel />
                   </>
                 ) : (
                   <>
                     <PlanRow
-                      title="Starter"
-                      price="App Store pricing"
-                      desc="Basic profile, basic project feed, 2 active bookings/month, standard support."
-                      cta={iosStorePlan === 'starter' ? 'Your plan' : 'View in App Store'}
-                      current={iosStorePlan === 'starter'}
-                      disabled={iosStorePlan === 'starter'}
-                      onPress={() => router.push('/paywall')}
+                      title="Free"
+                      price="€0"
+                      desc={freelancerPlanDescription('free')}
+                      cta={!isFreelancerPro(iosDisplayFreelancerPlan) ? 'Your plan' : 'Included'}
+                      current={!isFreelancerPro(iosDisplayFreelancerPlan)}
+                      disabled={!isFreelancerPro(iosDisplayFreelancerPlan)}
+                      onPress={() => {}}
                     />
                     <PlanRow
                       title="Pro"
                       price="App Store pricing"
-                      desc="Everything in Starter + post project listings, 5 active bookings/month, Project feed+."
-                      cta={iosStorePlan === 'pro' ? 'Your plan' : 'View in App Store'}
-                      current={iosStorePlan === 'pro'}
-                      disabled={iosStorePlan === 'pro'}
+                      desc={freelancerPlanDescription('pro')}
+                      cta={isFreelancerPro(iosDisplayFreelancerPlan) ? 'Your plan' : 'View in App Store'}
+                      current={isFreelancerPro(iosDisplayFreelancerPlan)}
+                      disabled={isFreelancerPro(iosDisplayFreelancerPlan)}
                       onPress={() => router.push('/paywall')}
                     />
                   </>
@@ -2202,80 +2133,55 @@ export default function ProfileScreen() {
 
                 <View style={styles.planIosFooter}>
                   <Text style={[styles.stripeFoot, styles.planIosStripeFoot]}>
-                    Subscriptions are managed through your Apple Account. For plan changes on the web, use
-                    creaservices.de in Safari.
+                    Subscriptions are managed through your Apple Account in Settings → Apple ID → Subscriptions.
                   </Text>
 
                   {!ceo && !iosStoreSubscribed ? (
                     <TouchableOpacity
-                      style={[styles.primaryBtn, styles.planIosFooterBtn]}
+                      style={[styles.primaryBtn, styles.planIosFooterBtn, styles.planIosFooterBtnLast]}
                       onPress={() => router.push('/paywall')}
                       activeOpacity={0.85}
                     >
                       <Text style={styles.primaryBtnText}>Subscribe in app</Text>
                     </TouchableOpacity>
                   ) : null}
-
-                  <TouchableOpacity
-                    style={[styles.secondaryBtn, styles.planIosFooterBtn, styles.planIosFooterBtnLast]}
-                    onPress={() => void openCreaWebsiteInBrowser()}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.secondaryBtnText}>Manage on creaservices.de</Text>
-                  </TouchableOpacity>
                 </View>
               </View>
             ) : (
             <>
               {!ceo && !stripeCustomerId ? (
-                <View style={styles.trialBanner}>
-                  <Text style={styles.trialBannerText}>
-                    {inPlatformTrial ? (
-                      <>
-                        <Text style={styles.trialBannerStrong}>Trial:</Text> Until{' '}
-                        <Text style={styles.trialBannerStrong}>{trialEndLabel}</Text> you can use Crea without a paid
-                        plan. After that, pick a plan below — billing starts after checkout.
-                      </>
-                    ) : (
-                      <>
-                        <Text style={styles.trialBannerStrong}>Trial ended.</Text> Pick a plan below — billing starts
-                        after checkout.
-                      </>
-                    )}
-                  </Text>
-                </View>
+                <PlatformTrialBar
+                  trialEndsAt={trialEndsAt}
+                  accountCreatedAt={accountCreatedAt}
+                  embedded
+                  style={styles.trialBarEmbedded}
+                />
               ) : null}
 
               <View style={styles.sectionCard}>
                 <Text style={styles.cardTitle}>Plan &amp; billing</Text>
                 <Text style={styles.cardSubtitle}>
-                  Start a paid plan from this screen (Stripe Checkout in the browser) or on creaservices.de. With an
-                  active Stripe subscription, use Manage subscription & billing or Plan &amp; billing on the website to
-                  change payment method or cancel.
+                  Same plans as creaservices.de — Stripe Checkout in the browser, or manage on the website.
                 </Text>
 
                 <CurrentPlanSummary
                   company={company}
-                  companyPlanTier={companyPlanTier}
-                  subscriptionTier={subscriptionTier}
+                  freelancerPlan={normalizedFreelancerPlan}
+                  companyPlan={normalizedCompanyPlan}
                 />
 
-                <Text style={styles.stripeHint}>
-                  No paid subscription yet — compare plans below or open the full comparison on the website.
-                </Text>
                 <TouchableOpacity
                   style={styles.secondaryBtn}
                   onPress={() => Linking.openURL('https://creaservices.de/pricing').catch(() => {})}
                 >
-                  <Text style={styles.secondaryBtnText}>View comparison</Text>
+                  <Text style={styles.secondaryBtnText}>View comparison on web</Text>
                 </TouchableOpacity>
 
-                {!ceo && !workspacePlan ? (
+                {!ceo ? (
                   <View style={styles.inAppPayBlock}>
                     <Text style={styles.inAppPayTitle}>Subscribe from the app</Text>
                     <Text style={styles.inAppPaySub}>
-                      Secure Stripe Checkout in the browser — Apple Pay and cards when your device and region support
-                      them. CREA Pay invoice payments use native Stripe / Apple Pay on the invoice screen.
+                      Secure Stripe Checkout in the browser — Apple Pay and cards when supported.
                     </Text>
                     {stripeCustomerId ? (
                       <TouchableOpacity
@@ -2294,130 +2200,78 @@ export default function ProfileScreen() {
                 {company ? (
                   <>
                     <PlanRow
-                      title="Studio"
-                      price="€89 / month"
-                      desc="Up to 5 active project listings, crew pool up to 20, contract generator, standard support."
+                      title="Pro"
+                      price={`${companyPlanPriceLinePerMonth()} · ${companyPlanPriceLinePerYear()}`}
+                      desc={`${companyStripePlanDescription('pro')} ${companySeatAddonPriceLine()}.`}
                       cta={
-                        companyPlanTier === 'studio'
+                        normalizedCompanyPlan === 'pro'
                           ? 'Active'
                           : switchingTrialPlan || stripeCheckoutBusy
                             ? 'Please wait…'
-                            : stripeCustomerId
-                              ? 'Use in trial'
+                            : inPlatformTrial && !stripeCustomerId
+                              ? 'Preview in trial'
                               : 'Subscribe'
                       }
-                      current={companyPlanTier === 'studio'}
-                      disabled={companyPlanTier === 'studio' || switchingTrialPlan || stripeCheckoutBusy}
+                      current={normalizedCompanyPlan === 'pro'}
+                      disabled={normalizedCompanyPlan === 'pro' || switchingTrialPlan || stripeCheckoutBusy}
                       onPress={() =>
-                        void (stripeCustomerId
-                          ? switchTrialTier('studio')
-                          : startCompanyPaidCheckout('studio'))
+                        void (inPlatformTrial && !stripeCustomerId
+                          ? switchTrialTier('pro')
+                          : startCompanyPaidCheckout())
                       }
                     />
-                    <PlanRow
-                      title="Agency"
-                      price="€129 / month"
-                      desc="Up to 15 listings, crew pool up to 50, team access (up to 3 users), integrations + priority support."
-                      cta={
-                        companyPlanTier === 'agency'
-                          ? 'Active'
-                          : switchingTrialPlan || stripeCheckoutBusy
-                            ? 'Please wait…'
-                            : stripeCustomerId
-                              ? 'Use in trial'
-                              : 'Subscribe'
-                      }
-                      current={companyPlanTier === 'agency'}
-                      disabled={companyPlanTier === 'agency' || switchingTrialPlan || stripeCheckoutBusy}
-                      onPress={() =>
-                        void (stripeCustomerId ? switchTrialTier('agency') : startCompanyPaidCheckout('agency'))
-                      }
-                    />
-                    <PlanRow
-                      title="Business"
-                      price="€249 / month"
-                      desc="Unlimited listings/pool, legal automation, company insurance, team access (up to 5 users)."
-                      cta="Coming soon"
-                      current={companyPlanTier === 'business'}
-                      disabled
-                      onPress={() => Alert.alert('Business', 'This tier is coming soon.')}
-                    />
-                    <PlanRow
-                      title="Enterprise"
-                      price="Custom pricing"
-                      desc="Tailored setup for large companies: dedicated account manager, custom legal setup and integrations."
-                      cta="Contact sales"
-                      current={companyPlanTier === 'enterprise'}
-                      onPress={() =>
-                        Linking.openURL(
-                          'mailto:sales@creaservices.de?subject=Enterprise%20Plan%20Inquiry%20-%20Crea'
-                        ).catch(() => {})
-                      }
-                    />
+                    <CompanySeatWebPanel />
                   </>
                 ) : (
                   <>
                     <PlanRow
-                      title="Workspace"
-                      price="€0 / month"
-                      desc="Solo workspace mode: private workflow, no talent-pool visibility, no marketplace DMs."
-                      cta="Use workspace"
-                      current={subscriptionTier === 'workspace'}
-                      onPress={() =>
-                        Alert.alert(
-                          'Workspace',
-                          'Workspace is free solo mode and not discoverable in the public marketplace.'
-                        )
-                      }
-                    />
-                    <PlanRow
-                      title="Starter"
-                      price="€9 / month"
-                      desc="Basic profile, basic project feed, 2 active bookings/month, standard support."
+                      title="Free"
+                      price="€0"
+                      desc={freelancerPlanDescription('free')}
                       cta={
-                        subscriptionTier === 'starter'
+                        !isFreelancerPro(normalizedFreelancerPlan)
                           ? 'Active'
                           : switchingTrialPlan || stripeCheckoutBusy
                             ? 'Please wait…'
-                            : stripeCustomerId
-                              ? 'Use in trial'
-                              : 'Subscribe'
+                            : inPlatformTrial
+                              ? 'Preview in trial'
+                              : 'Downgrade on web'
                       }
-                      current={subscriptionTier === 'starter'}
-                      disabled={subscriptionTier === 'starter' || switchingTrialPlan || stripeCheckoutBusy}
-                      onPress={() =>
-                        void (stripeCustomerId
-                          ? switchTrialTier('starter')
-                          : startFreelancerPaidCheckout('starter'))
+                      current={!isFreelancerPro(normalizedFreelancerPlan)}
+                      disabled={
+                        !isFreelancerPro(normalizedFreelancerPlan) ||
+                        switchingTrialPlan ||
+                        stripeCheckoutBusy ||
+                        (!inPlatformTrial && isFreelancerPro(normalizedFreelancerPlan))
                       }
+                      onPress={() => {
+                        if (inPlatformTrial && isFreelancerPro(normalizedFreelancerPlan)) {
+                          void switchTrialTier('free')
+                          return
+                        }
+                        Linking.openURL('https://creaservices.de/settings/freelancer?tab=plan').catch(() => {})
+                      }}
                     />
                     <PlanRow
                       title="Pro"
-                      price="€19 / month"
-                      desc="Everything in Starter + post project listings, 5 active bookings/month, Project feed+."
+                      price={`${freelancerProPriceLineMonthly()} · ${freelancerProPriceLineYearly()}`}
+                      desc={freelancerPlanDescription('pro')}
                       cta={
-                        subscriptionTier === 'pro'
+                        isFreelancerPro(normalizedFreelancerPlan)
                           ? 'Active'
                           : switchingTrialPlan || stripeCheckoutBusy
                             ? 'Please wait…'
-                            : stripeCustomerId
-                              ? 'Use in trial'
+                            : inPlatformTrial && !stripeCustomerId
+                              ? 'Preview in trial'
                               : 'Subscribe'
                       }
-                      current={subscriptionTier === 'pro'}
-                      disabled={subscriptionTier === 'pro' || switchingTrialPlan || stripeCheckoutBusy}
+                      current={isFreelancerPro(normalizedFreelancerPlan)}
+                      disabled={isFreelancerPro(normalizedFreelancerPlan) || switchingTrialPlan || stripeCheckoutBusy}
                       onPress={() =>
-                        void (stripeCustomerId ? switchTrialTier('pro') : startFreelancerPaidCheckout('pro'))
+                        void (inPlatformTrial && !stripeCustomerId
+                          ? switchTrialTier('pro')
+                          : startFreelancerPaidCheckout())
                       }
-                    />
-                    <PlanRow
-                      title="Premium"
-                      price="€49 / month"
-                      desc="Everything in Pro, plus verified badge, liability insurance, legal docs and tax/accounting tools."
-                      cta="Coming soon"
-                      current={subscriptionTier === 'premium'}
-                      disabled
-                      onPress={() => Alert.alert('Premium', 'This tier is coming soon.')}
                     />
                   </>
                 )}
@@ -3145,16 +2999,10 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   logoutText: { color: '#ff5555', fontSize: 14, fontWeight: '600' },
-  trialBanner: {
-    borderWidth: 1,
-    borderColor: 'rgba(80,200,120,0.45)',
-    backgroundColor: 'rgba(80,200,120,0.08)',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
+  trialBarEmbedded: {
+    marginTop: 14,
+    marginBottom: 4,
   },
-  trialBannerText: { fontSize: 13, color: 'rgba(255,255,255,0.75)', lineHeight: 19 },
-  trialBannerStrong: { color: '#8fdf9e', fontWeight: '700' },
   currentPlanBox: {
     borderWidth: 1,
     borderColor: '#FFDC00',
@@ -3174,6 +3022,17 @@ const styles = StyleSheet.create({
   currentPlanDesc: { fontSize: 13, color: 'rgba(255,255,255,0.45)', lineHeight: 18 },
   stripeHint: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginBottom: 10, lineHeight: 17 },
   stripeFoot: { fontSize: 11, color: 'rgba(255,255,255,0.28)', marginTop: 16, lineHeight: 16 },
+  seatWebPanel: {
+    marginTop: 14,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    gap: 8,
+  },
+  seatWebTitle: { fontSize: 13, fontWeight: '700', color: '#ffffff' },
+  seatWebText: { fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 18 },
   planIosFooter: {
     marginTop: 12,
     gap: 16,

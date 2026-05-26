@@ -6,11 +6,12 @@ import { Animated, Easing, Platform, StyleSheet, View } from 'react-native'
 const CREA_BLACK = '#0a0a0a'
 const CREA_YELLOW = '#FFDC00'
 
-const PULSE_MS = 1100
+const PULSE_MS = 900
 const REVEAL_MS = 700
+const QUICK_REVEAL_MS = 120
 
 /** Full-screen bootstrap: native Gaussian-ish blur (BlurView) fades off over {@link REVEAL_MS}, then wordmark pulses. */
-export function AppBootstrapLoading() {
+export function AppBootstrapLoading({ quick = false }: { quick?: boolean }) {
   const [fontsLoaded] = useFonts({ ClimateCrisis_400Regular })
   const softReveal = useRef(new Animated.Value(0)).current
   const smearReveal = useRef(new Animated.Value(0)).current
@@ -30,10 +31,12 @@ export function AppBootstrapLoading() {
   })
 
   useEffect(() => {
+    const revealMs = quick ? QUICK_REVEAL_MS : REVEAL_MS
     const easeOut = Easing.out(Easing.cubic)
     pulseLoopRef.current?.stop?.()
 
     const runPulse = () => {
+      if (quick) return
       const ease = Easing.inOut(Easing.sin)
       pulseLoopRef.current = Animated.loop(
         Animated.sequence([
@@ -73,13 +76,13 @@ export function AppBootstrapLoading() {
     Animated.parallel([
       Animated.timing(softReveal, {
         toValue: 1,
-        duration: REVEAL_MS,
+        duration: revealMs,
         easing: easeOut,
         useNativeDriver: false,
       }),
       Animated.timing(smearReveal, {
         toValue: 1,
-        duration: REVEAL_MS,
+        duration: revealMs,
         easing: easeOut,
         useNativeDriver: true,
       }),
@@ -92,7 +95,7 @@ export function AppBootstrapLoading() {
       pulseScale.setValue(1)
       pulseOpacity.setValue(1)
     }
-  }, [pulseOpacity, pulseScale, smearReveal, softReveal])
+  }, [pulseOpacity, pulseScale, quick, smearReveal, softReveal])
 
   const logoStyle = fontsLoaded
     ? styles.logo
@@ -125,23 +128,25 @@ export function AppBootstrapLoading() {
 
       {/*
        * Full-screen blur (no clipped box → no rectangular “noise” halo).
-       * iOS: true material blur; Android: expo experimental native blur where available.
+       * Skipped on quick bootstrap — returning users see the feed almost immediately.
        */}
-      <Animated.View style={[styles.blurPlate, { opacity: smearOpacity }]} pointerEvents="none">
-        {Platform.OS === 'ios' ? (
-          <BlurView intensity={100} tint="systemThinMaterialDark" style={StyleSheet.absoluteFillObject} />
-        ) : Platform.OS === 'android' ? (
-          <BlurView
-            intensity={72}
-            tint="dark"
-            experimentalBlurMethod="dimezisBlurView"
-            blurReductionFactor={3.25}
-            style={StyleSheet.absoluteFillObject}
-          />
-        ) : (
-          <View style={[StyleSheet.absoluteFillObject, styles.webFallbackScrim]} />
-        )}
-      </Animated.View>
+      {!quick ? (
+        <Animated.View style={[styles.blurPlate, { opacity: smearOpacity }]} pointerEvents="none">
+          {Platform.OS === 'ios' ? (
+            <BlurView intensity={100} tint="systemThinMaterialDark" style={StyleSheet.absoluteFillObject} />
+          ) : Platform.OS === 'android' ? (
+            <BlurView
+              intensity={72}
+              tint="dark"
+              experimentalBlurMethod="dimezisBlurView"
+              blurReductionFactor={3.25}
+              style={StyleSheet.absoluteFillObject}
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFillObject, styles.webFallbackScrim]} />
+          )}
+        </Animated.View>
+      ) : null}
     </View>
   )
 }

@@ -22,11 +22,13 @@ import {
 } from '@/lib/companyPlanFromSession'
 import {
   canFreelancerCreatePrivateProjects,
+  freelancerHasInvoicing,
+  isFreelancerPro,
   isFreelancerTalentPoolPlan,
-  isFreelancerWorkspaceOnlyPlan,
   resolveFreelancerPlanFromUser,
   type FreelancerPlan,
 } from '@/lib/freelancerPlan'
+import { isCompanyPro } from '@/lib/company-plan'
 import { getCache, setCache } from '@/lib/appCache'
 
 export type IncomeTotals = { paid: number; incoming: number; overdue: number; currency: string }
@@ -134,8 +136,8 @@ export function quickActionsForRole(
   opts?: { freelancerPlan?: FreelancerPlan; companyPlan?: CompanySubscriptionPlanDb }
 ): DashboardQuickAction[] {
   if (isCompanyProfile(role ?? undefined)) {
-    const plan = opts?.companyPlan ?? 'studio'
-    const businessPlus = plan === 'business' || plan === 'enterprise'
+    const plan = opts?.companyPlan ?? 'free'
+    const businessPlus = isCompanyPro(plan)
     return [
       { label: 'Post project', icon: PlusCircle, href: '/(tabs)/company-post-job' },
       { label: 'Applications', icon: ClipboardList, href: '/(tabs)/company-applications' },
@@ -151,7 +153,7 @@ export function quickActionsForRole(
         icon: Shield,
         webPath: '/company-dashboard/partners',
         disabled: !businessPlus,
-        hint: businessPlus ? undefined : 'Business plan and above',
+        hint: businessPlus ? undefined : 'Pro plan',
       },
       { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
     ]
@@ -167,80 +169,42 @@ export function quickActionsForRole(
   const base: DashboardQuickAction[] = [
     { label: 'Browse jobs', icon: Briefcase, href: '/(tabs)/jobs' },
     { label: 'Messages', icon: MessageCircle, href: '/(tabs)/messages' },
-    { label: 'Invoices', icon: Receipt, href: '/(tabs)/invoices' },
   ]
   if (isFreelancerProfile(role ?? undefined)) {
-    if (opts?.freelancerPlan && isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
-      const starterHint = 'Included from Starter — upgrade on creaservices.de'
-      return [
-        { label: 'Projects', icon: Layers, href: '/(tabs)/workspace-projects' },
-        {
-          label: 'Browse jobs',
-          icon: Briefcase,
-          href: '/(tabs)/jobs',
-          disabled: true,
-          hint: starterHint,
-        },
-        {
-          label: 'Messages',
-          icon: MessageCircle,
-          href: '/(tabs)/messages',
-          disabled: true,
-          hint: starterHint,
-        },
-        {
-          label: 'Invoices',
-          icon: Receipt,
-          href: '/(tabs)/invoices',
-          disabled: true,
-          hint: starterHint,
-        },
-        {
-          label: 'Talent pool',
-          icon: Users,
-          href: '/(tabs)/talent-pool',
-          disabled: true,
-          hint: 'Included with Pro — Starter unlocks the job pool',
-        },
-        {
-          label: 'Availability',
-          icon: CalendarDays,
-          href: '/(tabs)/availability',
-          disabled: true,
-          hint: starterHint,
-        },
-        { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
-      ]
+    const plan = opts?.freelancerPlan ?? 'free'
+    const pro = isFreelancerPro(plan)
+    if (pro && canFreelancerCreatePrivateProjects(plan)) {
+      base.push({ label: 'Projects', icon: Layers, href: '/(tabs)/workspace-projects' })
+    } else {
+      base.push({
+        label: 'Projects',
+        icon: Layers,
+        href: '/(tabs)/workspace-projects',
+        disabled: true,
+        hint: 'Pro plan',
+      })
     }
-    if (opts?.freelancerPlan && !isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
-      if (canFreelancerCreatePrivateProjects(opts.freelancerPlan)) {
-        base.splice(1, 0, {
-          label: 'Projects',
-          icon: Layers,
-          href: '/(tabs)/workspace-projects',
-        })
-      } else {
-        base.splice(1, 0, {
-          label: 'Projects',
-          icon: Layers,
-          href: '/(tabs)/workspace-projects',
-          disabled: true,
-          hint: 'Pro or Workspace plan',
-        })
-      }
-    }
-    if (opts?.freelancerPlan && isFreelancerTalentPoolPlan(opts.freelancerPlan)) {
-      base.splice(2, 0, { label: 'Talent pool', icon: Users, href: '/(tabs)/talent-pool' })
-    } else if (opts?.freelancerPlan && !isFreelancerWorkspaceOnlyPlan(opts.freelancerPlan)) {
-      base.splice(2, 0, {
+    if (isFreelancerTalentPoolPlan(plan)) {
+      base.push({ label: 'Talent pool', icon: Users, href: '/(tabs)/talent-pool' })
+    } else {
+      base.push({
         label: 'Talent pool',
         icon: Users,
         href: '/(tabs)/talent-pool',
         disabled: true,
-        hint: 'Only available for Pro users',
+        hint: 'Pro plan',
       })
     }
+    base.push({
+      label: 'Invoices',
+      icon: Receipt,
+      href: '/(tabs)/invoices',
+      disabled: !freelancerHasInvoicing(plan),
+      hint: pro ? undefined : 'Pro plan',
+    })
     base.push({ label: 'Availability', icon: CalendarDays, href: '/(tabs)/availability' })
+  } else {
+    base.push({ label: 'Invoices', icon: Receipt, href: '/(tabs)/invoices' })
   }
   base.push({ label: 'Settings', icon: Settings2, href: '/(tabs)/profile' })
   return base
@@ -264,7 +228,7 @@ export async function loadDashboardOverview(
   const resolvedRole = resolveAppRole(profile?.role, user)
   const resolvedFreelancerPlan = isFreelancerProfile(resolvedRole)
     ? resolveFreelancerPlanFromUser(user)
-    : 'starter'
+    : 'free'
   const av = (profile?.avatar_url as string | undefined)?.trim()
   const avatarUrl = av && /^https?:\/\//i.test(av) ? av : null
   const name = profile?.name ?? ''
@@ -283,8 +247,8 @@ export async function loadDashboardOverview(
     income: null,
     ceoSnap: null,
     ceoRpcError: null,
-    freelancerPlan: isFreelancerProfile(resolvedRole) ? resolvedFreelancerPlan : 'starter',
-    companyPlan: 'studio',
+    freelancerPlan: isFreelancerProfile(resolvedRole) ? resolvedFreelancerPlan : 'free',
+    companyPlan: 'free',
     trialEndsAt,
     accountCreatedAt,
     hasStripeCustomer: userHasStripeCustomer(user),
@@ -347,8 +311,16 @@ export async function loadDashboardOverview(
     }
   }
 
-  if (isFreelancerWorkspaceOnlyPlan(resolvedFreelancerPlan)) {
-    return { ...base, stats: [], income: null, freelancerPlan: resolvedFreelancerPlan }
+  if (!isFreelancerPro(resolvedFreelancerPlan)) {
+    return {
+      ...base,
+      stats: [
+        { label: 'Applications', value: '—', sub: 'Pro to apply' },
+        { label: 'Profile views', value: '—', sub: 'Browse jobs on Free' },
+      ],
+      income: null,
+      freelancerPlan: resolvedFreelancerPlan,
+    }
   }
 
   const [{ count: appCount }, { count: viewCount }, { data: invs }] = await Promise.all([

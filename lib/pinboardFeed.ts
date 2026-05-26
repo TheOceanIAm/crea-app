@@ -61,7 +61,7 @@ export const PINBOARD_UPDATES_COPY = {
   createListingLabel: 'Post a job listing',
   createProjectLabel: 'New workspace project',
   starterBlocked:
-    'Sharing updates requires Pro or Premium, or a company account.',
+    'Sharing updates requires Pro, or a company account.',
   recentLabel: 'Recent updates',
   postButton: 'Post update',
   legacyUnlinked: 'Legacy update (no link)',

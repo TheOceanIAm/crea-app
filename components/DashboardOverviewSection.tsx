@@ -33,7 +33,7 @@ import {
   isCompanyProfile,
   isFreelancerProfile,
 } from '@/lib/profileRole'
-import { isFreelancerWorkspaceOnlyPlan } from '@/lib/freelancerPlan'
+import { isFreelancerPro } from '@/lib/freelancerPlan'
 import {
   parseCeoSnapshot,
   quickActionsForRole,
@@ -65,8 +65,8 @@ export function DashboardOverviewSection({
   const avatarUrl = overview?.avatarUrl
   const stats = overview?.stats ?? []
   const income = overview?.income
-  const freelancerPlan = overview?.freelancerPlan ?? 'starter'
-  const companyPlan = overview?.companyPlan ?? 'studio'
+  const freelancerPlan = overview?.freelancerPlan ?? 'free'
+  const companyPlan = overview?.companyPlan ?? 'free'
 
   const quickActions = useMemo(
     () => quickActionsForRole(role, { freelancerPlan, companyPlan }),
@@ -74,7 +74,7 @@ export function DashboardOverviewSection({
   )
 
   const workspaceOnly =
-    isFreelancerProfile(role ?? undefined) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
+    isFreelancerProfile(role ?? undefined) && !isFreelancerPro(freelancerPlan)
 
   if (loading && !overview) {
     return (
@@ -332,9 +332,9 @@ export function DashboardOverviewSection({
 
       {workspaceOnly ? (
         <View style={styles.workspaceBanner}>
-          <Text style={styles.workspaceBannerTitle}>Workspace</Text>
+          <Text style={styles.workspaceBannerTitle}>Free plan</Text>
           <Text style={styles.workspaceBannerText}>
-            Private projects are active. Marketplace shortcuts stay locked until you upgrade to Starter on the web.
+            Browse jobs and use Workspace with Call Sheet + Shot List. Upgrade to Pro to apply, invoice, and unlock production tools.
           </Text>
         </View>
       ) : null}

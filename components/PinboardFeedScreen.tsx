@@ -27,7 +27,6 @@ import { TabScreenHeader } from '@/components/TabScreenHeader'
 import {
   canFreelancerCreatePrivateProjects,
   freelancerCanPostJobs,
-  isFreelancerWorkspaceOnlyPlan,
 } from '@/lib/freelancerPlan'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import {
@@ -160,7 +159,7 @@ export function PinboardFeedScreen() {
     setHasMore(more.length >= 25)
   }, [hasMore, loadingMore, posts, userId])
 
-  const freelancerPlan = overview?.freelancerPlan ?? 'starter'
+  const freelancerPlan = overview?.freelancerPlan ?? 'free'
   const canCompose = canComposePinboardUpdates({ role, freelancerPlan })
   const canPostJobs =
     isCompanyProfile(role ?? undefined) ||
@@ -255,9 +254,6 @@ export function PinboardFeedScreen() {
   )
 
   const avatarLetter = displayName.charAt(0).toUpperCase() || '?'
-  const workspaceOnly =
-    isFreelancerProfile(role ?? undefined) &&
-    isFreelancerWorkspaceOnlyPlan(overview?.freelancerPlan ?? 'starter')
 
   const openPostLink = useCallback(
     (p: PinboardPost) => {
@@ -406,7 +402,7 @@ export function PinboardFeedScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <TabScreenHeader
         title="Feed"
-        showMessages={!workspaceOnly}
+        showMessages
         left={
           <TouchableOpacity
             onPress={() => router.push('/(tabs)/profile')}

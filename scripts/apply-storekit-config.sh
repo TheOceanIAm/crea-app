@@ -15,14 +15,16 @@ fi
 cp "$SRC" "$DEST"
 echo "Copied StoreKit config to $DEST"
 
-python3 - <<'PY'
+CREA_ROOT="$ROOT" python3 - <<PY
 from pathlib import Path
+import os
 import xml.etree.ElementTree as ET
 
-scheme_path = Path("ios/CREA.xcodeproj/xcshareddata/xcschemes/CREA.xcscheme")
+root = Path(os.environ["CREA_ROOT"])
+scheme_path = root / "ios/CREA.xcodeproj/xcshareddata/xcschemes/CREA.xcscheme"
 tree = ET.parse(scheme_path)
-root = tree.getroot()
-launch = root.find("LaunchAction")
+doc = tree.getroot()
+launch = doc.find("LaunchAction")
 if launch is None:
     raise SystemExit("LaunchAction not found in scheme")
 
@@ -31,10 +33,14 @@ for child in list(launch):
         launch.remove(child)
 
 ref = ET.Element("StoreKitConfigurationFileReference")
-ref.set("identifier", "../../../CreaSubscriptions.storekit")
+# Resolved relative to CREA.xcodeproj (not the scheme file): ../ = ios/
+ref.set("identifier", "../CreaSubscriptions.storekit")
 launch.append(ref)
 tree.write(scheme_path, encoding="UTF-8", xml_declaration=True)
 print("Updated Xcode scheme StoreKit configuration")
 PY
 
-echo "Done. Rebuild: npx expo run:ios --scheme CREA"
+echo "Done. StoreKit simulator workflow:"
+echo "  1) npm run dev          (Metro, keep running)"
+echo "  2) npm run ios:xcode    (open Xcode)"
+echo "  3) Press Run (⌘R) in Xcode — StoreKit does NOT work via expo run:ios alone."

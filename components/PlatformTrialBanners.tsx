@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { useRouter } from 'expo-router'
-import {
-  formatPlatformTrialEndDate,
-  isWithinPlatformTrialPeriod,
-} from '@/lib/platformTrial'
+import { PlatformTrialBar } from '@/components/PlatformTrialBar'
+import { platformTrialDaysLeft } from '@/lib/platformTrial'
 import {
   isCeoProfile,
   isCompanyProfile,
@@ -45,17 +43,13 @@ export function PlatformTrialBanners({
   const isCeo = isCeoProfile(role ?? undefined)
   const isBillableRole =
     isFreelancerProfile(role ?? undefined) || isCompanyProfile(role ?? undefined)
-  const inTrial = isWithinPlatformTrialPeriod(trialEndsAt, accountCreatedAt)
-  const trialEndLabel = formatPlatformTrialEndDate(trialEndsAt, accountCreatedAt)
 
-  const showExploration =
-    isBillableRole && !hasStripeCustomer && inTrial && trialEndLabel !== 'the end of your trial'
-
-  const showTrialEnded = isBillableRole && !hasStripeCustomer && !inTrial
+  const showTrialBar =
+    isBillableRole && !hasStripeCustomer && platformTrialDaysLeft(trialEndsAt, accountCreatedAt) !== null
 
   const showCeoTrialHint = isCeo && !isBillableRole
 
-  if (!billingNotice && !showExploration && !showTrialEnded && !showCeoTrialHint) {
+  if (!billingNotice && !showTrialBar && !showCeoTrialHint) {
     return null
   }
 
@@ -81,26 +75,8 @@ export function PlatformTrialBanners({
         </View>
       ) : null}
 
-      {showExploration ? (
-        <View style={styles.exploreBanner}>
-          <Text style={styles.exploreText}>
-            <Text style={styles.exploreStrong}>Free exploration period:</Text> Through{' '}
-            <Text style={styles.exploreDate}>{trialEndLabel}</Text> you can use Crea without choosing a
-            paid plan. After that, pick a plan in Profile — billing starts when you complete checkout.
-          </Text>
-        </View>
-      ) : null}
-
-      {showTrialEnded ? (
-        <View style={styles.endedBanner}>
-          <Text style={styles.endedText}>
-            <Text style={styles.exploreStrong}>Trial ended.</Text> Pick a plan in Profile — billing
-            starts after checkout.{' '}
-            <Text style={styles.link} onPress={() => router.push('/(tabs)/profile')}>
-              Open Plan & billing →
-            </Text>
-          </Text>
-        </View>
+      {showTrialBar ? (
+        <PlatformTrialBar trialEndsAt={trialEndsAt} accountCreatedAt={accountCreatedAt} />
       ) : null}
     </View>
   )
@@ -132,25 +108,4 @@ const styles = StyleSheet.create({
     color: '#FFDC00',
     flexShrink: 0,
   },
-  exploreBanner: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(80,200,120,0.45)',
-    backgroundColor: 'rgba(80,200,120,0.08)',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  exploreText: { fontSize: 13, lineHeight: 19, color: 'rgba(255,255,255,0.75)' },
-  exploreStrong: { color: '#8fdf9e', fontWeight: '700' },
-  exploreDate: { color: '#fff', fontWeight: '600' },
-  endedBanner: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,220,0,0.25)',
-    backgroundColor: 'rgba(255,220,0,0.06)',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  endedText: { fontSize: 13, lineHeight: 19, color: 'rgba(255,255,255,0.7)' },
-  link: { color: '#FFDC00', fontWeight: '600' },
 })

@@ -78,10 +78,37 @@ export default function LoginScreen() {
           <TouchableOpacity style={styles.forgotRow} onPress={() => router.push('/forgot-password')} hitSlop={12}>
             <Text style={styles.forgotText}>Forgot password?</Text>
           </TouchableOpacity>
+
+          {Platform.OS === 'ios' ? (
+            <TouchableOpacity
+              style={styles.subscribeRow}
+              onPress={() => router.push('/paywall')}
+              hitSlop={12}
+            >
+              <Text style={styles.subscribeLink}>Subscribe without an account</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {__DEV__ ? (
+            <TouchableOpacity
+              style={styles.previewRow}
+              onPress={() => router.push('/platform-flow-preview')}
+              hitSlop={12}
+            >
+              <Text style={styles.previewLink}>Flow-Prototyp ansehen</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <Text style={styles.footer}>
-          {IOS_SIGNUP_ON_WEB_ONLY ? (
+          {Platform.OS === 'ios' || !IOS_SIGNUP_ON_WEB_ONLY ? (
+            <>
+              No account yet?{' '}
+              <Text style={styles.link} onPress={() => router.push('/register')}>
+                Sign up
+              </Text>
+            </>
+          ) : (
             <>
               New to CREA?{' '}
               <Text
@@ -89,13 +116,6 @@ export default function LoginScreen() {
                 onPress={() => Linking.openURL(getCreaWebRegisterUrl()).catch(() => {})}
               >
                 Create account on creaservices.de
-              </Text>
-            </>
-          ) : (
-            <>
-              No account yet?{' '}
-              <Text style={styles.link} onPress={() => router.push('/register')}>
-                Sign up
               </Text>
             </>
           )}
@@ -143,6 +163,10 @@ const styles = StyleSheet.create({
   buttonText: { color: '#0a0a0a', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
   forgotRow: { alignSelf: 'center', marginTop: 16, paddingVertical: 8 },
   forgotText: { color: 'rgba(255,255,255,0.45)', fontSize: 14, fontWeight: '600' },
+  subscribeRow: { alignSelf: 'center', marginTop: 8, paddingVertical: 8 },
+  subscribeLink: { color: '#FFDC00', fontSize: 14, fontWeight: '700' },
+  previewRow: { alignSelf: 'center', marginTop: 4, paddingVertical: 8 },
+  previewLink: { color: 'rgba(255,255,255,0.35)', fontSize: 12, fontWeight: '600' },
   footer: { color: 'rgba(255,255,255,0.3)', fontSize: 13, textAlign: 'center', marginTop: 32 },
   link: { color: '#FFDC00' },
 })

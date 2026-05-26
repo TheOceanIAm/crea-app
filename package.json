@@ -12,8 +12,9 @@
     "dev:fresh": "npm run dev:ios:clear",
     "dev:tunnel": "npm run metro:kill && bash scripts/expo-with-nvm.sh start --tunnel --scheme exp+crea-app",
     "dev:loopback": "npm run metro:kill && bash scripts/expo-with-nvm.sh start --localhost --scheme exp+crea-app",
+    "dev:xcode": "npm run dev:loopback",
     "sim": "npm run dev:ios",
-    "start": "npm run dev:ios",
+    "start": "npm run dev",
     "start:localhost": "npm run dev",
     "start:localhost:clear": "npm run dev:clear",
     "start:sim": "npm run dev:ios",
@@ -21,7 +22,10 @@
     "start:tunnel": "npm run dev:tunnel",
     "start:go": "bash scripts/expo-with-nvm.sh start --go",
     "android": "bash scripts/expo-with-nvm.sh run:android",
-    "ios": "bash scripts/expo-with-nvm.sh run:ios --scheme CREA",
+    "ios:setup": "bash scripts/setup-ios-dev.sh",
+    "ios": "npm run ios:setup && bash scripts/expo-with-nvm.sh run:ios --scheme CREA",
+    "ios:sim": "npm run ios:setup && bash scripts/expo-with-nvm.sh run:ios --scheme CREA --no-bundler",
+    "ios:xcode": "npm run ios:setup && open ios/CREA.xcworkspace",
     "ios:rebuild": "npm run metro:kill && bash scripts/expo-with-nvm.sh run:ios --scheme CREA --no-build-cache",
     "web": "bash scripts/expo-with-nvm.sh start --web",
     "deploy:supabase": "bash scripts/deploy-supabase.sh",
@@ -29,7 +33,7 @@
     "splash:transparent-bg": "node scripts/splash-make-transparent-bg.mjs",
     "splash:fix": "node scripts/splash-flatten-brand-yellow.mjs",
     "icon:flatten-yellow": "node scripts/icon-flatten-brand-yellow.mjs",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package && bash scripts/sync-xcode-node.sh"
   },
   "dependencies": {
     "@expo-google-fonts/climate-crisis": "^0.4.2",

@@ -4,14 +4,9 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { DashboardOverviewSection } from '@/components/DashboardOverviewSection'
 import { TabScreenHeader } from '@/components/TabScreenHeader'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
-import { isFreelancerWorkspaceOnlyPlan } from '@/lib/freelancerPlan'
-import { isFreelancerProfile } from '@/lib/profileRole'
 
 export default function DashboardScreen() {
   const { overview, loading, refresh } = useDashboardOverview()
-  const workspaceOnly =
-    isFreelancerProfile(overview?.role ?? undefined) &&
-    isFreelancerWorkspaceOnlyPlan(overview?.freelancerPlan ?? 'starter')
   const [refreshing, setRefreshing] = useState(false)
 
   const onRefresh = useCallback(async () => {
@@ -22,7 +17,7 @@ export default function DashboardScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <TabScreenHeader title="Dashboard" showMessages={!workspaceOnly} />
+      <TabScreenHeader title="Dashboard" showMessages />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}

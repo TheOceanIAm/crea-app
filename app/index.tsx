@@ -8,6 +8,7 @@ import { useAppBootstrapOverlay } from '@/contexts/AppBootstrapOverlayContext'
 import { resolveSessionForAppBootstrap } from '@/lib/authSession'
 import { consumeInitialSupabaseAuthUrlForBootstrap } from '@/lib/authDeepLink'
 import { profileNeedsOnboarding } from '@/lib/onboardingGate'
+import { getLoggedOutEntryRoute } from '@/lib/iosAppStoreCompliance'
 import { cacheDashboardOverview, loadDashboardOverview } from '@/lib/dashboardOverview'
 
 /** Avoid an endless native splash if Supabase/storage never resolves (offline, bad URL, etc.). */
@@ -152,7 +153,7 @@ export default function Index() {
   }
 
   if (!session) {
-    return <Redirect href="/login" />
+    return <Redirect href={getLoggedOutEntryRoute()} />
   }
 
   if (!onboardingDone) {

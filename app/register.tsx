@@ -188,12 +188,12 @@ const styles = StyleSheet.create({
     color: '#FFDC00',
     fontWeight: '900',
     letterSpacing: 6,
-    marginBottom: 6,
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 13,
     color: 'rgba(255,255,255,0.35)',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
     marginBottom: 48,
   },
   purchaseBanner: {
@@ -223,13 +223,13 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: '#FFDC00',
-    borderRadius: 100,
+    borderRadius: 999,
     paddingVertical: 15,
     alignItems: 'center',
     marginTop: 8,
   },
   buttonDisabled: { opacity: 0.7 },
-  buttonText: { color: '#0a0a0a', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
+  buttonText: { color: '#0a0a0a', fontSize: 15, fontWeight: '800' },
   legalFooter: {
     color: 'rgba(255,255,255,0.28)',
     fontSize: 12,

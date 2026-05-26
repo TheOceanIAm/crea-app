@@ -20,7 +20,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { getCreaWebBaseUrl, openProjectOnWeb } from '@/lib/creaWeb'
 import { jobShareUrl } from '@/lib/shareLinks'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
-import { isFreelancerWorkspaceOnlyPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
+import { freelancerCanApplyToJobs, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import {
   findBookingReplyStatus,
   bookingOpenDeepLinkMatchesJob,
@@ -113,6 +113,7 @@ export default function JobDetailScreen() {
   const [bookingBusy, setBookingBusy] = useState(false)
   const [rolePickerOpen, setRolePickerOpen] = useState(false)
   const [selectedApplyRole, setSelectedApplyRole] = useState('')
+  const [freelancerPlan, setFreelancerPlan] = useState<'free' | 'pro'>('free')
 
   /** Params can hydrate after first paint — bump `none` → `loading` when invite query appears. */
   useEffect(() => {
@@ -144,17 +145,8 @@ export default function JobDetailScreen() {
         .single()
       resolvedRole = resolveAppRole(prof?.role, user)
       setRole(prof?.role ?? null)
-      if (
-        resolvedRole === 'freelancer' &&
-        isFreelancerWorkspaceOnlyPlan(resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier))
-      ) {
-        setAccessDenied(true)
-        setJob(null)
-        setCompanyName('Company')
-        setCompanyLogoUrl(null)
-        setLoading(false)
-        return
-      }
+      const plan = resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier)
+      setFreelancerPlan(plan)
     } else {
       setRole(null)
     }
@@ -361,8 +353,21 @@ export default function JobDetailScreen() {
   /** Hide “Apply” for invite URLs until we fall back to `invalid` (broken/stale link). */
   const hideApplyForInviteDeepLink = openedFromBooking && bookingDeep.kind !== 'invalid'
 
+  const canApplyToJobs = freelancerCanApplyToJobs(freelancerPlan)
+
   const canShowApply =
     freelancer &&
+    canApplyToJobs &&
+    !isOwner &&
+    job?.status === 'active' &&
+    !pendingBookingGate &&
+    !hideApplyForInviteDeepLink &&
+    applicationStatus === 'none' &&
+    !hasWorkspaceAccess
+
+  const showUpgradeForApply =
+    freelancer &&
+    !canApplyToJobs &&
     !isOwner &&
     job?.status === 'active' &&
     !pendingBookingGate &&
@@ -728,6 +733,22 @@ export default function JobDetailScreen() {
           </TouchableOpacity>
         ) : null}
 
+        {showUpgradeForApply ? (
+          <View style={styles.upgradePanel}>
+            <Text style={styles.upgradePanelTitle}>Pro required to apply</Text>
+            <Text style={styles.upgradePanelText}>
+              Free lets you browse listings. Upgrade to Pro to apply and unlock production tools.
+            </Text>
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() => router.push('/paywall')}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.primaryBtnText}>Upgrade to Pro</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {freelancer && !isOwner && applicationStatus === 'pending' ? (
           <View style={[styles.applicationStatusPill, styles.applicationStatusPillPending]}>
             <Text style={styles.applicationStatusPending}>Application pending</Text>
@@ -879,6 +900,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryBtnText: { fontSize: 16, fontWeight: '800', color: '#0a0a0a' },
+  upgradePanel: {
+    marginTop: 24,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,220,0,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.22)',
+  },
+  upgradePanelTitle: { fontSize: 14, fontWeight: '800', color: '#FFDC00', marginBottom: 6 },
+  upgradePanelText: { fontSize: 13, color: 'rgba(255,255,255,0.65)', lineHeight: 19, marginBottom: 14 },
   secondaryBtn: {
     marginTop: 16,
     borderRadius: 14,

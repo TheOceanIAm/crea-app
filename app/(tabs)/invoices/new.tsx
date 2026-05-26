@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
+import { freelancerHasInvoicing, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 
 type CompanyOption = { id: string; name: string }
 
@@ -30,6 +31,7 @@ export default function NewInvoiceScreen() {
   }, [params.jobId])
   const [loading, setLoading] = useState(true)
   const [allowed, setAllowed] = useState(false)
+  const [needsProPlan, setNeedsProPlan] = useState(false)
   const [companies, setCompanies] = useState<CompanyOption[]>([])
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
   const [title, setTitle] = useState('')
@@ -54,12 +56,21 @@ export default function NewInvoiceScreen() {
 
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
     const role = resolveAppRole(profile?.role, user)
+    const plan = resolveFreelancerPlanFromUser(user)
     if (!isFreelancerProfile(role)) {
       setAllowed(false)
+      setNeedsProPlan(false)
+      setLoading(false)
+      return
+    }
+    if (!freelancerHasInvoicing(plan)) {
+      setAllowed(false)
+      setNeedsProPlan(true)
       setLoading(false)
       return
     }
 
+    setNeedsProPlan(false)
     setAllowed(true)
 
     const { data: apps } = await supabase
@@ -239,10 +250,24 @@ export default function NewInvoiceScreen() {
           <Text style={styles.backLabel}>Invoices</Text>
         </TouchableOpacity>
         <View style={styles.center}>
-          <Text style={styles.blockTitle}>Freelancers only</Text>
-          <Text style={styles.blockSub}>
-            Companies receive invoices here. Switch to a freelancer account to create one.
-          </Text>
+          {needsProPlan ? (
+            <>
+              <Text style={styles.blockTitle}>Pro required</Text>
+              <Text style={styles.blockSub}>
+                Invoicing is included with Pro. Upgrade to create and send invoices from the app.
+              </Text>
+              <TouchableOpacity style={styles.upgradeBtn} onPress={() => router.push('/paywall')} activeOpacity={0.85}>
+                <Text style={styles.upgradeBtnText}>Upgrade to Pro</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.blockTitle}>Freelancers only</Text>
+              <Text style={styles.blockSub}>
+                Companies receive invoices here. Switch to a freelancer account to create one.
+              </Text>
+            </>
+          )}
         </View>
       </SafeAreaView>
     )
@@ -426,4 +451,12 @@ const styles = StyleSheet.create({
   dim: { opacity: 0.5 },
   blockTitle: { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 8 },
   blockSub: { fontSize: 14, color: 'rgba(255,255,255,0.35)', textAlign: 'center' },
+  upgradeBtn: {
+    marginTop: 20,
+    backgroundColor: '#FFDC00',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  upgradeBtnText: { fontSize: 14, fontWeight: '800', color: '#0a0a0a' },
 })

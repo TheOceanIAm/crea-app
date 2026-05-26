@@ -17,6 +17,8 @@ import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { parseIsoDateInput } from '@/lib/isoDateInput'
 import { formatJobCategoryRoles } from '@/lib/jobCategoryRoles'
+import { maxActiveJobListings, COMPANY_FREE_ACTIVE_JOB_LISTINGS } from '@/lib/company-plan'
+import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
 
 const CATEGORIES = ['Film / Video', 'Photo', 'Post / Edit', 'Motion', 'Design', 'Other'] as const
 const BUDGET_TYPES = [
@@ -58,7 +60,11 @@ export default function CompanyPostJobScreen() {
           }
           return
         }
-        const { data: p } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+        const { data: p } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single()
         const role = resolveAppRole(p?.role, user)
         if (!cancelled) {
           setAllowed(isCompanyProfile(role))
@@ -116,6 +122,44 @@ export default function CompanyPostJobScreen() {
     if (prodA && prodB && prodB < prodA) {
       Alert.alert('Production window', 'End date must be on or after start.')
       return
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('subscription_tier')
+      .eq('id', user.id)
+      .maybeSingle()
+    const { data: cp } = await supabase
+      .from('company_profiles')
+      .select('subscription_plan')
+      .eq('id', user.id)
+      .maybeSingle()
+    const plan = resolveCompanySubscriptionPlanFromSources(
+      user,
+      profile?.subscription_tier,
+      cp?.subscription_plan
+    )
+    const cap = maxActiveJobListings(plan)
+    if (Number.isFinite(cap)) {
+      const { count, error: countErr } = await supabase
+        .from('jobs')
+        .select('*', { count: 'exact', head: true })
+        .eq('company_id', user.id)
+        .eq('status', 'active')
+      if (countErr) {
+        Alert.alert('Could not verify limit', countErr.message)
+        return
+      }
+      if ((count ?? 0) >= cap) {
+        Alert.alert(
+          'Listing limit reached',
+          cap === COMPANY_FREE_ACTIVE_JOB_LISTINGS
+            ? 'Free includes one active listing. Upgrade to Pro for unlimited listings.'
+            : 'Your plan does not allow more active listings. Subscribe to Pro or close an existing project.',
+          [{ text: 'View plans', onPress: () => router.push('/paywall') }, { text: 'OK', style: 'cancel' }]
+        )
+        return
+      }
     }
 
     setSaving(true)
@@ -201,7 +245,7 @@ export default function CompanyPostJobScreen() {
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Post a project</Text>
-        <Text style={styles.sub}>Freelancers can apply from the Jobs tab. You manage applicants on the project page.</Text>
+        <Text style={styles.sub}>Freelancers can apply from the Jobs tab. Review applicants on Pro.</Text>
 
         <Text style={styles.label}>Project title</Text>
         <Text style={styles.hintInline}>
@@ -418,4 +462,22 @@ const styles = StyleSheet.create({
   dim: { opacity: 0.55 },
   blockTitle: { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 8 },
   blockSub: { fontSize: 14, color: 'rgba(255,255,255,0.35)', textAlign: 'center' },
+  trialBanner: {
+    marginBottom: 20,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,220,0,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.22)',
+  },
+  trialBannerTitle: { fontSize: 14, fontWeight: '800', color: '#FFDC00', marginBottom: 6 },
+  trialBannerText: { fontSize: 13, color: 'rgba(255,255,255,0.65)', lineHeight: 19, marginBottom: 12 },
+  trialBannerBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFDC00',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  trialBannerBtnText: { fontSize: 13, fontWeight: '800', color: '#0a0a0a' },
 })

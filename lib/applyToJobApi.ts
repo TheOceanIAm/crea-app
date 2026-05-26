@@ -12,6 +12,7 @@ const RPC_APPLY_ERRORS = new Set([
   'job_not_active',
   'authentication required',
   'freelancer_profile_required',
+  'pro_plan_required',
 ])
 
 function webBases(): string[] {
@@ -55,6 +56,7 @@ function parseApplyErrorMessage(error: {
   if (blob.includes('job_not_active')) return 'job_not_active'
   if (blob.includes('authentication required')) return 'no_session'
   if (blob.includes('freelancer_profile_required')) return 'freelancer_profile_required'
+  if (blob.includes('pro_plan_required')) return 'pro_plan_required'
   if (blob.includes('beta_trial_ended')) return 'beta_trial_ended_new_job_work_not_allowed'
   if (error.code === '42883' || blob.includes('does not exist')) return 'rpc_unavailable'
   return error.message?.trim() || 'apply_failed'

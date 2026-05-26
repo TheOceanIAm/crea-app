@@ -1,3 +1,6 @@
+import type { NormalizedFreelancerPlan } from '@/lib/billingDisplay'
+import type { CompanySubscriptionPlanDb } from '@/lib/companyPlanFromSession'
+
 /** RevenueCat entitlement identifiers (must match RevenueCat dashboard). */
 export const RC_ENTITLEMENT_STARTER = 'crea_starter'
 export const RC_ENTITLEMENT_PRO = 'Crea Services Pro'
@@ -10,7 +13,7 @@ export const RC_PACKAGE_PRO = 'crea_pro'
 export const RC_PACKAGE_STUDIO = 'crea_studio'
 export const RC_PACKAGE_AGENCY = 'crea_agency'
 
-/** App Store product identifiers (subscriptions in App Store Connect). */
+/** App Store product identifiers (legacy — map to pro until new products ship). */
 export const RC_PRODUCT_STARTER = '56912026'
 export const RC_PRODUCT_PRO = '165846'
 export const RC_PRODUCT_STUDIO = '156715'
@@ -25,22 +28,15 @@ export const RC_PACKAGE_TO_PRODUCT: Record<string, string> = {
   [RC_PACKAGE_AGENCY]: RC_PRODUCT_AGENCY,
 }
 
-export type SubscriptionPlanKey = 'free' | 'starter' | 'pro' | 'studio' | 'agency'
+/** Normalized subscription tier for app logic (2-tier model). */
+export type SubscriptionPlanKey = 'free' | 'pro'
 
+/** Legacy entitlements → pro (paid access until App Store products are migrated). */
 const ENTITLEMENT_TO_PLAN: Record<string, SubscriptionPlanKey> = {
-  [RC_ENTITLEMENT_STARTER]: 'starter',
+  [RC_ENTITLEMENT_STARTER]: 'pro',
   [RC_ENTITLEMENT_PRO]: 'pro',
-  [RC_ENTITLEMENT_STUDIO]: 'studio',
-  [RC_ENTITLEMENT_AGENCY]: 'agency',
-}
-
-/** Highest active plan when multiple entitlements are active (agency > studio > pro > starter). */
-const PLAN_RANK: Record<SubscriptionPlanKey, number> = {
-  free: 0,
-  starter: 1,
-  pro: 2,
-  studio: 3,
-  agency: 4,
+  [RC_ENTITLEMENT_STUDIO]: 'pro',
+  [RC_ENTITLEMENT_AGENCY]: 'pro',
 }
 
 export function revenueCatApiKey(): string {
@@ -52,30 +48,25 @@ export function planFromEntitlementId(entitlementId: string): SubscriptionPlanKe
 }
 
 export function planFromActiveEntitlements(entitlementIds: string[]): SubscriptionPlanKey {
-  let best: SubscriptionPlanKey = 'free'
   for (const id of entitlementIds) {
-    const p = planFromEntitlementId(id)
-    if (p && PLAN_RANK[p] > PLAN_RANK[best]) best = p
+    if (planFromEntitlementId(id) === 'pro') return 'pro'
   }
-  return best
+  return 'free'
 }
 
-export function isFreelancerPlan(plan: SubscriptionPlanKey): boolean {
-  return plan === 'starter' || plan === 'pro'
+/** Both free and pro are valid for either role in the 2-tier model. */
+export function isFreelancerPlan(_plan: SubscriptionPlanKey): boolean {
+  return true
 }
 
-export function isCompanyPlan(plan: SubscriptionPlanKey): boolean {
-  return plan === 'studio' || plan === 'agency'
+export function isCompanyPlan(_plan: SubscriptionPlanKey): boolean {
+  return true
 }
 
-export function freelancerPlanFromSubscription(plan: SubscriptionPlanKey): 'workspace' | 'starter' | 'pro' | 'premium' {
-  if (plan === 'pro') return 'pro'
-  if (plan === 'starter') return 'starter'
-  return 'workspace'
+export function freelancerPlanFromSubscription(plan: SubscriptionPlanKey): NormalizedFreelancerPlan {
+  return plan === 'pro' ? 'pro' : 'free'
 }
 
-export function companyPlanFromSubscription(plan: SubscriptionPlanKey): 'studio' | 'agency' | 'business' | 'enterprise' {
-  if (plan === 'agency') return 'agency'
-  if (plan === 'studio') return 'studio'
-  return 'studio'
+export function companyPlanFromSubscription(plan: SubscriptionPlanKey): CompanySubscriptionPlanDb {
+  return plan === 'pro' ? 'pro' : 'free'
 }

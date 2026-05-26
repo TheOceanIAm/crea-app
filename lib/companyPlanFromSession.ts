@@ -1,32 +1,18 @@
 import type { User } from '@supabase/supabase-js'
 
-/**
- * Company billing tier — aligned with crea-services `lib/company-plan.ts`
- * (`company_profiles.subscription_plan`, Stripe `user_metadata.company_plan`).
- */
-export type CompanySubscriptionPlanDb = 'studio' | 'agency' | 'business' | 'enterprise'
+/** Company billing tier — aligned with crea-services + DB check (free | pro). */
+export type CompanySubscriptionPlanDb = 'free' | 'pro'
 
 /** Mirrors crea-services `companySubscriptionPlanForDb`. */
 export function companySubscriptionPlanForDb(raw: unknown): CompanySubscriptionPlanDb {
-  const p = String(raw ?? '')
-    .toLowerCase()
-    .trim()
-  if (p === 'agency' || p === 'business' || p === 'enterprise') return p
-  if (p === 'pro' || p === 'professional') return 'agency'
-  if (
-    p === 'studio' ||
-    p === 'starter' ||
-    p === 'free' ||
-    p === 'basic' ||
-    p === 'premium' ||
-    p === ''
-  )
-    return 'studio'
-  return 'studio'
+  const p = String(raw ?? '').toLowerCase().trim()
+  if (p === 'pro' || p === 'agency' || p === 'business' || p === 'enterprise' || p === 'professional') {
+    return 'pro'
+  }
+  return 'free'
 }
 
 /**
- * Same precedence as crea-services `companySubscriptionPlanFromSources`:
  * Auth metadata (`company_plan`) → `company_profiles.subscription_plan` → legacy `profiles.subscription_tier`.
  */
 export function resolveCompanySubscriptionPlanFromSources(

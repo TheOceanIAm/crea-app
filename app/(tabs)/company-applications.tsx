@@ -14,6 +14,12 @@ import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import {
+  companyCanReviewApplications,
+  companyPlanWithPlatformTrial,
+} from '@/lib/company-plan'
+import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
+import { isWithinPlatformTrialPeriod } from '@/lib/platformTrial'
 
 type Row = {
   id: string
@@ -35,6 +41,7 @@ export default function CompanyApplicationsScreen() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [allowed, setAllowed] = useState(false)
+  const [proRequired, setProRequired] = useState(false)
   const [rows, setRows] = useState<Row[]>([])
 
   const load = useCallback(async () => {
@@ -46,15 +53,40 @@ export default function CompanyApplicationsScreen() {
       router.replace('/login')
       return
     }
-    const { data: p } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+    const { data: p } = await supabase
+      .from('profiles')
+      .select('role, trial_ends_at, created_at, subscription_tier')
+      .eq('id', user.id)
+      .single()
     const role = resolveAppRole(p?.role, user)
     if (!isCompanyProfile(role)) {
       setAllowed(false)
+      setProRequired(false)
       setRows([])
       setLoading(false)
       return
     }
     setAllowed(true)
+
+    const { data: cp } = await supabase
+      .from('company_profiles')
+      .select('subscription_plan')
+      .eq('id', user.id)
+      .maybeSingle()
+    const storedPlan = resolveCompanySubscriptionPlanFromSources(
+      user,
+      p?.subscription_tier,
+      cp?.subscription_plan
+    )
+    const trialActive = isWithinPlatformTrialPeriod(p?.trial_ends_at, p?.created_at ?? user.created_at)
+    const effectivePlan = companyPlanWithPlatformTrial(storedPlan, trialActive)
+    if (!companyCanReviewApplications(effectivePlan)) {
+      setProRequired(true)
+      setRows([])
+      setLoading(false)
+      return
+    }
+    setProRequired(false)
 
     const { data: jobs, error: jerr } = await supabase
       .from('jobs')
@@ -141,6 +173,26 @@ export default function CompanyApplicationsScreen() {
         <View style={styles.center}>
           <Text style={styles.blockTitle}>Companies only</Text>
           <Text style={styles.blockSub}>Only company accounts can review job applications.</Text>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  if (proRequired) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
+          <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+          <Text style={styles.backText}>Tools</Text>
+        </TouchableOpacity>
+        <View style={styles.center}>
+          <Text style={styles.blockTitle}>Unlock with Pro</Text>
+          <Text style={styles.blockSub}>
+            Free includes posting one job listing. Review applicants, accept crew, and manage hiring on Pro.
+          </Text>
+          <TouchableOpacity style={styles.upgradeBtn} onPress={() => router.push('/paywall')} activeOpacity={0.9}>
+            <Text style={styles.upgradeBtnText}>View Pro plans</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     )
@@ -239,5 +291,13 @@ const styles = StyleSheet.create({
   },
   emptyText: { fontSize: 14, color: 'rgba(255,255,255,0.35)', textAlign: 'center', paddingVertical: 32 },
   blockTitle: { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 8 },
-  blockSub: { fontSize: 14, color: 'rgba(255,255,255,0.35)', textAlign: 'center' },
+  blockSub: { fontSize: 14, color: 'rgba(255,255,255,0.35)', textAlign: 'center', lineHeight: 20, paddingHorizontal: 12 },
+  upgradeBtn: {
+    marginTop: 20,
+    backgroundColor: '#FFDC00',
+    borderRadius: 999,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+  },
+  upgradeBtnText: { color: '#0a0a0a', fontSize: 15, fontWeight: '800' },
 })

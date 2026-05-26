@@ -317,11 +317,11 @@ export function FreelancerPublicProfileContent({
   const publicPlanTier = String(
     (profileNorm as Record<string, unknown>).plan_tier ??
       (profileNorm as Record<string, unknown>).subscription_tier ??
-      'starter'
+      'free'
   )
     .trim()
     .toLowerCase()
-  const canShowPublicRates = publicPlanTier !== 'workspace'
+  const canShowPublicRates = publicPlanTier !== 'workspace' && publicPlanTier !== 'free'
   const availabilityStatus = strTrim(profileNorm.availability_status)
   const availabilityDetails = strTrim(profileNorm.availability_details)
   const shareMessage = `${name} — view on Crea`

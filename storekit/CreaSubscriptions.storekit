@@ -16,15 +16,15 @@
   },
   "subscriptionGroups" : [
     {
-      "id" : "22101656",
+      "id" : "22101657",
       "localizations" : [
         {
-          "description" : "CREA subscription plans",
-          "displayName" : "CREA Plans",
+          "description" : "Freelancer Pro Abo",
+          "displayName" : "Crea Freelancer Pro",
           "locale" : "de"
         }
       ],
-      "name" : "Crea Plans",
+      "name" : "Crea Freelancer Pro",
       "subscriptions" : [
         {
           "adHocOffers" : [
@@ -33,27 +33,27 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "10.99",
+          "displayPrice" : "8.99",
           "familyShareable" : false,
           "groupNumber" : 1,
-          "internalID" : "56912026",
+          "internalID" : "freelancer_pro_monthly",
           "introductoryOffer" : {
-            "internalID" : "starter_trial_3m",
-            "numberOfPeriods" : 3,
+            "internalID" : "freelancer_trial_30d",
+            "numberOfPeriods" : 1,
             "paymentMode" : "free",
             "subscriptionPeriod" : "P1M"
           },
           "localizations" : [
             {
-              "description" : "Ideal für Freelancer die starten.",
-              "displayName" : "Crea Starter",
+              "description" : "Jobs, Invoicing, Sun Planner & Brief AI.",
+              "displayName" : "Crea Freelancer Pro",
               "locale" : "de"
             }
           ],
-          "productID" : "56912026",
+          "productID" : "de.creaservices.freelancer.pro.monthly",
           "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "crea_starter_monthly",
-          "subscriptionGroupID" : "22101656",
+          "referenceName" : "freelancer_pro_monthly",
+          "subscriptionGroupID" : "22101657",
           "type" : "RecurringSubscription"
         },
         {
@@ -63,27 +63,70 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "19.99",
+          "displayPrice" : "59.99",
           "familyShareable" : false,
-          "groupNumber" : 2,
-          "internalID" : "165846",
+          "groupNumber" : 1,
+          "internalID" : "freelancer_pro_yearly",
           "introductoryOffer" : {
-            "internalID" : "pro_trial_3m",
-            "numberOfPeriods" : 3,
+            "internalID" : "freelancer_trial_30d_yr",
+            "numberOfPeriods" : 1,
             "paymentMode" : "free",
             "subscriptionPeriod" : "P1M"
           },
           "localizations" : [
             {
-              "description" : "Pro features for freelancers.",
-              "displayName" : "Crea Pro",
+              "description" : "Jobs, Invoicing, Sun Planner & Brief AI.",
+              "displayName" : "Crea Freelancer Pro Jahresabo",
               "locale" : "de"
             }
           ],
-          "productID" : "165846",
+          "productID" : "de.creaservices.freelancer.pro.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "freelancer_pro_yearly",
+          "subscriptionGroupID" : "22101657",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id" : "22101658",
+      "localizations" : [
+        {
+          "description" : "Company Pro Abo",
+          "displayName" : "Crea Company Pro",
+          "locale" : "de"
+        }
+      ],
+      "name" : "Crea Company Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "89.00",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "company_pro_monthly",
+          "introductoryOffer" : {
+            "internalID" : "company_trial_30d",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1M"
+          },
+          "localizations" : [
+            {
+              "description" : "Alle Features inkl. 2 Seats.",
+              "displayName" : "Crea Company Pro",
+              "locale" : "de"
+            }
+          ],
+          "productID" : "de.creaservices.company.pro.monthly",
           "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "crea_pro_monthly",
-          "subscriptionGroupID" : "22101656",
+          "referenceName" : "company_pro_monthly",
+          "subscriptionGroupID" : "22101658",
           "type" : "RecurringSubscription"
         },
         {
@@ -93,57 +136,27 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "49.99",
+          "displayPrice" : "649.99",
           "familyShareable" : false,
-          "groupNumber" : 3,
-          "internalID" : "156715",
+          "groupNumber" : 1,
+          "internalID" : "company_pro_yearly",
           "introductoryOffer" : {
-            "internalID" : "studio_trial_3m",
-            "numberOfPeriods" : 3,
+            "internalID" : "company_trial_30d_yr",
+            "numberOfPeriods" : 1,
             "paymentMode" : "free",
             "subscriptionPeriod" : "P1M"
           },
           "localizations" : [
             {
-              "description" : "Studio plan for companies.",
-              "displayName" : "Crea Studio",
+              "description" : "Alle Features inkl. 2 Seats.",
+              "displayName" : "Crea Company Pro Jahresabo",
               "locale" : "de"
             }
           ],
-          "productID" : "156715",
-          "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "crea_studio_monthly",
-          "subscriptionGroupID" : "22101656",
-          "type" : "RecurringSubscription"
-        },
-        {
-          "adHocOffers" : [
-
-          ],
-          "codeOffers" : [
-
-          ],
-          "displayPrice" : "99.99",
-          "familyShareable" : false,
-          "groupNumber" : 4,
-          "internalID" : "1156474",
-          "introductoryOffer" : {
-            "internalID" : "agency_trial_3m",
-            "numberOfPeriods" : 3,
-            "paymentMode" : "free",
-            "subscriptionPeriod" : "P1M"
-          },
-          "localizations" : [
-            {
-              "description" : "Agency plan for companies.",
-              "displayName" : "Crea Agency",
-              "locale" : "de"
-            }
-          ],
-          "productID" : "1156474",
-          "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "crea_agency_monthly",
-          "subscriptionGroupID" : "22101656",
+          "productID" : "de.creaservices.company.pro.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "company_pro_yearly",
+          "subscriptionGroupID" : "22101658",
           "type" : "RecurringSubscription"
         }
       ]

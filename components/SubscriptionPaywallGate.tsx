@@ -27,6 +27,7 @@ function isPaywallAllowedRoute(path: string): boolean {
   if (n.startsWith("/auth")) return true;
   if (n === "/onboarding") return true;
   if (n === "/paywall") return true;
+  if (n === "/platform-flow-preview") return true;
   if (isProfilePlanTabPath(n)) return true;
   return false;
 }

@@ -326,7 +326,7 @@ export default function TalentPoolScreen() {
       setLoadError(fpErr)
       setRows([])
     } else {
-      const candidates = (fpRows ?? []).filter((r) => String(r.plan_tier ?? '').trim().toLowerCase() !== 'workspace')
+      const candidates = fpRows ?? []
       const ids = [
         ...new Set(
           candidates

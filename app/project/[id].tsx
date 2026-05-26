@@ -43,6 +43,7 @@ import {
   projectStatusVariant,
 } from '@/lib/projectStatusDisplay'
 import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
+import { isCompanyPro } from '@/lib/company-plan'
 import {
   isFreelancerStarterPlan,
   isFreelancerWorkspaceOnlyPlan,
@@ -298,21 +299,20 @@ export default function ProjectWorkspaceScreen() {
       sunTrialIso = typeof trialData === 'string' ? trialData : null
     }
 
-    let normalizedCompanyTier = 'studio'
+    let companyPlan: 'free' | 'pro' = 'free'
     if (role === 'company') {
       const { data: cp } = await supabase
         .from('company_profiles')
         .select('subscription_plan')
         .eq('id', user.id)
         .maybeSingle()
-      normalizedCompanyTier = resolveCompanySubscriptionPlanFromSources(
+      companyPlan = resolveCompanySubscriptionPlanFromSources(
         user,
         (profile as { subscription_tier?: string | null } | null)?.subscription_tier,
         (cp as { subscription_plan?: string } | null)?.subscription_plan
       )
     }
-    const companySunAccess =
-      role === 'company' && ['studio', 'agency', 'business', 'enterprise'].includes(normalizedCompanyTier || 'studio')
+    const companySunAccess = role === 'company' && isCompanyPro(companyPlan)
 
     setWorkspaceOnlyPlan(
       isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
@@ -385,17 +385,17 @@ export default function ProjectWorkspaceScreen() {
       if (!nextSun) {
         if (isFreelancerStarterPlan(freelancerPlan)) {
           nextSunHint =
-            'Sun Planner: your 14-day trial has ended. Upgrade to Pro or Premium for full access.'
+            'Sun Planner: your 14-day trial has ended. Upgrade to Pro for full access.'
         } else if (isFreelancerWorkspaceOnlyPlan(freelancerPlan)) {
           nextSunHint =
-            'Sun Planner: your 14-day Workspace trial has ended. Upgrade to Pro or Premium for full access.'
+            'Sun Planner is available on Pro. Upgrade to unlock production scheduling.'
         } else {
           nextSunHint = 'Sun Planner is not available on your current plan.'
         }
       }
       if (!nextWeather) {
         nextWeatherHint =
-          'Weather: your 14-day Workspace trial has ended. Upgrade to Pro or Premium for full access.'
+          'Weather in production tools is available on Pro. Upgrade to unlock full access.'
       }
     }
     setSunPlannerEnabled(nextSun)

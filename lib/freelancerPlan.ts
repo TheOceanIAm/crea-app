@@ -1,55 +1,70 @@
 import type { User } from '@supabase/supabase-js'
+import type { NormalizedFreelancerPlan } from '@/lib/billingDisplay'
+import { normalizeFreelancerPlanKey } from '@/lib/billingDisplay'
 
-export type FreelancerPlan = 'workspace' | 'starter' | 'pro' | 'premium'
+/** @deprecated Use NormalizedFreelancerPlan — kept for gradual migration. */
+export type FreelancerPlan = NormalizedFreelancerPlan
 
-function norm(v: unknown): string {
-  return String(v ?? '')
-    .trim()
-    .toLowerCase()
-}
-
-export function resolveFreelancerPlanFromUser(user: User | null | undefined): FreelancerPlan {
-  const um = user?.user_metadata as Record<string, unknown> | undefined
-  const raw = um?.freelancer_plan ?? um?.plan ?? um?.subscription_tier ?? um?.freelancer_tier
-  const p = norm(raw)
-  if (p === 'workspace') return 'workspace'
-  if (p === 'pro') return 'pro'
-  if (p === 'premium') return 'premium'
-  return 'starter'
+export function resolveFreelancerPlanFromUser(user: User | null | undefined): NormalizedFreelancerPlan {
+  if (!user?.user_metadata) return 'free'
+  const m = user.user_metadata as Record<string, unknown>
+  const raw = m.freelancer_plan ?? m.plan ?? m.subscription_tier ?? m.freelancer_tier
+  return normalizeFreelancerPlanKey(raw)
 }
 
 export function resolveFreelancerPlanFromUserAndProfileTier(
   user: User | null | undefined,
   profilesSubscriptionTier: unknown
-): FreelancerPlan {
+): NormalizedFreelancerPlan {
   const fromUser = resolveFreelancerPlanFromUser(user)
-  if (fromUser !== 'starter') return fromUser
-  const p = norm(profilesSubscriptionTier)
-  if (p === 'workspace') return 'workspace'
-  if (p === 'pro') return 'pro'
-  if (p === 'premium') return 'premium'
-  return 'starter'
+  if (fromUser === 'pro') return 'pro'
+  return normalizeFreelancerPlanKey(profilesSubscriptionTier)
 }
 
-export function isFreelancerWorkspaceOnlyPlan(plan: FreelancerPlan): boolean {
-  return plan === 'workspace'
+export function isFreelancerPro(plan: NormalizedFreelancerPlan): boolean {
+  return plan === 'pro'
 }
 
-export function isFreelancerStarterPlan(plan: FreelancerPlan): boolean {
-  return plan === 'starter'
+export function freelancerCanApplyToJobs(plan: NormalizedFreelancerPlan): boolean {
+  return plan === 'pro'
 }
 
-/** Talent pool browse + favorites: freelancers need Pro or Premium (not Starter / Workspace). */
-export function isFreelancerTalentPoolPlan(plan: FreelancerPlan): boolean {
-  return plan === 'pro' || plan === 'premium'
+export function freelancerCanPostJobs(plan: NormalizedFreelancerPlan): boolean {
+  return plan === 'pro'
 }
 
-/** Lead-owned private projects (not public jobs): Workspace, Pro, Premium — not Starter. */
-export function canFreelancerCreatePrivateProjects(plan: FreelancerPlan): boolean {
-  return plan !== 'starter'
+export function freelancerHasSunPlanner(plan: NormalizedFreelancerPlan): boolean {
+  return plan === 'pro'
 }
 
-/** Marketplace job listings: Pro or Premium. */
-export function freelancerCanPostJobs(plan: FreelancerPlan): boolean {
-  return plan === 'pro' || plan === 'premium'
+export function freelancerHasBriefAI(plan: NormalizedFreelancerPlan): boolean {
+  return plan === 'pro'
+}
+
+export function freelancerHasInvoicing(plan: NormalizedFreelancerPlan): boolean {
+  return plan === 'pro'
+}
+
+export function freelancerWorkspaceAccess(plan: NormalizedFreelancerPlan): 'full' | 'limited' {
+  return plan === 'pro' ? 'full' : 'limited'
+}
+
+/** @deprecated Use !isFreelancerPro(plan) */
+export function isFreelancerWorkspaceOnlyPlan(plan: NormalizedFreelancerPlan): boolean {
+  return !isFreelancerPro(plan)
+}
+
+/** @deprecated Use !isFreelancerPro(plan) */
+export function isFreelancerStarterPlan(plan: NormalizedFreelancerPlan): boolean {
+  return plan === 'free'
+}
+
+/** @deprecated Use isFreelancerPro */
+export function isFreelancerTalentPoolPlan(plan: NormalizedFreelancerPlan): boolean {
+  return plan === 'pro'
+}
+
+/** @deprecated Use isFreelancerPro */
+export function canFreelancerCreatePrivateProjects(plan: NormalizedFreelancerPlan): boolean {
+  return plan === 'pro'
 }
