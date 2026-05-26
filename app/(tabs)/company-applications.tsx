@@ -188,7 +188,7 @@ export default function CompanyApplicationsScreen() {
         <View style={styles.center}>
           <Text style={styles.blockTitle}>Unlock with Pro</Text>
           <Text style={styles.blockSub}>
-            Free includes posting one job listing. Review applicants, accept crew, and manage hiring on Pro.
+            Free includes one job listing per month. Review applicants, accept crew, and manage hiring on Pro.
           </Text>
           <TouchableOpacity style={styles.upgradeBtn} onPress={() => router.push('/paywall')} activeOpacity={0.9}>
             <Text style={styles.upgradeBtnText}>View Pro plans</Text>

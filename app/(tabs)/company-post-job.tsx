@@ -17,8 +17,13 @@ import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { parseIsoDateInput } from '@/lib/isoDateInput'
 import { formatJobCategoryRoles } from '@/lib/jobCategoryRoles'
-import { maxActiveJobListings, COMPANY_FREE_ACTIVE_JOB_LISTINGS } from '@/lib/company-plan'
+import {
+  companyFreeJobListingLimitMessage,
+  companyJobListingMonthStartUtc,
+  companyJobListingPostCap,
+} from '@/lib/company-plan'
 import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
+import { isWithinPlatformTrialPeriod } from '@/lib/platformTrial'
 
 const CATEGORIES = ['Film / Video', 'Photo', 'Post / Edit', 'Motion', 'Design', 'Other'] as const
 const BUDGET_TYPES = [
@@ -126,7 +131,7 @@ export default function CompanyPostJobScreen() {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('subscription_tier')
+      .select('subscription_tier, trial_ends_at, beta_invite')
       .eq('id', user.id)
       .maybeSingle()
     const { data: cp } = await supabase
@@ -139,23 +144,23 @@ export default function CompanyPostJobScreen() {
       profile?.subscription_tier,
       cp?.subscription_plan
     )
-    const cap = maxActiveJobListings(plan)
+    const inPlatformTrial = isWithinPlatformTrialPeriod(profile?.trial_ends_at, user.created_at)
+    const cap = companyJobListingPostCap(plan, inPlatformTrial)
     if (Number.isFinite(cap)) {
+      const monthStart = companyJobListingMonthStartUtc()
       const { count, error: countErr } = await supabase
         .from('jobs')
         .select('*', { count: 'exact', head: true })
         .eq('company_id', user.id)
-        .eq('status', 'active')
+        .gte('created_at', monthStart)
       if (countErr) {
         Alert.alert('Could not verify limit', countErr.message)
         return
       }
       if ((count ?? 0) >= cap) {
         Alert.alert(
-          'Listing limit reached',
-          cap === COMPANY_FREE_ACTIVE_JOB_LISTINGS
-            ? 'Free includes one active listing. Upgrade to Pro for unlimited listings.'
-            : 'Your plan does not allow more active listings. Subscribe to Pro or close an existing project.',
+          'Monthly listing limit reached',
+          companyFreeJobListingLimitMessage(),
           [{ text: 'View plans', onPress: () => router.push('/paywall') }, { text: 'OK', style: 'cancel' }]
         )
         return

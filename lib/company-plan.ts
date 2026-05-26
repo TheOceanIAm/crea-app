@@ -23,8 +23,30 @@ export function companyHasAccountingIntegrations(plan: ResolvedCompanyPlan): boo
   return plan === 'pro'
 }
 
+/** Free companies (after platform trial): one new listing per calendar month (UTC). */
+export const COMPANY_FREE_JOB_LISTINGS_PER_MONTH = 1
+
+/** @deprecated Use COMPANY_FREE_JOB_LISTINGS_PER_MONTH */
+export const COMPANY_FREE_ACTIVE_JOB_LISTINGS = COMPANY_FREE_JOB_LISTINGS_PER_MONTH
+
+export function companyJobListingMonthStartUtc(now = new Date()): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+}
+
+export function companyJobListingPostCap(
+  plan: ResolvedCompanyPlan,
+  inPlatformTrial: boolean
+): number {
+  if (plan === 'pro' || inPlatformTrial) return Number.POSITIVE_INFINITY
+  return COMPANY_FREE_JOB_LISTINGS_PER_MONTH
+}
+
 export function maxActiveJobListings(plan: ResolvedCompanyPlan): number {
-  return plan === 'pro' ? Number.POSITIVE_INFINITY : 0
+  return plan === 'pro' ? Number.POSITIVE_INFINITY : COMPANY_FREE_JOB_LISTINGS_PER_MONTH
+}
+
+export function companyFreeJobListingLimitMessage(): string {
+  return `Free includes ${COMPANY_FREE_JOB_LISTINGS_PER_MONTH} job listing per month. Upgrade to Pro for unlimited listings.`
 }
 
 export function maxPoolSaves(plan: ResolvedCompanyPlan): number {

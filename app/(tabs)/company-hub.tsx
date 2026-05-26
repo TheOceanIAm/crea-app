@@ -11,14 +11,11 @@ import {
   PlusCircle,
   Receipt,
   Settings2,
-  Shield,
   Users,
   Wallet,
   FileText,
 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
-import { companyHasBryterAndAxa } from '@/lib/company-plan'
-import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
 import { openCreaWebPath } from '@/lib/creaWeb'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -90,13 +87,6 @@ const WEB_TOOLS: ToolRow[] = [
     icon: Wallet,
     webPath: '/company-dashboard/payments',
   },
-  {
-    label: 'Legal & insurance partners',
-    sub: 'Bryter and AXA resources for Business plans.',
-    icon: Shield,
-    webPath: '/company-dashboard/partners',
-    disabled: true,
-  },
 ]
 
 export default function CompanyHubScreen() {
@@ -118,31 +108,13 @@ export default function CompanyHubScreen() {
         }
         const { data: p } = await supabase
           .from('profiles')
-          .select('role, subscription_tier')
+          .select('role')
           .eq('id', user.id)
           .single()
-        const { data: cp } = await supabase
-          .from('company_profiles')
-          .select('subscription_plan')
-          .eq('id', user.id)
-          .maybeSingle()
         const role = resolveAppRole(p?.role, user)
-        const plan = resolveCompanySubscriptionPlanFromSources(
-          user,
-          p?.subscription_tier,
-          cp?.subscription_plan
-        )
-        const businessPlus = companyHasBryterAndAxa(plan)
         if (!cancelled) {
           setAllowed(isCompanyProfile(role))
-          setTools([
-            ...NATIVE_TOOLS,
-            ...WEB_TOOLS.map((t) =>
-              t.webPath === '/company-dashboard/partners'
-                ? { ...t, disabled: !businessPlus }
-                : t
-            ),
-          ])
+          setTools([...NATIVE_TOOLS, ...WEB_TOOLS])
         }
       })()
       return () => {

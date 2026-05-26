@@ -52,7 +52,7 @@ export function companyStripePlanDescription(plan: CompanyStripePlan): string {
     case 'pro':
       return 'Unlimited job listings and pool saves, all features, 2 team seats included (extra seats €12.99/mo each).'
     case 'free':
-      return '30-day trial with full Pro features — upgrade before it ends to keep access.'
+      return '1 job listing per month on Free — upgrade to Pro for unlimited listings and full hiring tools.'
     default:
       return 'Choose Pro on Pricing to unlock job postings and hiring tools.'
   }
