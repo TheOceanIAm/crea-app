@@ -66,13 +66,19 @@ export function expectedCurrencyForDeviceLocale(localeTag?: string): string | nu
 }
 
 /**
- * Localized price from StoreKit fields — uses Apple’s currency + device locale formatting.
- * Falls back to priceString when Intl fails.
+ * Localized price from StoreKit — prefer Apple's `priceString` (matches checkout / App Store region).
+ * Re-formatting with `price` + `currencyCode` alone can show US tier ($7.99) while DE checkout is €8.99.
  */
 export function formatStoreProductPrice(
   product: StorePriceProduct,
   opts?: { perMonth?: boolean; perYear?: boolean }
 ): string {
+  const suffix = opts?.perMonth ? '/mo' : opts?.perYear ? '/yr' : ''
+  const fromStore = product.priceString?.trim()
+  if (fromStore) {
+    return suffix ? `${fromStore}${suffix}` : fromStore
+  }
+
   const currency = (product.currencyCode || 'EUR').toUpperCase()
   const locale = getDeviceLocaleTag()
   let formatted: string
@@ -83,7 +89,7 @@ export function formatStoreProductPrice(
       currencyDisplay: 'symbol',
     }).format(product.price)
   } catch {
-    formatted = product.priceString?.trim() || `${currency} ${product.price.toFixed(2)}`
+    formatted = `${currency} ${product.price.toFixed(2)}`
   }
   if (opts?.perMonth) return `${formatted}/mo`
   if (opts?.perYear) return `${formatted}/yr`
