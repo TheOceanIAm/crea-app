@@ -15,6 +15,7 @@ import {
   Wallet,
   FileText,
 } from 'lucide-react-native'
+import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { openCreaWebPath } from '@/lib/creaWeb'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
@@ -98,7 +99,7 @@ export default function CompanyHubScreen() {
     useCallback(() => {
       let cancelled = false
       ;(async () => {
-        const { data: { user } } = await supabase.auth.getUser()
+        const user = await getAuthUser()
         if (!user) {
           if (!cancelled) {
             setAllowed(false)

@@ -13,12 +13,13 @@ import {
   Image,
 } from 'react-native'
 import { useFocusEffect } from 'expo-router'
-import { Send } from 'lucide-react-native'
+import { Send, Trash2 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { loadProfileAvatarsByIds, normalizeProfileAvatarUrl } from '@/lib/profileAvatar'
 import { mirrorProjectMessageToJob } from '@/lib/syncWorkspaceMessage'
+import { deleteOwnWorkspaceMessage, filterRowsAfterDelete } from '@/lib/deleteWorkspaceMessage'
 import { fetchMergedWorkspaceMessages, workspaceMessageSyncKey } from '@/lib/workspaceMessages'
 
 type Row = {
@@ -70,6 +71,7 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
   const [loading, setLoading] = useState(true)
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const listRef = useRef<FlatList>(null)
 
   useEffect(() => {
@@ -212,6 +214,34 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
     load()
   }
 
+  const removeMessage = (item: Row) => {
+    if (item.sender_id !== userId || deletingId) return
+    Alert.alert('Delete message', 'Remove this message from the crew chat?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          setDeletingId(item.id)
+          const { error } = await deleteOwnWorkspaceMessage(supabase, {
+            messageId: item.id,
+            senderId: item.sender_id,
+            body: item.body,
+            createdAt: item.created_at,
+            jobId,
+            projectId,
+          })
+          setDeletingId(null)
+          if (error) {
+            Alert.alert('Could not delete', error)
+            return
+          }
+          setRows((prev) => filterRowsAfterDelete(prev, item))
+        },
+      },
+    ])
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -251,6 +281,20 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
                   <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{item.body}</Text>
                 </View>
               </View>
+              {mine ? (
+                <TouchableOpacity
+                  style={styles.deleteBtn}
+                  onPress={() => removeMessage(item)}
+                  disabled={deletingId === item.id}
+                  accessibilityLabel="Delete message"
+                >
+                  {deletingId === item.id ? (
+                    <ActivityIndicator size="small" color="rgba(255,255,255,0.4)" />
+                  ) : (
+                    <Trash2 size={16} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
+                  )}
+                </TouchableOpacity>
+              ) : null}
               {mine && item.avatar_url ? (
                 <Image source={{ uri: item.avatar_url }} style={styles.msgAvatar} />
               ) : null}
@@ -306,6 +350,13 @@ const styles = StyleSheet.create({
   bubbleMine: { backgroundColor: 'rgba(255,220,0,0.15)', borderColor: 'rgba(255,220,0,0.35)' },
   bubbleText: { fontSize: 15, color: 'rgba(255,255,255,0.9)', lineHeight: 20 },
   bubbleTextMine: { color: '#fff' },
+  deleteBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',

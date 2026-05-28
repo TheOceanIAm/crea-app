@@ -14,6 +14,7 @@ import {
 import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import {
@@ -165,9 +166,7 @@ export default function WorkspaceProjectsScreen() {
     }
     const timed = await runTimed('workspace-projects.load', async () => {
     setError(null)
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getAuthUser()
     if (!user) {
       setAllowed(false)
       setListings([])
@@ -552,9 +551,7 @@ export default function WorkspaceProjectsScreen() {
   const onCreate = async () => {
     const t = title.trim()
     if (!t || creating) return
-    const {
-      data: { user: u },
-    } = await supabase.auth.getUser()
+    const u = await getAuthUser()
     if (!u) {
       Alert.alert('Projects', 'Please sign in again.')
       return
@@ -570,9 +567,7 @@ export default function WorkspaceProjectsScreen() {
     }
     setCreating(true)
     setError(null)
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getAuthUser()
     if (!user) {
       setCreating(false)
       setError('Please sign in again.')
@@ -684,9 +679,7 @@ export default function WorkspaceProjectsScreen() {
 
   const archiveProject = async (item: ProjectListing) => {
     if (actingId || item.kind !== 'private') return
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getAuthUser()
     if (!user) {
       setError('Please sign in again.')
       return
@@ -720,9 +713,7 @@ export default function WorkspaceProjectsScreen() {
           style: 'destructive',
           onPress: () => {
             void (async () => {
-              const {
-                data: { user },
-              } = await supabase.auth.getUser()
+              const user = await getAuthUser()
               if (!user) {
                 setError('Please sign in again.')
                 return

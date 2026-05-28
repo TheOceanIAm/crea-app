@@ -22,6 +22,7 @@ import {
   Sparkles,
 } from 'lucide-react-native'
 import type { LucideIcon } from 'lucide-react-native'
+import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { ensureSoloWorkspaceProjectRow } from '@/lib/ensureSoloWorkspaceProject'
 import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
@@ -261,9 +262,7 @@ export default function ProjectWorkspaceScreen() {
       setLoading(false)
       return
     }
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getAuthUser()
     if (!user) {
       setForbidden(true)
       setWorkspaceOnlyPlan(false)

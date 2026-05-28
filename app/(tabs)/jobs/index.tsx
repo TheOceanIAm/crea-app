@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { PlusCircle } from 'lucide-react-native'
 import * as Linking from 'expo-linking'
+import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -137,9 +138,7 @@ export default function JobsListScreen() {
       )
         return
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const user = await getAuthUser()
       let role: string | null = null
       if (user) {
         const { data: prof } = await supabase

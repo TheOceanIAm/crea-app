@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useFocusEffect } from '@react-navigation/native'
 import { router } from 'expo-router'
+import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { isCeoProfile, resolveAppRole } from '@/lib/profileRole'
 
@@ -13,7 +14,7 @@ export function useCeoAccess(): { ready: boolean; allowed: boolean } {
     useCallback(() => {
       let cancelled = false
       ;(async () => {
-        const { data: { user } } = await supabase.auth.getUser()
+        const user = await getAuthUser()
         if (cancelled) return
         if (!user) {
           router.replace('/login')

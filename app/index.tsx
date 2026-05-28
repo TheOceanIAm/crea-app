@@ -89,7 +89,32 @@ export default function Index() {
         if (cancelled) return
 
         if (raced.kind === 'timeout') {
-          setSession(null)
+          const { data: { session: cached } } = await supabase.auth.getSession()
+          if (!cached) {
+            setSession(null)
+            return
+          }
+          const sessionToUse = await resolveSessionForAppBootstrap(cached)
+          if (!sessionToUse) {
+            setSession(null)
+            return
+          }
+          setSession(sessionToUse)
+          hideBootstrapOverlay()
+          void loadDashboardOverview(sessionToUse.user.id).then((overview) => {
+            if (overview) cacheDashboardOverview(overview)
+          })
+          const { data: profile, error } = await supabase
+            .from('profiles')
+            .select('onboarding_completed')
+            .eq('id', sessionToUse.user.id)
+            .maybeSingle()
+          if (cancelled) return
+          if (error) {
+            setOnboardingDone(true)
+          } else {
+            setOnboardingDone(!profileNeedsOnboarding(profile))
+          }
           return
         }
 

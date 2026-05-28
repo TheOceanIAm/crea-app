@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
 import { ChevronDown, X } from 'lucide-react-native'
+import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { getCache, setCache, deleteCache } from '@/lib/appCache'
 import { isCompanyProfile, isFreelancerProfile } from '@/lib/profileRole'
@@ -83,8 +84,7 @@ export function PinboardFeedScreen() {
     refreshInFlight.current = (async () => {
       try {
         if (!opts?.silent) setLoadError(null)
-        const { data: auth } = await supabase.auth.getUser()
-        const user = auth.user
+        const user = await getAuthUser()
         if (!user) {
           router.replace('/login')
           return

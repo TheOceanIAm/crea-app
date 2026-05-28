@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { ChevronLeft, MapPin, Star } from 'lucide-react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { getCache, setCache } from '@/lib/appCache'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
@@ -261,9 +262,7 @@ export default function TalentPoolScreen() {
 
   const load = useCallback(async (opts?: { force?: boolean }) => {
     setLoadError(null)
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getAuthUser()
     if (!user) {
       setAllowed(false)
       setRows([])

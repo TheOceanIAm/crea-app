@@ -15,6 +15,7 @@ import { ChevronLeft, Eye, Share2 } from 'lucide-react-native'
 import { CeoPublicProfileView } from '@/components/CeoPublicProfileView'
 import { FreelancerPublicProfileContent } from '@/components/profile/FreelancerPublicProfileContent'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
+import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { loadPublicProfile } from '@/lib/loadPublicProfile'
 import { postSyncFreelancerProfileToWeb } from '@/lib/syncFreelancerProfileApi'
@@ -38,9 +39,7 @@ export default function ProfilePreviewScreen() {
   const [liveWidgets, setLiveWidgets] = useState<PublicProfileWidgets | null>(null)
 
   const load = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getAuthUser()
     if (!user) {
       setAuthUserId(null)
       setLoading(false)

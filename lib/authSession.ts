@@ -31,10 +31,15 @@ export async function resolveSessionForAppBootstrap(initial: Session): Promise<S
     if (!refErr && ref.session) {
       return ref.session
     }
-    const { data: again } = await supabase.auth.getSession()
-    return again.session ?? null
   } catch {
-    const { data: again } = await supabase.auth.getSession()
-    return again.session ?? null
+    // fall through — keep valid cached session when refresh fails offline
   }
+
+  const exp = initial.expires_at
+  if (exp != null && exp * 1000 > Date.now()) {
+    return initial
+  }
+
+  const { data: again } = await supabase.auth.getSession()
+  return again.session ?? null
 }

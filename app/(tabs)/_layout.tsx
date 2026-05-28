@@ -5,6 +5,7 @@ import { Tabs } from 'expo-router'
 import { Bell, Briefcase, House, LayoutDashboard, UserRound } from 'lucide-react-native'
 import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
+import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { markGoodNewsModalShownToday, shouldShowGoodNewsModalToday } from '@/lib/goodNewsDailyGate'
 import { readBootstrapHints } from '@/lib/bootstrapHints'
@@ -55,9 +56,7 @@ export default function TabLayout() {
 
     const task = InteractionManager.runAfterInteractions(() => {
       void (async () => {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
+        const user = await getAuthUser()
         if (!user) {
           setUserId(null)
           setUnreadAlertsCount(0)
