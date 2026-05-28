@@ -17,8 +17,9 @@ import {
   markAlertRead,
   type NotificationRow,
 } from '@/lib/notificationsFeed'
+import { readCachedNotifications, cacheNotifications } from '@/lib/notificationsCache'
 import { invalidateAlertsBadge } from '@/lib/invalidateAlerts'
-import { getCache, setCache } from '@/lib/appCache'
+import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { runTimed } from '@/lib/perfMarks'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 import { TabScreenHeader } from '@/components/TabScreenHeader'
@@ -36,18 +37,35 @@ function timeAgo(str: string) {
   return `${Math.floor(h / 24)}d`
 }
 
+const ALERTS_STALE_MS = 30_000
+
+function readInitialNotifications(): {
+  rows: NotificationRow[]
+  readKeys: Set<string>
+  loading: boolean
+} {
+  const uid = peekWarmedOverview()?.userId
+  if (!uid) return { rows: [], readKeys: new Set(), loading: true }
+  const cached = readCachedNotifications(uid)
+  if (!cached) return { rows: [], readKeys: new Set(), loading: true }
+  return { rows: cached.rows, readKeys: new Set(cached.reads), loading: false }
+}
+
 export default function NotificationsScreen() {
   const router = useRouter()
-  const [rows, setRows] = useState<NotificationRow[]>([])
-  const [readKeys, setReadKeys] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(true)
+  const boot = useRef(readInitialNotifications()).current
+  const [rows, setRows] = useState<NotificationRow[]>(boot.rows)
+  const [readKeys, setReadKeys] = useState<Set<string>>(boot.readKeys)
+  const [loading, setLoading] = useState(boot.loading)
   const [refreshing, setRefreshing] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [showMessages, setShowMessages] = useState(true)
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadInFlight = useRef<Promise<void> | null>(null)
+  const lastFetchedAt = useRef(boot.loading ? 0 : Date.now())
+  const initialDone = useRef(!boot.loading)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (loadInFlight.current) return loadInFlight.current
     loadInFlight.current = (async () => {
       try {
@@ -69,12 +87,12 @@ export default function NotificationsScreen() {
             .maybeSingle()
           const role = resolveAppRole(profile?.role, user)
           setShowMessages(true)
-          const cacheKey = `notifications:${user.id}`
-          const cached = getCache<{ rows: NotificationRow[]; reads: string[] }>(cacheKey)
-          if (cached) {
+          const cached = readCachedNotifications(user.id)
+          if (!initialDone.current && cached) {
             setRows(cached.rows)
             setReadKeys(new Set(cached.reads))
             setLoading(false)
+            initialDone.current = true
           }
           const [feed, reads] = await Promise.all([
             loadNotificationFeed(user.id),
@@ -82,13 +100,15 @@ export default function NotificationsScreen() {
           ])
           setRows(feed)
           setReadKeys(reads)
-          setCache(cacheKey, { rows: feed, reads: Array.from(reads) }, 20_000)
+          cacheNotifications(user.id, { rows: feed, reads: Array.from(reads) })
+          lastFetchedAt.current = Date.now()
           return { feed: feed.length, reads: reads.size }
         })
         if (__DEV__ && timed.value) {
           console.log(`[perf] notifications.rows: feed=${timed.value.feed} reads=${timed.value.reads}`)
         }
       } finally {
+        initialDone.current = true
         setLoading(false)
       }
     })()
@@ -114,9 +134,15 @@ export default function NotificationsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void load().finally(() => {
+      if (!initialDone.current) {
+        void load().finally(() => invalidateAlertsBadge())
+        return
+      }
+      if (lastFetchedAt.current > 0 && Date.now() - lastFetchedAt.current < ALERTS_STALE_MS) {
         invalidateAlertsBadge()
-      })
+        return
+      }
+      void load({ silent: true }).finally(() => invalidateAlertsBadge())
     }, [load])
   )
 
@@ -157,14 +183,10 @@ export default function NotificationsScreen() {
           nextReadKeys.add(item.id)
           return nextReadKeys
         })
-        setCache(
-          `notifications:${userId}`,
-          {
-            rows,
-            reads: Array.from(nextReadKeys),
-          },
-          20_000
-        )
+        cacheNotifications(userId, {
+          rows,
+          reads: Array.from(nextReadKeys),
+        })
         invalidateAlertsBadge()
       }
       if (item.kind === 'invoice_incoming' || item.kind === 'invoice_freelancer') {

@@ -1,3 +1,5 @@
+import { getDeviceLocaleTag } from '@/lib/revenuecat/storeProductPrice'
+
 /** List prices (EUR) — must match Stripe + crea-services/lib/company-plan-catalog-prices.ts */
 export const FREELANCER_PLAN_PRICE_EUR = {
   proMonthly: 8.99,
@@ -10,26 +12,36 @@ export const COMPANY_PLAN_PRICE_EUR = {
   seatAddonMonthly: 12.99,
 } as const
 
-function formatEurPrice(amount: number): string {
-  return `€${amount.toFixed(2).replace(/\.00$/, '')}`
+const CATALOG_CURRENCY = 'EUR'
+
+export function formatCatalogPrice(amount: number, currency = CATALOG_CURRENCY): string {
+  try {
+    return new Intl.NumberFormat(getDeviceLocaleTag(), {
+      style: 'currency',
+      currency,
+      currencyDisplay: 'symbol',
+    }).format(amount)
+  } catch {
+    return `€${amount.toFixed(2).replace(/\.00$/, '')}`
+  }
 }
 
 export function freelancerProPriceLineMonthly(): string {
-  return `${formatEurPrice(FREELANCER_PLAN_PRICE_EUR.proMonthly)}/mo`
+  return `${formatCatalogPrice(FREELANCER_PLAN_PRICE_EUR.proMonthly)}/mo`
 }
 
 export function freelancerProPriceLineYearly(): string {
-  return `${formatEurPrice(FREELANCER_PLAN_PRICE_EUR.proYearly)}/yr`
+  return `${formatCatalogPrice(FREELANCER_PLAN_PRICE_EUR.proYearly)}/yr`
 }
 
 export function companyPlanPriceLinePerMonth(): string {
-  return `${formatEurPrice(COMPANY_PLAN_PRICE_EUR.proMonthly)}/mo`
+  return `${formatCatalogPrice(COMPANY_PLAN_PRICE_EUR.proMonthly)}/mo`
 }
 
 export function companyPlanPriceLinePerYear(): string {
-  return `${formatEurPrice(COMPANY_PLAN_PRICE_EUR.proYearly)}/yr`
+  return `${formatCatalogPrice(COMPANY_PLAN_PRICE_EUR.proYearly)}/yr`
 }
 
 export function companySeatAddonPriceLine(): string {
-  return `${formatEurPrice(COMPANY_PLAN_PRICE_EUR.seatAddonMonthly)}/mo per seat`
+  return `${formatCatalogPrice(COMPANY_PLAN_PRICE_EUR.seatAddonMonthly)}/mo per seat`
 }

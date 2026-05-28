@@ -1,8 +1,9 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { Animated, Easing, StyleSheet, View } from 'react-native'
 import { AppBootstrapLoading } from '@/components/AppBootstrapLoading'
 
 const FAILSAFE_MS = 8_000
+const FADE_OUT_MS = 280
 
 type ShowBootstrapOptions = {
   quick?: boolean
@@ -28,27 +29,51 @@ export function AppBootstrapOverlayProvider({ children }: { children: React.Reac
   const [visible, setVisible] = useState(false)
   const [quickBootstrap, setQuickBootstrap] = useState(true)
   const failsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fadeRef = useRef(new Animated.Value(1)).current
+  const hidingRef = useRef(false)
 
   const hideBootstrapOverlay = useCallback(() => {
     if (failsafeRef.current) {
       clearTimeout(failsafeRef.current)
       failsafeRef.current = null
     }
-    setVisible(false)
-  }, [])
+    if (hidingRef.current) return
+    hidingRef.current = true
+    Animated.timing(fadeRef, {
+      toValue: 0,
+      duration: FADE_OUT_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      hidingRef.current = false
+      if (finished) {
+        setVisible(false)
+        fadeRef.setValue(1)
+      }
+    })
+  }, [fadeRef])
 
   const showBootstrapOverlay = useCallback(
     (opts?: ShowBootstrapOptions) => {
+      hidingRef.current = false
+      fadeRef.setValue(1)
       setQuickBootstrap(opts?.quick !== false)
       setVisible(true)
       if (failsafeRef.current) clearTimeout(failsafeRef.current)
       failsafeRef.current = setTimeout(() => {
         failsafeRef.current = null
         setVisible(false)
+        fadeRef.setValue(1)
       }, FAILSAFE_MS)
     },
-    []
+    [fadeRef]
   )
+
+  useEffect(() => {
+    return () => {
+      if (failsafeRef.current) clearTimeout(failsafeRef.current)
+    }
+  }, [])
 
   const ctx = useMemo(
     () => ({
@@ -63,14 +88,14 @@ export function AppBootstrapOverlayProvider({ children }: { children: React.Reac
     <AppBootstrapOverlayContext.Provider value={ctx}>
       {children}
       {visible ? (
-        <View
+        <Animated.View
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
           pointerEvents="auto"
-          style={styles.overlayWrap}
+          style={[styles.overlayWrap, { opacity: fadeRef }]}
         >
           <AppBootstrapLoading quick={quickBootstrap} />
-        </View>
+        </Animated.View>
       ) : null}
     </AppBootstrapOverlayContext.Provider>
   )

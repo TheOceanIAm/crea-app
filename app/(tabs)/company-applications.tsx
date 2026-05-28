@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -12,40 +12,57 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
 import { getAuthUser } from '@/lib/getAuthUser'
-import { supabase } from '@/lib/supabase'
-import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import {
-  companyCanReviewApplications,
-  companyPlanWithPlatformTrial,
-} from '@/lib/company-plan'
-import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
-import { isWithinPlatformTrialPeriod } from '@/lib/platformTrial'
+  readCachedCompanyApplications,
+  loadCompanyApplicationsCache,
+  cacheCompanyApplications,
+  type CompanyApplicationRow,
+} from '@/lib/companyApplicationsLoad'
+import { peekWarmedOverview } from '@/lib/warmAppCaches'
 
-type Row = {
-  id: string
-  jobId: string
-  jobTitle: string
-  freelancerId: string
-  freelancerName: string
-  avatarUrl: string | null
-  status: string
-  createdAt: string
-}
+type Row = CompanyApplicationRow
 
 function initial(name: string) {
   const t = name.trim()
   return t ? t.charAt(0).toUpperCase() : '?'
 }
 
+function readInitialApplications(): {
+  loading: boolean
+  allowed: boolean
+  proRequired: boolean
+  rows: Row[]
+} {
+  const uid = peekWarmedOverview()?.userId
+  if (!uid) return { loading: true, allowed: false, proRequired: false, rows: [] }
+  const cached = readCachedCompanyApplications(uid)
+  if (!cached) return { loading: true, allowed: false, proRequired: false, rows: [] }
+  return {
+    loading: false,
+    allowed: cached.allowed,
+    proRequired: cached.proRequired,
+    rows: cached.rows,
+  }
+}
+
 export default function CompanyApplicationsScreen() {
   const router = useRouter()
-  const [loading, setLoading] = useState(true)
-  const [allowed, setAllowed] = useState(false)
-  const [proRequired, setProRequired] = useState(false)
-  const [rows, setRows] = useState<Row[]>([])
+  const boot = useRef(readInitialApplications()).current
+  const lastFetchedAt = useRef(boot.loading ? 0 : Date.now())
+  const [loading, setLoading] = useState(boot.loading)
+  const [allowed, setAllowed] = useState(boot.allowed)
+  const [proRequired, setProRequired] = useState(boot.proRequired)
+  const [rows, setRows] = useState<Row[]>(boot.rows)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { force?: boolean }) => {
+    if (
+      !opts?.force &&
+      lastFetchedAt.current > 0 &&
+      Date.now() - lastFetchedAt.current < 30_000
+    ) {
+      return
+    }
     const user = await getAuthUser()
     if (!user) {
       setAllowed(false)
@@ -54,101 +71,21 @@ export default function CompanyApplicationsScreen() {
       router.replace('/login')
       return
     }
-    const { data: p } = await supabase
-      .from('profiles')
-      .select('role, trial_ends_at, created_at, subscription_tier')
-      .eq('id', user.id)
-      .single()
-    const role = resolveAppRole(p?.role, user)
-    if (!isCompanyProfile(role)) {
-      setAllowed(false)
-      setProRequired(false)
-      setRows([])
+    const cached = readCachedCompanyApplications(user.id)
+    if (cached && loading) {
+      setAllowed(cached.allowed)
+      setProRequired(cached.proRequired)
+      setRows(cached.rows)
       setLoading(false)
-      return
     }
-    setAllowed(true)
-
-    const { data: cp } = await supabase
-      .from('company_profiles')
-      .select('subscription_plan')
-      .eq('id', user.id)
-      .maybeSingle()
-    const storedPlan = resolveCompanySubscriptionPlanFromSources(
-      user,
-      p?.subscription_tier,
-      cp?.subscription_plan
-    )
-    const trialActive = isWithinPlatformTrialPeriod(p?.trial_ends_at, p?.created_at ?? user.created_at)
-    const effectivePlan = companyPlanWithPlatformTrial(storedPlan, trialActive)
-    if (!companyCanReviewApplications(effectivePlan)) {
-      setProRequired(true)
-      setRows([])
-      setLoading(false)
-      return
-    }
-    setProRequired(false)
-
-    const { data: jobs, error: jerr } = await supabase
-      .from('jobs')
-      .select('id, title')
-      .eq('company_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(100)
-    if (jerr || !jobs?.length) {
-      setRows([])
-      setLoading(false)
-      return
-    }
-    const jobMap = new Map<string, string>()
-    for (const j of jobs) {
-      jobMap.set(j.id as string, String(j.title ?? '').trim() || 'Project')
-    }
-    const jobIds = [...jobMap.keys()]
-
-    const { data: apps, error: aerr } = await supabase
-      .from('job_applications')
-      .select('id, job_id, freelancer_id, status, created_at')
-      .in('job_id', jobIds)
-      .order('created_at', { ascending: false })
-      .limit(200)
-
-    if (aerr || !apps?.length) {
-      setRows([])
-      setLoading(false)
-      return
-    }
-
-    const fIds = [...new Set(apps.map((a) => a.freelancer_id as string).filter(Boolean))]
-    const { data: profs } = await supabase.from('profiles').select('id, name, avatar_url').in('id', fIds)
-    const profMap = new Map<string, { name: string; avatar_url: string | null }>()
-    for (const pr of profs ?? []) {
-      const url = pr.avatar_url?.trim()
-      profMap.set(pr.id as string, {
-        name: (pr.name || 'Freelancer').trim() || 'Freelancer',
-        avatar_url: url && /^https?:\/\//i.test(url) ? url : null,
-      })
-    }
-
-    setRows(
-      apps.map((a) => {
-        const fid = a.freelancer_id as string
-        const pr = profMap.get(fid)
-        const jid = a.job_id as string
-        return {
-          id: a.id as string,
-          jobId: jid,
-          jobTitle: jobMap.get(jid) ?? 'Job',
-          freelancerId: fid,
-          freelancerName: pr?.name ?? 'Freelancer',
-          avatarUrl: pr?.avatar_url ?? null,
-          status: String(a.status ?? 'pending'),
-          createdAt: String(a.created_at ?? ''),
-        }
-      })
-    )
+    const data = await loadCompanyApplicationsCache(user)
+    setAllowed(data.allowed)
+    setProRequired(data.proRequired)
+    setRows(data.rows)
+    cacheCompanyApplications(user.id, data)
+    lastFetchedAt.current = Date.now()
     setLoading(false)
-  }, [router])
+  }, [loading, router])
 
   useFocusEffect(
     useCallback(() => {

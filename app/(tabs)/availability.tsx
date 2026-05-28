@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   View,
   Text,
@@ -24,13 +24,38 @@ import {
   type CellState,
   DAY_LABELS_EN,
   effectiveDayStateMap,
-  parseAvailabilityCalendar,
   toISODateLocal,
   toJsonPayload,
 } from '@/lib/availabilityCalendar'
 import { addMonths, buildMonthSlotMatrix, formatMonthTitle } from '@/lib/calendarMonth'
+import { readCachedAvailability, loadAvailabilityCache, cacheAvailability } from '@/lib/availabilityCache'
+import { peekWarmedOverview } from '@/lib/warmAppCaches'
 
 const TAB_BAR_HEIGHT = 80
+
+function readInitialAvailability(): {
+  loading: boolean
+  role: string | null
+  days: Record<string, CellState>
+  notes: string
+  defaultMode: CalendarDefaultMode
+} {
+  const uid = peekWarmedOverview()?.userId
+  if (!uid) {
+    return { loading: true, role: null, days: {}, notes: '', defaultMode: 'available' }
+  }
+  const cached = readCachedAvailability(uid)
+  if (!cached) {
+    return { loading: true, role: null, days: {}, notes: '', defaultMode: 'available' }
+  }
+  return {
+    loading: false,
+    role: cached.role,
+    days: cached.days,
+    notes: cached.notes,
+    defaultMode: cached.defaultMode,
+  }
+}
 
 type MonthPageProps = {
   pageWidth: number
@@ -141,12 +166,13 @@ export default function AvailabilityScreen() {
   const cardGutter = 12
   const pageWidth = Math.max(280, windowWidth - cardGutter * 2)
 
-  const [loading, setLoading] = useState(true)
+  const boot = useRef(readInitialAvailability()).current
+  const [loading, setLoading] = useState(boot.loading)
   const [saving, setSaving] = useState(false)
-  const [role, setRole] = useState<string | null>(null)
-  const [days, setDays] = useState<Record<string, CellState>>({})
-  const [defaultMode, setDefaultMode] = useState<CalendarDefaultMode>('available')
-  const [notes, setNotes] = useState('')
+  const [role, setRole] = useState<string | null>(boot.role)
+  const [days, setDays] = useState<Record<string, CellState>>(boot.days)
+  const [defaultMode, setDefaultMode] = useState<CalendarDefaultMode>(boot.defaultMode)
+  const [notes, setNotes] = useState(boot.notes)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [cursor, setCursor] = useState(() => {
     const n = new Date()
@@ -167,27 +193,33 @@ export default function AvailabilityScreen() {
       return
     }
 
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('role, availability_calendar')
-      .eq('id', user.id)
-      .single()
+    const cached = readCachedAvailability(user.id)
+    if (cached && loading) {
+      setRole(cached.role)
+      if (isFreelancerProfile(cached.role)) {
+        setDays(cached.days)
+        setNotes(cached.notes)
+        setDefaultMode(cached.defaultMode)
+      }
+      setLoading(false)
+    }
 
-    if (error) {
-      setLoadError(error.message)
+    const next = await loadAvailabilityCache(user.id)
+    if (!next) {
+      setLoadError('Could not load availability')
       setLoading(false)
       return
     }
 
-    setRole(profile?.role ?? null)
-    if (isFreelancerProfile(profile?.role)) {
-      const parsed = parseAvailabilityCalendar(profile?.availability_calendar)
-      setDays(parsed.days)
-      setNotes(parsed.notes ?? '')
-      setDefaultMode(parsed.version === 3 ? 'available' : 'off')
+    setRole(next.role)
+    if (isFreelancerProfile(next.role)) {
+      setDays(next.days)
+      setNotes(next.notes)
+      setDefaultMode(next.defaultMode)
     }
+    cacheAvailability(user.id, next)
     setLoading(false)
-  }, [])
+  }, [loading])
 
   useEffect(() => {
     load()

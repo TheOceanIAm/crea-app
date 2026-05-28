@@ -16,26 +16,40 @@ import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
 import { supabase } from '@/lib/supabase'
 import { loadDirectMessageInbox, type ConvoRow } from '@/lib/messagesInboxLoad'
+import { readCachedMessages, cacheMessages } from '@/lib/messagesCache'
 import { invalidateDmBadge } from '@/lib/invalidateDmBadge'
-import { deleteCache, getCache, setCache } from '@/lib/appCache'
+import { deleteCache } from '@/lib/appCache'
+import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { runTimed } from '@/lib/perfMarks'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
+const MESSAGES_STALE_MS = 30_000
+
+function readInitialMessages(): { inbox: ConvoRow[]; archived: ConvoRow[]; loading: boolean } {
+  const uid = peekWarmedOverview()?.userId
+  if (!uid) return { inbox: [], archived: [], loading: true }
+  const cached = readCachedMessages(uid)
+  if (!cached) return { inbox: [], archived: [], loading: true }
+  return { inbox: cached.inbox, archived: cached.archived, loading: false }
+}
+
 export default function MessagesScreen() {
   const router = useRouter()
-  const [convos, setConvos] = useState<ConvoRow[]>([])
-  const [loading, setLoading] = useState(true)
+  const boot = useRef(readInitialMessages()).current
+  const [convos, setConvos] = useState<ConvoRow[]>(boot.inbox)
+  const [loading, setLoading] = useState(boot.loading)
   const [refreshing, setRefreshing] = useState(false)
   const [signedIn, setSignedIn] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [archived, setArchived] = useState<ConvoRow[]>([])
+  const [archived, setArchived] = useState<ConvoRow[]>(boot.archived)
   const [showArchived, setShowArchived] = useState(false)
 
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshInFlight = useRef<Promise<void> | null>(null)
-  const initialLoadingDone = useRef(false)
+  const initialLoadingDone = useRef(!boot.loading)
+  const lastFetchedAt = useRef(boot.loading ? 0 : Date.now())
 
-  const refreshList = useCallback(async () => {
+  const refreshList = useCallback(async (opts?: { silent?: boolean }) => {
     if (refreshInFlight.current) return refreshInFlight.current
     refreshInFlight.current = (async () => {
       try {
@@ -50,12 +64,12 @@ export default function MessagesScreen() {
           return
         }
         setSignedIn(true)
-        const cacheKey = `messages:${user.id}`
-        const cached = getCache<{ inbox: ConvoRow[]; archived: ConvoRow[] }>(cacheKey)
+        const cached = readCachedMessages(user.id)
         if (!initialLoadingDone.current && cached) {
           setConvos(cached.inbox)
           setArchived(cached.archived)
           setLoading(false)
+          initialLoadingDone.current = true
         }
 
         const result = await loadDirectMessageInbox(user.id)
@@ -68,7 +82,8 @@ export default function MessagesScreen() {
         setLoadError(null)
         setConvos(result.inbox)
         setArchived(result.archived)
-        setCache(cacheKey, { inbox: result.inbox, archived: result.archived }, 20_000)
+        cacheMessages(user.id, { inbox: result.inbox, archived: result.archived })
+        lastFetchedAt.current = Date.now()
         return { inbox: result.inbox.length, archived: result.archived.length }
         })
         if (__DEV__ && timed.value) {
@@ -97,7 +112,20 @@ export default function MessagesScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void refreshList()
+      if (!initialLoadingDone.current) {
+        void refreshList()
+        invalidateDmBadge()
+        return () => {
+          if (reloadTimer.current) clearTimeout(reloadTimer.current)
+        }
+      }
+      if (lastFetchedAt.current > 0 && Date.now() - lastFetchedAt.current < MESSAGES_STALE_MS) {
+        invalidateDmBadge()
+        return () => {
+          if (reloadTimer.current) clearTimeout(reloadTimer.current)
+        }
+      }
+      void refreshList({ silent: true })
       invalidateDmBadge()
       return () => {
         if (reloadTimer.current) clearTimeout(reloadTimer.current)

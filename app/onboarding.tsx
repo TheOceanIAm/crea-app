@@ -31,6 +31,9 @@ import {
   type NormalizedFreelancerPlan,
 } from '@/lib/billingDisplay'
 import type { CompanySubscriptionPlanDb } from '@/lib/companyPlanFromSession'
+import { PLATFORM_TRIAL_DAYS } from '@/lib/platformTrial'
+import { mainTabHref, writeLastMainTab } from '@/lib/appEntryRoute'
+import { writeBootstrapHints } from '@/lib/bootstrapHints'
 
 type RoleChoice = 'freelancer' | 'company'
 
@@ -199,7 +202,12 @@ export default function OnboardingScreen() {
       console.warn('[onboarding] auth.updateUser metadata:', metaErr.message)
     }
 
-    router.replace('/(tabs)/feed')
+    await writeBootstrapHints(user.id, {
+      onboardingCompleted: true,
+      role: roleChoice,
+    })
+    await writeLastMainTab(user.id, 'feed')
+    router.replace(mainTabHref('feed'))
   }
 
   const goBack = () => {
@@ -236,7 +244,7 @@ export default function OnboardingScreen() {
     step === 0
       ? 'You can change details later in settings.'
       : step === 1
-        ? 'During your 30-day platform trial you can preview Free vs Pro. Switch anytime under Profile → Plan (same as creaservices.de).'
+        ? `During your ${PLATFORM_TRIAL_DAYS}-day platform trial you can preview Free vs Pro. Switch anytime under Profile → Plan (same as creaservices.de).`
         : step === 2
           ? roleChoice === 'company'
             ? 'This is how you appear to freelancers.'
@@ -326,12 +334,11 @@ export default function OnboardingScreen() {
                   )
                 })}
               </View>
-              {roleChoice === 'company' ? (
-                <Text style={styles.trialFootnote}>
-                  During the 30-day platform trial, both options give full Pro features. After trial, companies need Pro
-                  to continue.
-                </Text>
-              ) : null}
+              <Text style={styles.trialFootnote}>
+                {roleChoice === 'company'
+                  ? `During the ${PLATFORM_TRIAL_DAYS}-day platform trial, both options include full Pro features. After the trial you move to Free automatically; subscribe to Pro when you need unlimited listings and hiring tools.`
+                  : `During the ${PLATFORM_TRIAL_DAYS}-day platform trial, both options include full Pro features. After the trial you move to Free automatically; subscribe to Pro to keep applying to jobs and using Pro tools.`}
+              </Text>
             </>
           ) : null}
 

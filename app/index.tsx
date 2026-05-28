@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { View, StyleSheet, Alert } from 'react-native'
+import type { Href } from 'expo-router'
 import type { Session } from '@supabase/supabase-js'
 import { Redirect, useRouter } from 'expo-router'
 import { supabase } from '@/lib/supabase'
@@ -7,11 +8,14 @@ import * as SplashScreen from 'expo-splash-screen'
 import { useAppBootstrapOverlay } from '@/contexts/AppBootstrapOverlayContext'
 import { resolveSessionForAppBootstrap } from '@/lib/authSession'
 import { consumeInitialSupabaseAuthUrlForBootstrap } from '@/lib/authDeepLink'
-import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 import { getLoggedOutEntryRoute } from '@/lib/iosAppStoreCompliance'
-import { cacheDashboardOverview, loadDashboardOverview } from '@/lib/dashboardOverview'
+import { onboardingDoneFromHints, resolveAppEntryHref, resolveAppEntryTab } from '@/lib/appEntryRoute'
+import { awaitBootstrapReveal, resolveBootstrapMinRevealMs, BOOTSTRAP_MIN_REVEAL_QUICK_MS } from '@/lib/bootstrapRevealGate'
+import { prefetchMainTabDataAwait, hydrateMainTabFromDisk } from '@/lib/prefetchTabData'
+import { runPostLoginWarmup } from '@/lib/postLoginWarmup'
+import { readBootstrapHints, markFastBootstrapEnabled, readFastBootstrapEnabled } from '@/lib/bootstrapHints'
 
-/** Avoid an endless native splash if Supabase/storage never resolves (offline, bad URL, etc.). */
+/** Cap wait for first `getSession()`; overlay hides earlier once session is known. */
 const SESSION_BOOTSTRAP_MS = 8_000
 
 type SessionRace =
@@ -34,7 +38,6 @@ async function getSessionOrTimeout(): Promise<SessionRace> {
         if (error) {
           const msg = (error.message ?? '').toLowerCase()
           if (msg.includes('invalid refresh token') || msg.includes('refresh token not found')) {
-            // Stale local credentials after reinstall/session rotation: clear local auth storage and continue logged out.
             await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
             done({ kind: 'ok', session: null })
             return
@@ -51,6 +54,7 @@ export default function Index() {
   const [loading, setLoading] = useState(true)
   const [session, setSession] = useState<Session | null>(null)
   const [onboardingDone, setOnboardingDone] = useState(true)
+  const [entryHref, setEntryHref] = useState<Href>('/(tabs)/feed' as Href)
   const { showBootstrapOverlay, hideBootstrapOverlay } = useAppBootstrapOverlay()
 
   useLayoutEffect(() => {
@@ -58,13 +62,66 @@ export default function Index() {
   }, [])
 
   useEffect(() => {
-    showBootstrapOverlay()
+    void (async () => {
+      const fast = await readFastBootstrapEnabled()
+      showBootstrapOverlay({ quick: fast })
+    })()
   }, [showBootstrapOverlay])
 
   useEffect(() => {
     let cancelled = false
 
+    const finishLoading = () => {
+      if (cancelled) return
+      setLoading(false)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!cancelled) hideBootstrapOverlay()
+        })
+      })
+      void markFastBootstrapEnabled()
+    }
+
+    const enterLoggedIn = async (sessionToUse: Session, bootstrapStartedAt: number) => {
+      const uid = sessionToUse.user.id
+      const [hints, entryTab, entry] = await Promise.all([
+        readBootstrapHints(uid),
+        resolveAppEntryTab(uid),
+        resolveAppEntryHref(uid),
+      ])
+      const hinted = onboardingDoneFromHints(hints)
+
+      if (cancelled) return
+
+      const minMs = await resolveBootstrapMinRevealMs(uid, entryTab)
+      showBootstrapOverlay({ quick: minMs <= BOOTSTRAP_MIN_REVEAL_QUICK_MS })
+
+      setSession(sessionToUse)
+      setEntryHref(entry)
+      if (hinted === false) {
+        setOnboardingDone(false)
+      } else {
+        setOnboardingDone(true)
+      }
+
+      await awaitBootstrapReveal({ startedAt: bootstrapStartedAt, userId: uid, entryTab })
+      if (cancelled) return
+
+      finishLoading()
+
+      runPostLoginWarmup(sessionToUse, {
+        onOnboardingResolved: (done) => {
+          if (cancelled) return
+          if (!done) setOnboardingDone(false)
+          void resolveAppEntryHref(uid).then((href) => {
+            if (!cancelled) setEntryHref(href)
+          })
+        },
+      })
+    }
+
     const run = async () => {
+      const bootstrapStartedAt = Date.now()
       try {
         const initial = await consumeInitialSupabaseAuthUrlForBootstrap()
         if (cancelled) return
@@ -88,82 +145,38 @@ export default function Index() {
         const raced = await getSessionOrTimeout()
         if (cancelled) return
 
-        if (raced.kind === 'timeout') {
-          const { data: { session: cached } } = await supabase.auth.getSession()
-          if (!cached) {
-            setSession(null)
-            return
-          }
-          const sessionToUse = await resolveSessionForAppBootstrap(cached)
-          if (!sessionToUse) {
-            setSession(null)
-            return
-          }
-          setSession(sessionToUse)
-          hideBootstrapOverlay()
-          void loadDashboardOverview(sessionToUse.user.id).then((overview) => {
-            if (overview) cacheDashboardOverview(overview)
-          })
-          const { data: profile, error } = await supabase
-            .from('profiles')
-            .select('onboarding_completed')
-            .eq('id', sessionToUse.user.id)
-            .maybeSingle()
-          if (cancelled) return
-          if (error) {
-            setOnboardingDone(true)
-          } else {
-            setOnboardingDone(!profileNeedsOnboarding(profile))
-          }
-          return
-        }
+        let rawSession: Session | null =
+          raced.kind === 'timeout'
+            ? (await supabase.auth.getSession()).data.session
+            : raced.session
 
-        const s = raced.session
-        if (!s) {
+        if (!rawSession) {
           setSession(null)
+          finishLoading()
           return
         }
 
-        const sessionToUse = await resolveSessionForAppBootstrap(s)
+        const sessionToUse = await resolveSessionForAppBootstrap(rawSession)
         if (!sessionToUse) {
           if (__DEV__) {
             console.warn('[auth] Session cleared after refresh failure during bootstrap')
           }
           setSession(null)
+          finishLoading()
           return
         }
 
-        setSession(sessionToUse)
-        hideBootstrapOverlay()
-
-        void loadDashboardOverview(sessionToUse.user.id).then((overview) => {
-          if (overview) cacheDashboardOverview(overview)
+        void resolveAppEntryTab(sessionToUse.user.id).then(async (tab) => {
+          await hydrateMainTabFromDisk(sessionToUse.user.id, tab)
+          void prefetchMainTabDataAwait(sessionToUse.user.id, tab)
         })
 
-        const { data: profile, error } = await supabase
-          .from('profiles')
-          .select('onboarding_completed')
-          .eq('id', sessionToUse.user.id)
-          .maybeSingle()
-
-        if (cancelled) return
-
-        if (error) {
-          const msg = error.message.toLowerCase()
-          if (msg.includes('onboarding_completed') || msg.includes('column')) {
-            setOnboardingDone(true)
-          } else {
-            setOnboardingDone(true)
-          }
-        } else {
-          setOnboardingDone(!profileNeedsOnboarding(profile))
-        }
+        await enterLoggedIn(sessionToUse, bootstrapStartedAt)
       } catch {
-        if (!cancelled) setSession(null)
-      } finally {
-        if (cancelled) return
-        setLoading(false)
-        hideBootstrapOverlay()
+        if (!cancelled) {
+          setSession(null)
+          finishLoading()
+        }
       }
     }
 
@@ -171,7 +184,7 @@ export default function Index() {
     return () => {
       cancelled = true
     }
-  }, [router])
+  }, [hideBootstrapOverlay, router, showBootstrapOverlay])
 
   if (loading) {
     return <View style={styles.bridge} />
@@ -185,7 +198,7 @@ export default function Index() {
     return <Redirect href="/onboarding" />
   }
 
-  return <Redirect href="/(tabs)/feed" />
+  return <Redirect href={entryHref} />
 }
 
 const styles = StyleSheet.create({

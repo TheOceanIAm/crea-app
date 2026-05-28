@@ -46,22 +46,55 @@ import {
   PINBOARD_NO_ATTACH,
   PINBOARD_UPDATES_COPY,
   pinboardCacheKey,
+  readCachedPinboardFeed,
   validatePinboardUpdateInput,
   type PinboardAttachOption,
   type PinboardFeedCache,
   type PinboardPost,
 } from '@/lib/pinboardFeed'
+import {
+  consumeWarmedPinboard,
+  peekWarmedOverview,
+  peekWarmedPinboard,
+  peekWarmedPinboardFetchedAt,
+  peekWarmedPinboardUserId,
+} from '@/lib/warmAppCaches'
+import { prefetchSecondaryTabsIdle } from '@/lib/prefetchSecondaryTabs'
 import type { Href } from 'expo-router'
+
+const FEED_STALE_MS = 30_000
+
+function readInitialFeed(): { posts: PinboardPost[]; loading: boolean; fetchedAt: number } {
+  const warmedUid = peekWarmedPinboardUserId()
+  if (warmedUid) {
+    return {
+      posts: peekWarmedPinboard() ?? [],
+      loading: false,
+      fetchedAt: peekWarmedPinboardFetchedAt(),
+    }
+  }
+
+  const overview = peekWarmedOverview()
+  if (overview) {
+    const cached = readCachedPinboardFeed(overview.userId)
+    if (cached) {
+      return { posts: cached, loading: false, fetchedAt: Date.now() }
+    }
+  }
+
+  return { posts: [], loading: true, fetchedAt: 0 }
+}
 
 export function PinboardFeedScreen() {
   const router = useRouter()
+  const bootFeed = useRef(readInitialFeed()).current
   const { overview, refresh: refreshOverview } = useDashboardOverview()
   const userId = overview?.userId ?? null
   const role = overview?.role ?? null
   const avatarUrl = overview?.avatarUrl ?? null
   const displayName = overview?.name?.trim() || 'You'
-  const [posts, setPosts] = useState<PinboardPost[]>([])
-  const [loading, setLoading] = useState(true)
+  const [posts, setPosts] = useState<PinboardPost[]>(bootFeed.posts)
+  const [loading, setLoading] = useState(bootFeed.loading)
   const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -76,8 +109,32 @@ export function PinboardFeedScreen() {
   const [attachLoading, setAttachLoading] = useState(false)
   const [attachPickerOpen, setAttachPickerOpen] = useState(false)
 
-  const initialDone = useRef(false)
+  const initialDone = useRef(!bootFeed.loading)
   const refreshInFlight = useRef<Promise<void> | null>(null)
+  const lastFetchedAt = useRef(bootFeed.fetchedAt)
+
+  useEffect(() => {
+    if (!userId) return
+    prefetchSecondaryTabsIdle(userId, role)
+  }, [userId, role])
+
+  useEffect(() => {
+    if (!userId || initialDone.current) return
+
+    const warmed = consumeWarmedPinboard(userId)
+    if (warmed !== null) {
+      setPosts(warmed)
+      setLoading(false)
+      initialDone.current = true
+      return
+    }
+
+    const cached = getCache<PinboardFeedCache>(pinboardCacheKey(userId))
+    if (cached) {
+      setPosts(cached.posts)
+      setLoading(false)
+    }
+  }, [userId])
 
   const refreshFeed = useCallback(async (opts?: { silent?: boolean }) => {
     if (refreshInFlight.current) return refreshInFlight.current
@@ -90,23 +147,26 @@ export function PinboardFeedScreen() {
           return
         }
         const cacheKey = pinboardCacheKey(user.id)
-        if (!initialDone.current) {
-          const cached = getCache<PinboardFeedCache>(cacheKey)
-          if (cached?.posts?.length) {
-            setPosts(cached.posts)
-            setLoading(false)
-          }
+        const cached = getCache<PinboardFeedCache>(cacheKey)
+
+        if (!initialDone.current && cached) {
+          setPosts(cached.posts)
+          setLoading(false)
+          initialDone.current = true
         }
 
         const { posts: next, error } = await loadPinboardFeedPage()
         if (error) {
-          setLoadError(error)
-          if (!initialDone.current) setPosts([])
+          if (!cached) {
+            setLoadError(error)
+            if (!initialDone.current) setPosts([])
+          }
         } else {
           setLoadError(null)
           setPosts(next)
           setHasMore(next.length >= 25)
           setCache(cacheKey, { posts: next }, 25_000)
+          lastFetchedAt.current = Date.now()
         }
       } finally {
         if (!initialDone.current) {
@@ -124,7 +184,14 @@ export function PinboardFeedScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void refreshFeed({ silent: initialDone.current })
+      if (!initialDone.current) {
+        void refreshFeed()
+        return
+      }
+      if (lastFetchedAt.current > 0 && Date.now() - lastFetchedAt.current < FEED_STALE_MS) {
+        return
+      }
+      void refreshFeed({ silent: true })
     }, [refreshFeed])
   )
 

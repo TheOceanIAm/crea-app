@@ -6,19 +6,32 @@ import {
   dashboardOverviewCacheKey,
   hydrateDashboardOverviewFromDisk,
   loadDashboardOverview,
+  persistDashboardOverviewToDisk,
   readCachedDashboardOverview,
   type DashboardOverviewData,
 } from '@/lib/dashboardOverview'
 import { deleteCache } from '@/lib/appCache'
-import { consumeWarmedOverview } from '@/lib/warmAppCaches'
+import { consumeWarmedOverview, peekWarmedOverview, peekWarmedPinboardUserId } from '@/lib/warmAppCaches'
+
+function readInitialOverview(): { overview: DashboardOverviewData | null; loading: boolean } {
+  const warmed = peekWarmedOverview()
+  if (warmed) return { overview: warmed, loading: false }
+  const uid = peekWarmedPinboardUserId() ?? warmed?.userId
+  if (uid) {
+    const mem = readCachedDashboardOverview(uid)
+    if (mem) return { overview: mem, loading: false }
+  }
+  return { overview: null, loading: true }
+}
 
 export function useDashboardOverview() {
-  const [overview, setOverview] = useState<DashboardOverviewData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const initialDone = useRef(false)
+  const boot = useRef(readInitialOverview()).current
+  const [overview, setOverview] = useState<DashboardOverviewData | null>(boot.overview)
+  const [loading, setLoading] = useState(boot.loading)
+  const initialDone = useRef(Boolean(boot.overview))
   const inFlight = useRef<Promise<void> | null>(null)
-  const lastFetchedAt = useRef(0)
-  const hydratedRef = useRef(false)
+  const lastFetchedAt = useRef(boot.overview ? Date.now() : 0)
+  const hydratedRef = useRef(Boolean(boot.overview))
   const DASHBOARD_STALE_MS = 90_000
 
   useEffect(() => {
@@ -51,11 +64,14 @@ export function useDashboardOverview() {
       }
 
       const disk = await hydrateDashboardOverviewFromDisk(user.id)
-      if (cancelled || !disk) return
-      setOverview(disk)
-      setLoading(false)
-      initialDone.current = true
-      lastFetchedAt.current = Date.now()
+      if (cancelled) return
+      if (disk) {
+        setOverview(disk)
+        setLoading(false)
+        initialDone.current = true
+        lastFetchedAt.current = Date.now()
+        return
+      }
     })()
     return () => {
       cancelled = true
@@ -102,6 +118,7 @@ export function useDashboardOverview() {
         if (next) {
           setOverview(next)
           cacheDashboardOverview(next)
+          void persistDashboardOverviewToDisk(next)
           lastFetchedAt.current = Date.now()
         }
       } finally {
@@ -120,7 +137,7 @@ export function useDashboardOverview() {
 
   useFocusEffect(
     useCallback(() => {
-      if (lastFetchedAt.current > 0 && Date.now() - lastFetchedAt.current < 90_000) {
+      if (lastFetchedAt.current > 0 && Date.now() - lastFetchedAt.current < DASHBOARD_STALE_MS) {
         return
       }
       void refresh()

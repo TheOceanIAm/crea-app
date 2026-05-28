@@ -15,6 +15,18 @@ export function isCompanyPro(plan: ResolvedCompanyPlan): boolean {
   return plan === 'pro'
 }
 
+/** Platform trial grants Pro-level access for feature gates. */
+export function companyPlanWithPlatformTrial(
+  plan: ResolvedCompanyPlan,
+  inPlatformTrial: boolean
+): ResolvedCompanyPlan {
+  return inPlatformTrial ? 'pro' : plan
+}
+
+export function companyCanReviewApplications(plan: ResolvedCompanyPlan): boolean {
+  return isCompanyPro(plan)
+}
+
 export function companyHasBryterAndAxa(plan: ResolvedCompanyPlan): boolean {
   return plan === 'pro'
 }

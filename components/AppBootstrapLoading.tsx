@@ -8,9 +8,51 @@ const CREA_YELLOW = '#FFDC00'
 
 const PULSE_MS = 900
 const REVEAL_MS = 700
-const QUICK_REVEAL_MS = 120
+const QUICK_REVEAL_MS = 280
 
-/** Full-screen bootstrap: native Gaussian-ish blur (BlurView) fades off over {@link REVEAL_MS}, then wordmark pulses. */
+function startPulseLoop(
+  pulseScale: Animated.Value,
+  pulseOpacity: Animated.Value,
+  pulseMs: number
+): Animated.CompositeAnimation {
+  const ease = Easing.inOut(Easing.sin)
+  const loop = Animated.loop(
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(pulseScale, {
+          toValue: 1.08,
+          duration: pulseMs,
+          easing: ease,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseOpacity, {
+          toValue: 0.62,
+          duration: pulseMs,
+          easing: ease,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.parallel([
+        Animated.timing(pulseScale, {
+          toValue: 1,
+          duration: pulseMs,
+          easing: ease,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseOpacity, {
+          toValue: 1,
+          duration: pulseMs,
+          easing: ease,
+          useNativeDriver: true,
+        }),
+      ]),
+    ])
+  )
+  loop.start()
+  return loop
+}
+
+/** Full-screen bootstrap: blur fades while CREA pulses from the first frame. */
 export function AppBootstrapLoading({ quick = false }: { quick?: boolean }) {
   const [fontsLoaded] = useFonts({ ClimateCrisis_400Regular })
   const softReveal = useRef(new Animated.Value(0)).current
@@ -19,10 +61,9 @@ export function AppBootstrapLoading({ quick = false }: { quick?: boolean }) {
   const pulseOpacity = useRef(new Animated.Value(1)).current
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null)
 
-  /** Mild glow while unfocused; blur layer does most of the softness. */
   const shadowRadius = softReveal.interpolate({
     inputRange: [0, 1],
-    outputRange: [18, 0],
+    outputRange: [22, 8],
   })
 
   const smearOpacity = smearReveal.interpolate({
@@ -32,46 +73,11 @@ export function AppBootstrapLoading({ quick = false }: { quick?: boolean }) {
 
   useEffect(() => {
     const revealMs = quick ? QUICK_REVEAL_MS : REVEAL_MS
+    const pulseMs = quick ? 650 : PULSE_MS
     const easeOut = Easing.out(Easing.cubic)
     pulseLoopRef.current?.stop?.()
 
-    const runPulse = () => {
-      if (quick) return
-      const ease = Easing.inOut(Easing.sin)
-      pulseLoopRef.current = Animated.loop(
-        Animated.sequence([
-          Animated.parallel([
-            Animated.timing(pulseScale, {
-              toValue: 1.07,
-              duration: PULSE_MS,
-              easing: ease,
-              useNativeDriver: true,
-            }),
-            Animated.timing(pulseOpacity, {
-              toValue: 0.68,
-              duration: PULSE_MS,
-              easing: ease,
-              useNativeDriver: true,
-            }),
-          ]),
-          Animated.parallel([
-            Animated.timing(pulseScale, {
-              toValue: 1,
-              duration: PULSE_MS,
-              easing: ease,
-              useNativeDriver: true,
-            }),
-            Animated.timing(pulseOpacity, {
-              toValue: 1,
-              duration: PULSE_MS,
-              easing: ease,
-              useNativeDriver: true,
-            }),
-          ]),
-        ])
-      )
-      pulseLoopRef.current?.start?.()
-    }
+    pulseLoopRef.current = startPulseLoop(pulseScale, pulseOpacity, pulseMs)
 
     Animated.parallel([
       Animated.timing(softReveal, {
@@ -86,9 +92,7 @@ export function AppBootstrapLoading({ quick = false }: { quick?: boolean }) {
         easing: easeOut,
         useNativeDriver: true,
       }),
-    ]).start(({ finished }) => {
-      if (finished) runPulse()
-    })
+    ]).start()
 
     return () => {
       pulseLoopRef.current?.stop?.()
@@ -103,6 +107,24 @@ export function AppBootstrapLoading({ quick = false }: { quick?: boolean }) {
 
   return (
     <View style={styles.root} accessibilityRole="progressbar" accessibilityLabel="Loading CREA">
+      {!quick ? (
+        <Animated.View style={[styles.blurPlate, { opacity: smearOpacity }]} pointerEvents="none">
+          {Platform.OS === 'ios' ? (
+            <BlurView intensity={100} tint="systemThinMaterialDark" style={StyleSheet.absoluteFillObject} />
+          ) : Platform.OS === 'android' ? (
+            <BlurView
+              intensity={72}
+              tint="dark"
+              experimentalBlurMethod="dimezisBlurView"
+              blurReductionFactor={3.25}
+              style={StyleSheet.absoluteFillObject}
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFillObject, styles.webFallbackScrim]} />
+          )}
+        </Animated.View>
+      ) : null}
+
       <View style={styles.centerPlate} pointerEvents="none">
         <Animated.View
           style={{
@@ -125,28 +147,6 @@ export function AppBootstrapLoading({ quick = false }: { quick?: boolean }) {
           </Animated.Text>
         </Animated.View>
       </View>
-
-      {/*
-       * Full-screen blur (no clipped box → no rectangular “noise” halo).
-       * Skipped on quick bootstrap — returning users see the feed almost immediately.
-       */}
-      {!quick ? (
-        <Animated.View style={[styles.blurPlate, { opacity: smearOpacity }]} pointerEvents="none">
-          {Platform.OS === 'ios' ? (
-            <BlurView intensity={100} tint="systemThinMaterialDark" style={StyleSheet.absoluteFillObject} />
-          ) : Platform.OS === 'android' ? (
-            <BlurView
-              intensity={72}
-              tint="dark"
-              experimentalBlurMethod="dimezisBlurView"
-              blurReductionFactor={3.25}
-              style={StyleSheet.absoluteFillObject}
-            />
-          ) : (
-            <View style={[StyleSheet.absoluteFillObject, styles.webFallbackScrim]} />
-          )}
-        </Animated.View>
-      ) : null}
     </View>
   )
 }
@@ -156,13 +156,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: CREA_BLACK,
   },
-  centerPlate: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   blurPlate: {
     ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
+  centerPlate: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   logo: {
     fontFamily: 'ClimateCrisis_400Regular',
@@ -172,7 +174,6 @@ const styles = StyleSheet.create({
     color: CREA_YELLOW,
     textTransform: 'uppercase',
   },
-  /** Web: no expo-blur – light scrim only (dev / edge). */
   webFallbackScrim: {
     backgroundColor: 'rgba(10,10,10,0.52)',
   },

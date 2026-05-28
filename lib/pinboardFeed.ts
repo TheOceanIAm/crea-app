@@ -1,3 +1,5 @@
+import { getCache, setCache } from '@/lib/appCache'
+import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { supabase } from '@/lib/supabase'
 import { supabaseTimestampMs } from '@/lib/supabaseTimestamp'
 import {
@@ -122,6 +124,28 @@ export type PinboardFeedCache = {
 
 export function pinboardCacheKey(userId: string) {
   return `pinboard:${userId}`
+}
+
+const DISK_PINBOARD_TTL_MS = 24 * 60 * 60 * 1000
+
+function pinboardFeedDiskKey(userId: string) {
+  return `crea:pinboard_feed:${userId}`
+}
+
+export async function hydratePinboardFeedFromDisk(userId: string): Promise<PinboardPost[] | null> {
+  const hit = await readPersistedCache<PinboardFeedCache>(pinboardFeedDiskKey(userId))
+  if (!hit) return null
+  setCache(pinboardCacheKey(userId), hit, 25_000)
+  return hit.posts
+}
+
+export async function persistPinboardFeedToDisk(userId: string, posts: PinboardPost[]): Promise<void> {
+  await writePersistedCache(pinboardFeedDiskKey(userId), { posts }, DISK_PINBOARD_TTL_MS)
+}
+
+export function readCachedPinboardFeed(userId: string): PinboardPost[] | null {
+  const hit = getCache<PinboardFeedCache>(pinboardCacheKey(userId))
+  return hit?.posts ?? null
 }
 
 export function formatPinboardTimeAgo(dateStr: string): string {

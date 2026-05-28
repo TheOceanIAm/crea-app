@@ -30,6 +30,13 @@ import {
 } from '@/lib/freelancerPlan'
 import { isCompanyPro } from '@/lib/company-plan'
 import { getCache, setCache } from '@/lib/appCache'
+import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
+
+const DISK_OVERVIEW_TTL_MS = 24 * 60 * 60 * 1000
+
+function dashboardOverviewDiskKey(userId: string) {
+  return `crea:dashboard_overview:${userId}`
+}
 
 export type IncomeTotals = { paid: number; incoming: number; overdue: number; currency: string }
 
@@ -354,11 +361,26 @@ export async function loadDashboardOverview(
 
 export function cacheDashboardOverview(data: DashboardOverviewData) {
   const { userId, ...rest } = data
-  setCache(dashboardOverviewCacheKey(userId), rest, 30_000)
+  setCache(dashboardOverviewCacheKey(userId), rest, 120_000)
 }
 
 export function readCachedDashboardOverview(userId: string): DashboardOverviewData | null {
   const hit = getCache<DashboardOverviewCache>(dashboardOverviewCacheKey(userId))
   if (!hit) return null
   return { userId, ...hit }
+}
+
+export async function hydrateDashboardOverviewFromDisk(
+  userId: string
+): Promise<DashboardOverviewData | null> {
+  const hit = await readPersistedCache<DashboardOverviewCache>(dashboardOverviewDiskKey(userId))
+  if (!hit) return null
+  const data = { userId, ...hit }
+  cacheDashboardOverview(data)
+  return data
+}
+
+export async function persistDashboardOverviewToDisk(data: DashboardOverviewData): Promise<void> {
+  const { userId, ...rest } = data
+  await writePersistedCache(dashboardOverviewDiskKey(userId), rest, DISK_OVERVIEW_TTL_MS)
 }

@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, InteractionManager, Platform, StyleSheet, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
-import { Tabs } from 'expo-router'
+import { Tabs, usePathname } from 'expo-router'
 import { Bell, Briefcase, House, LayoutDashboard, UserRound } from 'lucide-react-native'
 import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { markGoodNewsModalShownToday, shouldShowGoodNewsModalToday } from '@/lib/goodNewsDailyGate'
-import { readBootstrapHints } from '@/lib/bootstrapHints'
+import { mainTabFromPathname, writeLastMainTab } from '@/lib/appEntryRoute'
+import { prefetchMainTabData } from '@/lib/prefetchTabData'
+import { readBootstrapHints, writeBootstrapHints } from '@/lib/bootstrapHints'
 import { hydrateDashboardOverviewFromDisk } from '@/lib/dashboardOverview'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { countUnreadAlerts } from '@/lib/notificationsFeed'
@@ -22,6 +24,7 @@ import { fetchGoodNewsOfTheDayHeadline } from '@/lib/ceoLiveWidgets'
 let realtimeTopicSeq = 0
 
 export default function TabLayout() {
+  const pathname = usePathname()
   const [userId, setUserId] = useState<string | null>(null)
   const [goodNewsPopup, setGoodNewsPopup] = useState<{ body: string; source?: string } | null>(null)
   const [unreadAlertsCount, setUnreadAlertsCount] = useState(0)
@@ -74,12 +77,16 @@ export default function TabLayout() {
         if (!hints && !diskOverview) {
           const { data: profile } = await supabase
             .from('profiles')
-            .select('role, subscription_tier')
+            .select('role, subscription_tier, onboarding_completed')
             .eq('id', user.id)
             .maybeSingle()
           const fetchedRole = resolveAppRole(profile?.role, user)
           setShowWorkspaceProjectsTab(fetchedRole === 'company')
           setShowMarketplaceJobsTab(isFreelancerProfile(fetchedRole))
+          await writeBootstrapHints(user.id, {
+            role: fetchedRole,
+            onboardingCompleted: profile?.onboarding_completed === true,
+          })
         }
 
         await loadUnreadAlertsCount(user.id)
@@ -141,6 +148,14 @@ export default function TabLayout() {
     await markGoodNewsModalShownToday()
     setGoodNewsPopup(null)
   }, [])
+
+  useEffect(() => {
+    if (!userId) return
+    const tab = mainTabFromPathname(pathname)
+    if (!tab) return
+    void writeLastMainTab(userId, tab)
+    prefetchMainTabData(userId, tab)
+  }, [pathname, userId])
 
   useEffect(() => {
     if (!userId) return

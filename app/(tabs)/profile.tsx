@@ -92,6 +92,8 @@ import {
   freelancerProPriceLineYearly,
 } from '@/lib/planCatalogPrices'
 import { openCompanySeatManagementOnWeb } from '@/lib/companySeatBilling'
+import { useAppStorePlanPrices } from '@/hooks/useAppStorePlanPrices'
+import { formatCatalogPrice } from '@/lib/planCatalogPrices'
 import { postTrialPlan } from '@/lib/trialPlanApi'
 import { setBillingNotice } from '@/lib/billingNotice'
 import {
@@ -382,6 +384,15 @@ export default function ProfileScreen() {
     }
     return normalizedCompanyPlan ?? 'free'
   }, [iosStoreSubscribed, iosStorePlan, normalizedCompanyPlan])
+
+  const iosPlanStoreRole: 'freelancer' | 'company' | '' = company
+    ? 'company'
+    : freelancer
+      ? 'freelancer'
+      : ''
+  const { displayPrice: iosStorePriceLine } = useAppStorePlanPrices(
+    Platform.OS === 'ios' ? iosPlanStoreRole : ''
+  )
 
   const profileStrengthPct = useMemo(() => {
     if (ceo) return null
@@ -2099,7 +2110,7 @@ export default function ProfileScreen() {
                   <>
                     <PlanRow
                       title="Pro"
-                      price="App Store pricing"
+                      price={iosStorePriceLine}
                       desc={companyStripePlanDescription('pro')}
                       cta={iosDisplayCompanyPlan === 'pro' ? 'Your plan' : 'View in App Store'}
                       current={iosDisplayCompanyPlan === 'pro'}
@@ -2112,7 +2123,7 @@ export default function ProfileScreen() {
                   <>
                     <PlanRow
                       title="Free"
-                      price="€0"
+                      price={formatCatalogPrice(0)}
                       desc={freelancerPlanDescription('free')}
                       cta={!isFreelancerPro(iosDisplayFreelancerPlan) ? 'Your plan' : 'Included'}
                       current={!isFreelancerPro(iosDisplayFreelancerPlan)}
@@ -2121,7 +2132,7 @@ export default function ProfileScreen() {
                     />
                     <PlanRow
                       title="Pro"
-                      price="App Store pricing"
+                      price={iosStorePriceLine}
                       desc={freelancerPlanDescription('pro')}
                       cta={isFreelancerPro(iosDisplayFreelancerPlan) ? 'Your plan' : 'View in App Store'}
                       current={isFreelancerPro(iosDisplayFreelancerPlan)}

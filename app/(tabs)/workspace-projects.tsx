@@ -22,6 +22,12 @@ import {
   resolveFreelancerPlanFromUserAndProfileTier,
 } from '@/lib/freelancerPlan'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
+import {
+  readCachedWorkspaceProjects,
+  workspaceProjectsCacheKey,
+  type WorkspaceProjectsCache,
+} from '@/lib/workspaceProjectsLoad'
+import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { getCache, setCache } from '@/lib/appCache'
 import { runTimed } from '@/lib/perfMarks'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
@@ -109,13 +115,6 @@ type ListingSection = {
   data: ProjectListing[]
 }
 
-type WorkspaceProjectsCache = {
-  listings: ProjectListing[]
-  archivedListings: ProjectListing[]
-  canCreatePrivate: boolean
-  viewerRole: 'freelancer' | 'company'
-}
-
 type JobRow = {
   id: string
   title: string
@@ -132,17 +131,42 @@ type JobRow = {
   created_at?: string | null
 }
 
+function readInitialWorkspaceProjects(): {
+  listings: ProjectListing[]
+  archivedListings: ProjectListing[]
+  canCreatePrivate: boolean
+  viewerRole: 'freelancer' | 'company' | null
+  loading: boolean
+} {
+  const uid = peekWarmedOverview()?.userId
+  if (!uid) {
+    return { listings: [], archivedListings: [], canCreatePrivate: false, viewerRole: null, loading: true }
+  }
+  const cached = readCachedWorkspaceProjects(uid)
+  if (!cached) {
+    return { listings: [], archivedListings: [], canCreatePrivate: false, viewerRole: null, loading: true }
+  }
+  return {
+    listings: cached.listings,
+    archivedListings: cached.archivedListings,
+    canCreatePrivate: cached.canCreatePrivate,
+    viewerRole: cached.viewerRole,
+    loading: false,
+  }
+}
+
 export default function WorkspaceProjectsScreen() {
   const router = useRouter()
-  const hasLoadedRef = useRef(false)
-  const lastLoadedAtRef = useRef(0)
+  const boot = useRef(readInitialWorkspaceProjects()).current
+  const hasLoadedRef = useRef(!boot.loading)
+  const lastLoadedAtRef = useRef(boot.loading ? 0 : Date.now())
   const RELOAD_COOLDOWN_MS = 15000
-  const [loading, setLoading] = useState(true)
-  const [allowed, setAllowed] = useState<boolean | null>(null)
+  const [loading, setLoading] = useState(boot.loading)
+  const [allowed, setAllowed] = useState<boolean | null>(boot.viewerRole ? true : null)
   const [denyKind, setDenyKind] = useState<'role' | null>(null)
-  const [canCreatePrivate, setCanCreatePrivate] = useState(false)
-  const [listings, setListings] = useState<ProjectListing[]>([])
-  const [archivedListings, setArchivedListings] = useState<ProjectListing[]>([])
+  const [canCreatePrivate, setCanCreatePrivate] = useState(boot.canCreatePrivate)
+  const [listings, setListings] = useState<ProjectListing[]>(boot.listings)
+  const [archivedListings, setArchivedListings] = useState<ProjectListing[]>(boot.archivedListings)
   const [posterAvatarUrl, setPosterAvatarUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -157,7 +181,7 @@ export default function WorkspaceProjectsScreen() {
   const [editNotes, setEditNotes] = useState('')
   const [editOutputs, setEditOutputs] = useState<Record<string, unknown>>({})
   const [archiveOpen, setArchiveOpen] = useState(false)
-  const [viewerRole, setViewerRole] = useState<'freelancer' | 'company' | null>(null)
+  const [viewerRole, setViewerRole] = useState<'freelancer' | 'company' | null>(boot.viewerRole)
 
   const load = useCallback(async (opts?: { force?: boolean }) => {
     const now = Date.now()
@@ -175,7 +199,7 @@ export default function WorkspaceProjectsScreen() {
       return
     }
 
-    const wsCacheKey = `workspace-projects:${user.id}`
+    const wsCacheKey = workspaceProjectsCacheKey(user.id)
 
     const { data: p } = await supabase
       .from('profiles')

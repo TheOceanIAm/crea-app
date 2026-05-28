@@ -24,17 +24,20 @@ import {
   RC_DEFAULT_OFFERING_ID,
   RC_PACKAGE_AGENCY,
   RC_PACKAGE_PRO,
-  RC_PACKAGE_STARTER,
-  RC_PACKAGE_STUDIO,
-  RC_PACKAGE_TO_PRODUCT,
   type SubscriptionPlanKey,
 } from '@/lib/revenuecat/config'
 import { resolveAppRole } from '@/lib/profileRole'
+import { PLATFORM_TRIAL_DAYS } from '@/lib/platformTrial'
+import { filterPackagesForRole } from '@/lib/revenuecat/offeringsPackages'
 import {
   offeringsEmptyMessage,
   offeringsLoadErrorMessage,
   purchasesUnavailableUserMessage,
 } from '@/lib/revenuecat/purchasesEnvironment'
+import {
+  formatStoreProductPrice,
+  storeCurrencyRegionHint,
+} from '@/lib/revenuecat/storeProductPrice'
 
 type PlanCard = {
   key: SubscriptionPlanKey
@@ -136,27 +139,15 @@ export default function PaywallScreen() {
   }, [ready, loadOfferings])
 
   const availableOptions = useMemo(() => {
-    const packageKey =
-      role === 'company'
-        ? COMPANY_PLANS[0]?.packageKey ?? RC_PACKAGE_AGENCY
-        : FREELANCER_PLANS[0]?.packageKey ?? RC_PACKAGE_PRO
-    const primaryProductId = RC_PACKAGE_TO_PRODUCT[packageKey]
-    const matching = packages.filter((pkg) => {
-      if (pkg.identifier === packageKey) return true
-      if (primaryProductId && pkg.product.identifier === primaryProductId) return true
-      return false
-    })
-    const filtered = matching.length ? matching : packages
-
-    const rank = (pkg: PurchasesPackage) => {
-      const type = (pkg.packageType || '').toLowerCase()
-      if (type.includes('annual') || type.includes('year')) return 0
-      if (type.includes('monthly') || type.includes('month')) return 1
-      return 2
-    }
-
-    return [...filtered].sort((a, b) => rank(a) - rank(b))
+    if (!role) return packages
+    return filterPackagesForRole(packages, role === 'company' ? 'company' : 'freelancer')
   }, [packages, role])
+
+  const currencyHint = useMemo(() => {
+    const sample = availableOptions[0]?.product
+    if (!sample?.currencyCode) return null
+    return storeCurrencyRegionHint(sample.currencyCode)
+  }, [availableOptions])
 
   useEffect(() => {
     if (!availableOptions.length) {
@@ -252,7 +243,9 @@ export default function PaywallScreen() {
 
       <View style={styles.trialBanner}>
         <Text style={styles.trialBannerText}>
-          New subscribers: <Text style={styles.trialStrong}>3 months free</Text> trial with your Apple ID.
+          New freelancer and company accounts get{' '}
+          <Text style={styles.trialStrong}>{PLATFORM_TRIAL_DAYS} days of Pro features</Text>, then automatically move
+          to the Free plan. Subscribe below to stay on Pro after your trial.
         </Text>
       </View>
 
@@ -299,7 +292,7 @@ export default function PaywallScreen() {
                       {type.includes('annual') || type.includes('year') ? 'Auto-renewing yearly' : 'Auto-renewing monthly'}
                     </Text>
                   </View>
-                  <Text style={styles.optionPrice}>{pkg.product.priceString}</Text>
+                  <Text style={styles.optionPrice}>{formatStoreProductPrice(pkg.product)}</Text>
                 </TouchableOpacity>
               )
             })}
@@ -317,6 +310,8 @@ export default function PaywallScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+
+          {currencyHint ? <Text style={styles.currencyHint}>{currencyHint}</Text> : null}
 
           <Text style={styles.legal}>
             Payment is charged to your Apple ID at confirmation. Subscription auto-renews unless canceled at
@@ -435,6 +430,14 @@ const styles = StyleSheet.create({
   },
   secondaryBtnText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' },
   btnDisabled: { opacity: 0.45 },
+  currencyHint: {
+    color: 'rgba(250,246,234,0.45)',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 4,
+  },
   legal: {
     color: 'rgba(250,246,234,0.4)',
     fontSize: 11,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -15,166 +15,127 @@ import { useRouter, useSegments } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
-import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { formatDate, invoiceStatusLabel, money, statusVariant } from '@/lib/invoiceFormatting'
 import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
-import { freelancerHasInvoicing, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import {
+  cacheInvoicesList,
+  loadInvoicesListCache,
+  readCachedInvoicesList,
+  type InvoiceListRow,
+  type InvoiceBudgetOverview,
+  type InvoiceMonthlyPoint,
+  type ReadyInvoiceJob,
+} from '@/lib/invoicesListLoad'
+import { peekWarmedOverview } from '@/lib/warmAppCaches'
 
-type InvoiceRow = {
-  id: string
-  status: string
-  amount: number | null
-  currency?: string | null
-  due_date?: string | null
-  created_at?: string | null
-  company_id?: string | null
-  freelancer_id?: string | null
-  job_id?: string | null
-  title?: string | null
-  description?: string | null
-  invoice_number?: string | null
-  invoice_project_title?: string | null
-  payment_reference?: string | null
-  version_no?: number | null
-  version_group_id?: string | null
-  is_latest?: boolean | null
-}
+type InvoiceRow = InvoiceListRow
+type BudgetOverview = InvoiceBudgetOverview
+type MonthlyPoint = InvoiceMonthlyPoint
 
-type ProjectBudgetRow = {
-  budget_amount: number | null
-  budget_currency?: string | null
-  status?: string | null
-}
-
-type BudgetOverview = {
-  annualBudget: number | null
-  annualBudgetYear: number | null
-  projects: number
-  activeProjectCosts: number
-  pendingCosts: number
-  paidInvoices: number
-  causedCosts: number
-  overdueCosts: number
-  currency: string
-}
-
-type MonthlyPoint = { label: string; value: number }
-
-type ReadyInvoiceJob = {
-  jobId: string
-  title: string
-  clientName: string
-  isSolo: boolean
-}
-
-function pickNewestInvoice(a: InvoiceRow, b: InvoiceRow): InvoiceRow {
-  const av = typeof a.version_no === 'number' ? a.version_no : 1
-  const bv = typeof b.version_no === 'number' ? b.version_no : 1
-  if (av !== bv) return av > bv ? a : b
-  const at = a.created_at ? new Date(a.created_at).getTime() : 0
-  const bt = b.created_at ? new Date(b.created_at).getTime() : 0
-  return at >= bt ? a : b
-}
-
-function collapseToLatestInvoices(rows: InvoiceRow[]): InvoiceRow[] {
-  if (rows.length <= 1) return rows
-  const map = new Map<string, InvoiceRow>()
-  for (const row of rows) {
-    const groupId =
-      (typeof row.version_group_id === 'string' && row.version_group_id.trim()) ||
-      (typeof row.job_id === 'string' && row.job_id.trim()
-        ? `job:${row.job_id}|f:${String(row.freelancer_id ?? '')}|c:${String(row.company_id ?? '')}`
-        : `id:${row.id}`)
-    const prev = map.get(groupId)
-    if (!prev) {
-      map.set(groupId, row)
-      continue
-    }
-    map.set(groupId, pickNewestInvoice(prev, row))
-  }
-  return Array.from(map.values()).sort((a, b) => {
-    const at = a.created_at ? new Date(a.created_at).getTime() : 0
-    const bt = b.created_at ? new Date(b.created_at).getTime() : 0
-    return bt - at
-  })
-}
-
-function computeBudgetOverview(
-  projectRows: ProjectBudgetRow[],
-  invoiceRows: InvoiceRow[],
-  profileBudget: { amount: number | null; year: number | null; currency?: string | null }
-): BudgetOverview {
-  const out: BudgetOverview = {
-    annualBudget: profileBudget.amount,
-    annualBudgetYear: profileBudget.year,
-    projects: 0,
-    activeProjectCosts: 0,
-    pendingCosts: 0,
-    paidInvoices: 0,
-    causedCosts: 0,
-    overdueCosts: 0,
-    currency: (profileBudget.currency || 'EUR').toUpperCase(),
-  }
-  for (const row of projectRows) {
-    const amount = typeof row.budget_amount === 'number' ? row.budget_amount : 0
-    const status = String(row.status ?? '').toLowerCase()
-    out.projects += 1
-    if (row.budget_currency) out.currency = row.budget_currency.toUpperCase()
-    if (status === 'completed' || status === 'done' || status === 'closed' || status === 'archived') {
-      // ignore closed projects for "active project costs"
-    } else {
-      out.activeProjectCosts += amount
+function readInitialInvoices() {
+  const uid = peekWarmedOverview()?.userId
+  if (!uid) {
+    return {
+      loading: true,
+      rows: [] as InvoiceRow[],
+      perspective: null as 'company' | 'freelancer' | null,
+      budgetOverview: null as BudgetOverview | null,
+      showBudgetOverview: false,
+      monthlyPaid: [] as MonthlyPoint[],
+      annualBudgetAmount: '',
+      annualBudgetCurrency: 'EUR',
+      annualBudgetYear: String(new Date().getFullYear()),
+      invoicingAllowed: true,
+      readyToInvoice: [] as ReadyInvoiceJob[],
     }
   }
-  for (const row of invoiceRows) {
-    const amount = typeof row.amount === 'number' ? row.amount : 0
-    const status = String(row.status ?? '').toLowerCase()
-    if (row.currency) out.currency = row.currency.toUpperCase()
-    if (status === 'paid') out.paidInvoices += amount
-    if (status !== 'draft') out.causedCosts += amount
-    if (status === 'pending') out.pendingCosts += amount
-    if (status === 'overdue') out.overdueCosts += amount
-    if (status === 'pending' && row.due_date) {
-      const due = new Date(row.due_date)
-      if (!Number.isNaN(due.getTime()) && due.getTime() < Date.now()) out.overdueCosts += amount
+  const cached = readCachedInvoicesList(uid)
+  if (!cached) {
+    return {
+      loading: true,
+      rows: [] as InvoiceRow[],
+      perspective: null as 'company' | 'freelancer' | null,
+      budgetOverview: null as BudgetOverview | null,
+      showBudgetOverview: false,
+      monthlyPaid: [] as MonthlyPoint[],
+      annualBudgetAmount: '',
+      annualBudgetCurrency: 'EUR',
+      annualBudgetYear: String(new Date().getFullYear()),
+      invoicingAllowed: true,
+      readyToInvoice: [] as ReadyInvoiceJob[],
     }
   }
-  return out
+  return {
+    loading: false,
+    rows: cached.rows,
+    perspective: cached.perspective,
+    budgetOverview: cached.budgetOverview,
+    showBudgetOverview: cached.showBudgetOverview,
+    monthlyPaid: cached.monthlyPaid,
+    annualBudgetAmount: cached.annualBudgetAmount,
+    annualBudgetCurrency: cached.annualBudgetCurrency,
+    annualBudgetYear: cached.annualBudgetYear,
+    invoicingAllowed: cached.invoicingAllowed,
+    readyToInvoice: cached.readyToInvoice,
+  }
 }
 
-function computeMonthlyPaid(invoices: InvoiceRow[]): MonthlyPoint[] {
-  const labels = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
-  const totals = new Array(12).fill(0) as number[]
-  for (const row of invoices) {
-    if (String(row.status ?? '').toLowerCase() !== 'paid') continue
-    const amount = typeof row.amount === 'number' ? row.amount : 0
-    const created = row.created_at ? new Date(row.created_at) : null
-    if (!created || Number.isNaN(created.getTime())) continue
-    totals[created.getMonth()] += amount
+function applyInvoicesCache(
+  cached: ReturnType<typeof readInitialInvoices>,
+  setters: {
+    setRows: (v: InvoiceRow[]) => void
+    setPerspective: (v: 'company' | 'freelancer' | null) => void
+    setBudgetOverview: (v: BudgetOverview | null) => void
+    setShowBudgetOverview: (v: boolean) => void
+    setMonthlyPaid: (v: MonthlyPoint[]) => void
+    setAnnualBudgetAmount: (v: string) => void
+    setAnnualBudgetCurrency: (v: string) => void
+    setAnnualBudgetYear: (v: string) => void
+    setInvoicingAllowed: (v: boolean) => void
+    setReadyToInvoice: (v: ReadyInvoiceJob[]) => void
+    setError: (v: string | null) => void
   }
-  return labels.map((label, i) => ({ label, value: totals[i] }))
+) {
+  setters.setRows(cached.rows)
+  setters.setPerspective(cached.perspective)
+  setters.setBudgetOverview(cached.budgetOverview)
+  setters.setShowBudgetOverview(cached.showBudgetOverview)
+  setters.setMonthlyPaid(cached.monthlyPaid)
+  setters.setAnnualBudgetAmount(cached.annualBudgetAmount)
+  setters.setAnnualBudgetCurrency(cached.annualBudgetCurrency)
+  setters.setAnnualBudgetYear(cached.annualBudgetYear)
+  setters.setInvoicingAllowed(cached.invoicingAllowed)
+  setters.setReadyToInvoice(cached.readyToInvoice)
+  setters.setError(null)
 }
 
 export default function InvoicesListScreen() {
   const router = useRouter()
   const segments = useSegments()
-  const [rows, setRows] = useState<InvoiceRow[]>([])
-  const [loading, setLoading] = useState(true)
+  const boot = useRef(readInitialInvoices()).current
+  const lastFetchedAt = useRef(boot.loading ? 0 : Date.now())
+  const [rows, setRows] = useState<InvoiceRow[]>(boot.rows)
+  const [loading, setLoading] = useState(boot.loading)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [perspective, setPerspective] = useState<'company' | 'freelancer' | null>(null)
-  const [budgetOverview, setBudgetOverview] = useState<BudgetOverview | null>(null)
-  const [showBudgetOverview, setShowBudgetOverview] = useState(false)
-  const [monthlyPaid, setMonthlyPaid] = useState<MonthlyPoint[]>([])
-  const [annualBudgetAmount, setAnnualBudgetAmount] = useState('')
-  const [annualBudgetCurrency, setAnnualBudgetCurrency] = useState('EUR')
-  const [annualBudgetYear, setAnnualBudgetYear] = useState(String(new Date().getFullYear()))
+  const [perspective, setPerspective] = useState<'company' | 'freelancer' | null>(boot.perspective)
+  const [budgetOverview, setBudgetOverview] = useState<BudgetOverview | null>(boot.budgetOverview)
+  const [showBudgetOverview, setShowBudgetOverview] = useState(boot.showBudgetOverview)
+  const [monthlyPaid, setMonthlyPaid] = useState<MonthlyPoint[]>(boot.monthlyPaid)
+  const [annualBudgetAmount, setAnnualBudgetAmount] = useState(boot.annualBudgetAmount)
+  const [annualBudgetCurrency, setAnnualBudgetCurrency] = useState(boot.annualBudgetCurrency)
+  const [annualBudgetYear, setAnnualBudgetYear] = useState(boot.annualBudgetYear)
   const [savingAnnualBudget, setSavingAnnualBudget] = useState(false)
-  const [invoicingAllowed, setInvoicingAllowed] = useState(true)
-  const [readyToInvoice, setReadyToInvoice] = useState<ReadyInvoiceJob[]>([])
+  const [invoicingAllowed, setInvoicingAllowed] = useState(boot.invoicingAllowed)
+  const [readyToInvoice, setReadyToInvoice] = useState<ReadyInvoiceJob[]>(boot.readyToInvoice)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { force?: boolean }) => {
+    if (!opts?.force && lastFetchedAt.current > 0 && Date.now() - lastFetchedAt.current < 30_000) {
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
     setError(null)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
@@ -183,153 +144,73 @@ export default function InvoicesListScreen() {
       return
     }
 
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-    const resolvedRole = resolveAppRole(profile?.role, user)
-    const role = isCompanyProfile(resolvedRole) ? 'company' : 'freelancer'
-    setPerspective(role)
-    const freelancerPlan = resolveFreelancerPlanFromUser(user)
-    const budgetAllowed = role === 'company' || freelancerHasInvoicing(freelancerPlan)
-    const canUseInvoicing = role === 'company' || freelancerHasInvoicing(freelancerPlan)
-    setShowBudgetOverview(budgetAllowed)
-    setInvoicingAllowed(canUseInvoicing)
-
-    let q = supabase
-      .from('invoices')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(50)
-
-    if (role === 'company') {
-      q = q.eq('company_id', user.id)
-    } else {
-      q = q.eq('freelancer_id', user.id)
-    }
-
-    const { data, error: err } = await q
-
-    if (err) {
-      setError(err.message)
-      setRows([])
-    } else {
-      const latestRows = collapseToLatestInvoices((data as InvoiceRow[]) ?? [])
-      setRows(latestRows)
-      setMonthlyPaid(computeMonthlyPaid(latestRows))
-    }
-
-    if (budgetAllowed) {
-      let projectQuery = supabase
-        .from('projects')
-        .select('budget_amount, budget_currency, status')
-        .limit(200)
-      if (role === 'company') {
-        projectQuery = projectQuery.eq('company_id', user.id)
-      } else {
-        projectQuery = projectQuery.eq('freelancer_id', user.id)
-      }
-      const { data: projectRows, error: projectErr } = await projectQuery
-      if (!projectErr) {
-        if (role === 'company') {
-          const { data: profileBudgetRow } = await supabase
-            .from('profiles')
-            .select('annual_budget_amount, annual_budget_currency, annual_budget_year')
-            .eq('id', user.id)
-            .maybeSingle()
-          const budgetAmount =
-            typeof profileBudgetRow?.annual_budget_amount === 'number'
-              ? profileBudgetRow.annual_budget_amount
-              : null
-          const budgetYear =
-            typeof profileBudgetRow?.annual_budget_year === 'number'
-              ? profileBudgetRow.annual_budget_year
-              : null
-          setAnnualBudgetAmount(budgetAmount != null ? String(budgetAmount) : '')
-          setAnnualBudgetCurrency(
-            typeof profileBudgetRow?.annual_budget_currency === 'string'
-              ? profileBudgetRow.annual_budget_currency.toUpperCase()
-              : 'EUR'
-          )
-          setAnnualBudgetYear(budgetYear != null ? String(budgetYear) : String(new Date().getFullYear()))
-          setBudgetOverview(
-            computeBudgetOverview((projectRows as ProjectBudgetRow[]) ?? [], (data as InvoiceRow[]) ?? [], {
-              amount: budgetAmount,
-              year: budgetYear,
-              currency:
-                typeof profileBudgetRow?.annual_budget_currency === 'string'
-                  ? profileBudgetRow.annual_budget_currency
-                  : null,
-            })
-          )
-        } else {
-          /** Freelancers: no annual company budget — earnings overview only (invoice + project totals). */
-          setAnnualBudgetAmount('')
-          setAnnualBudgetCurrency('EUR')
-          setAnnualBudgetYear(String(new Date().getFullYear()))
-          setBudgetOverview(
-            computeBudgetOverview((projectRows as ProjectBudgetRow[]) ?? [], (data as InvoiceRow[]) ?? [], {
-              amount: null,
-              year: null,
-              currency: null,
-            })
-          )
+    const cached = readCachedInvoicesList(user.id)
+    if (cached && loading) {
+      applyInvoicesCache(
+        {
+          loading: false,
+          rows: cached.rows,
+          perspective: cached.perspective,
+          budgetOverview: cached.budgetOverview,
+          showBudgetOverview: cached.showBudgetOverview,
+          monthlyPaid: cached.monthlyPaid,
+          annualBudgetAmount: cached.annualBudgetAmount,
+          annualBudgetCurrency: cached.annualBudgetCurrency,
+          annualBudgetYear: cached.annualBudgetYear,
+          invoicingAllowed: cached.invoicingAllowed,
+          readyToInvoice: cached.readyToInvoice,
+        },
+        {
+          setRows,
+          setPerspective,
+          setBudgetOverview,
+          setShowBudgetOverview,
+          setMonthlyPaid,
+          setAnnualBudgetAmount,
+          setAnnualBudgetCurrency,
+          setAnnualBudgetYear,
+          setInvoicingAllowed,
+          setReadyToInvoice,
+          setError,
         }
-      } else {
-        setBudgetOverview(null)
-      }
-    } else {
-      setBudgetOverview(null)
+      )
     }
 
-    let readyJobs: ReadyInvoiceJob[] = []
-    if (!isCompanyProfile(resolvedRole)) {
-      const { data: apps } = await supabase
-        .from('job_applications')
-        .select('job_id')
-        .eq('freelancer_id', user.id)
-        .eq('status', 'accepted')
-      const crewIds = [...new Set((apps ?? []).map((a) => a.job_id).filter(Boolean))] as string[]
-      const { data: soloJobs } = await supabase
-        .from('jobs')
-        .select('id')
-        .eq('company_id', user.id)
-        .eq('is_solo_workspace', true)
-      const soloIds = (soloJobs ?? []).map((j) => j.id)
-      const allJobIds = [...new Set([...crewIds, ...soloIds])]
-      if (allJobIds.length > 0) {
-        const { data: jobs } = await supabase
-          .from('jobs')
-          .select('id, title, company_id, project_status, status, is_solo_workspace')
-          .in('id', allJobIds)
-        const completed = (jobs ?? []).filter((j) => {
-          const ps = String(j.project_status ?? '').toLowerCase()
-          const st = String(j.status ?? '').toLowerCase()
-          return ps === 'completed' || st === 'closed'
-        })
-        const { data: invRows } = await supabase
-          .from('invoices')
-          .select('job_id')
-          .eq('freelancer_id', user.id)
-          .not('job_id', 'is', null)
-        const invoiced = new Set((invRows ?? []).map((r) => r.job_id).filter(Boolean) as string[])
-        const missing = completed.filter((j) => j.id && !invoiced.has(j.id))
-        const companyIds = [...new Set(missing.map((j) => j.company_id).filter(Boolean))] as string[]
-        let names: Record<string, string> = {}
-        if (companyIds.length > 0) {
-          const { data: profs } = await supabase.from('profiles').select('id, name').in('id', companyIds)
-          names = Object.fromEntries((profs ?? []).map((p) => [p.id, (p.name || 'Client').trim()]))
-        }
-        readyJobs = missing.map((j) => ({
-          jobId: j.id,
-          title: (j.title || 'Project').trim(),
-          clientName: j.company_id ? names[String(j.company_id)] ?? 'Client' : 'Client',
-          isSolo: Boolean(j.is_solo_workspace) && j.company_id === user.id,
-        }))
+    const data = await loadInvoicesListCache(user)
+    applyInvoicesCache(
+      {
+        loading: false,
+        rows: data.rows,
+        perspective: data.perspective,
+        budgetOverview: data.budgetOverview,
+        showBudgetOverview: data.showBudgetOverview,
+        monthlyPaid: data.monthlyPaid,
+        annualBudgetAmount: data.annualBudgetAmount,
+        annualBudgetCurrency: data.annualBudgetCurrency,
+        annualBudgetYear: data.annualBudgetYear,
+        invoicingAllowed: data.invoicingAllowed,
+        readyToInvoice: data.readyToInvoice,
+      },
+      {
+        setRows,
+        setPerspective,
+        setBudgetOverview,
+        setShowBudgetOverview,
+        setMonthlyPaid,
+        setAnnualBudgetAmount,
+        setAnnualBudgetCurrency,
+        setAnnualBudgetYear,
+        setInvoicingAllowed,
+        setReadyToInvoice,
+        setError,
       }
-    }
-    setReadyToInvoice(readyJobs)
-
+    )
+    if (data.error) setError(data.error)
+    cacheInvoicesList(user.id, data)
+    lastFetchedAt.current = Date.now()
     setLoading(false)
     setRefreshing(false)
-  }, [])
+  }, [loading])
 
   useFocusEffect(
     useCallback(() => {
@@ -339,7 +220,7 @@ export default function InvoicesListScreen() {
 
   const onRefresh = () => {
     setRefreshing(true)
-    load()
+    void load({ force: true })
   }
 
   const saveAnnualBudget = async () => {

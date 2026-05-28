@@ -19,6 +19,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { getCache, setCache } from '@/lib/appCache'
+import { talentPoolCacheKey } from '@/lib/talentPoolPrefetch'
+import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { isFreelancerTalentPoolPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -239,15 +241,34 @@ async function loadTalentPoolFavorites(
   return { favoriteProfileIds: favIds, folders }
 }
 
+function readInitialTalentPool(): {
+  loading: boolean
+  rows: TalentRow[]
+  favoriteProfileIds: string[]
+  folders: Folder[]
+} {
+  const uid = peekWarmedOverview()?.userId
+  if (!uid) return { loading: true, rows: [], favoriteProfileIds: [], folders: [] }
+  const cached = getCache<TalentPoolCache>(talentPoolCacheKey(uid))
+  if (!cached) return { loading: true, rows: [], favoriteProfileIds: [], folders: [] }
+  return {
+    loading: false,
+    rows: cached.rows,
+    favoriteProfileIds: cached.favoriteProfileIds,
+    folders: cached.folders,
+  }
+}
+
 export default function TalentPoolScreen() {
   const router = useRouter()
-  const [loading, setLoading] = useState(true)
+  const boot = useRef(readInitialTalentPool()).current
+  const [loading, setLoading] = useState(boot.loading)
   const [allowed, setAllowed] = useState<boolean | null>(null)
   const [showFavoriteUi, setShowFavoriteUi] = useState(false)
   const [favoriteMode, setFavoriteMode] = useState<'company' | 'freelancer' | null>(null)
-  const [rows, setRows] = useState<TalentRow[]>([])
-  const [favoriteProfileIds, setFavoriteProfileIds] = useState<string[]>([])
-  const [folders, setFolders] = useState<Folder[]>([])
+  const [rows, setRows] = useState<TalentRow[]>(boot.rows)
+  const [favoriteProfileIds, setFavoriteProfileIds] = useState<string[]>(boot.favoriteProfileIds)
+  const [folders, setFolders] = useState<Folder[]>(boot.folders)
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
   const [showNewFolderInput, setShowNewFolderInput] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
@@ -298,7 +319,7 @@ export default function TalentPoolScreen() {
         : null
     setFavoriteMode(mode)
 
-    const cacheKey = `talent-pool:${user.id}`
+    const cacheKey = talentPoolCacheKey(user.id)
     if (!opts?.force) {
       const cached = getCache<TalentPoolCache>(cacheKey)
       if (cached) {

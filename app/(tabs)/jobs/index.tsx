@@ -30,46 +30,18 @@ import {
 } from '@/lib/freelancerPlan'
 import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
 import { publishCeoExternalJob } from '@/lib/ceoExternalJobsApi'
-import { getCache, setCache } from '@/lib/appCache'
+import {
+  cacheJobsFeed,
+  loadJobsFeed,
+  readCachedJobsFeed,
+  type ExternalJobRow,
+  type JobFeedRow,
+} from '@/lib/jobsFeedLoad'
+import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
-type JobsFeedCache = {
-  jobs: Job[]
-  externalJobs: ExternalJob[]
-}
-
-type Job = {
-  id: string
-  title: string
-  category: string
-  budget_type: string
-  budget_amount: number | null
-  budget_currency: string | null
-  location_type: string
-  company_id: string | null
-  company_name: string
-  company_logo_url: string | null
-  status: string
-  is_solo_workspace: boolean
-}
-
-type ExternalJob = {
-  id: string
-  title: string
-  company: string
-  location: string | null
-  region: string | null
-  role: string | null
-  rate: string | null
-  needed_when: string | null
-  source_platform: string | null
-  source_url: string | null
-  intel_brief: string | null
-  contact_name: string | null
-  contact_email: string | null
-  contact_linkedin: string | null
-  contact_instagram: string | null
-}
+type Job = JobFeedRow
+type ExternalJob = ExternalJobRow
 
 function companyInitial(name: string) {
   const t = name.trim()
@@ -96,19 +68,28 @@ function isCreaJobItem(item: Job | ExternalJob): item is Job {
   return 'company_name' in item
 }
 
+function readInitialJobsFeed(): { jobs: Job[]; externalJobs: ExternalJob[]; loading: boolean } {
+  const uid = peekWarmedOverview()?.userId
+  if (!uid) return { jobs: [], externalJobs: [], loading: true }
+  const cached = readCachedJobsFeed(uid, 'crea', false)
+  if (!cached) return { jobs: [], externalJobs: [], loading: true }
+  return { jobs: cached.jobs, externalJobs: cached.externalJobs, loading: false }
+}
+
 export default function JobsListScreen() {
   const router = useRouter()
-  const hasLoadedRef = useRef(false)
+  const bootJobs = useRef(readInitialJobsFeed()).current
+  const hasLoadedRef = useRef(!bootJobs.loading)
   const lastLoadedAtRef = useRef(0)
   const RELOAD_COOLDOWN_MS = 15000
-  const [jobs, setJobs] = useState<Job[]>([])
-  const [loading, setLoading] = useState(true)
+  const [jobs, setJobs] = useState<Job[]>(bootJobs.jobs)
+  const [loading, setLoading] = useState(bootJobs.loading)
   const [isCompanyUser, setIsCompanyUser] = useState(false)
   const [isCeoUser, setIsCeoUser] = useState(false)
   const [isFreeFreelancer, setIsFreeFreelancer] = useState(false)
   const [feedTab, setFeedTab] = useState<'crea' | 'external'>('crea')
   const [search, setSearch] = useState('')
-  const [externalJobs, setExternalJobs] = useState<ExternalJob[]>([])
+  const [externalJobs, setExternalJobs] = useState<ExternalJob[]>(bootJobs.externalJobs)
   const [activeExternalJob, setActiveExternalJob] = useState<ExternalJob | null>(null)
 
   /** CEO-only: manual external listing (parity with CREA web). */
@@ -157,109 +138,31 @@ export default function JobsListScreen() {
       setIsCompanyUser(companyOnly)
       setIsCeoUser(Boolean(user && isCeoProfile(role)))
 
-      const cacheKey =
-        user && !opts?.bypassCooldown ? `jobs-feed:${user.id}:${feedTab}:${companyOnly ? 'c' : 'f'}` : null
-
-      let hydrated = false
-      if (cacheKey && !hasLoadedRef.current) {
-        const hit = getCache<JobsFeedCache>(cacheKey)
-        if (hit && Array.isArray(hit.jobs) && Array.isArray(hit.externalJobs)) {
+      if (user && !opts?.bypassCooldown) {
+        const hit = readCachedJobsFeed(user.id, feedTab, companyOnly)
+        if (hit && !hasLoadedRef.current) {
           setJobs(hit.jobs)
           setExternalJobs(hit.externalJobs)
           setLoading(false)
-          hydrated = true
         }
       }
-      if (!hydrated && !hasLoadedRef.current) setLoading(true)
+      if (!hasLoadedRef.current && !(user && readCachedJobsFeed(user.id, feedTab, companyOnly))) {
+        setLoading(true)
+      }
 
-      if (!companyOnly && feedTab === 'external') {
-        const { data: extRows, error: extError } = await supabase
-          .from('external_jobs')
-          .select(
-            'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram'
-          )
-          .eq('status', 'published')
-          .order('posted_date', { ascending: false })
-          .order('created_at', { ascending: false })
-          .limit(40)
-        const extArr =
-          extError || !extRows ? [] : ((extRows as ExternalJob[]) ?? [])
-        setExternalJobs(extArr)
-        setJobs([])
-        if (cacheKey) setCache(cacheKey, { jobs: [], externalJobs: extArr }, 35_000)
+      if (!user) {
         setLoading(false)
-        hasLoadedRef.current = true
-        lastLoadedAtRef.current = Date.now()
         return
       }
 
-      let q = supabase
-        .from('jobs')
-        .select(
-          'id, title, category, budget_type, budget_amount, budget_currency, location_type, company_id, status, is_solo_workspace'
-        )
-        .order('created_at', { ascending: false })
-        .limit(companyOnly ? 100 : 30)
-
-      if (companyOnly) {
-        q = q.eq('company_id', user.id)
-      } else {
-        q = q.eq('status', 'active')
-      }
-      q = q.eq('is_solo_workspace', false)
-
-      const { data: jobRows, error } = await q
-
-      if (error || !jobRows?.length) {
-        setJobs([])
-        setExternalJobs([])
-        if (cacheKey) setCache(cacheKey, { jobs: [], externalJobs: [] }, 35_000)
+      const loaded = await loadJobsFeed(user, { feedTab })
+      if (!loaded) {
         setLoading(false)
-        hasLoadedRef.current = true
-        lastLoadedAtRef.current = Date.now()
         return
       }
-
-      const ids = [
-        ...new Set(
-          jobRows.map((j) => j.company_id).filter((x): x is string => typeof x === 'string' && x.length > 0)
-        ),
-      ]
-
-      const companyById: Record<string, { name: string; avatar_url: string | null }> = {}
-      if (ids.length > 0) {
-        const { data: profiles } = await supabase.from('profiles').select('id, name, avatar_url').in('id', ids)
-        for (const p of profiles ?? []) {
-          const url = p.avatar_url?.trim()
-          companyById[p.id] = {
-            name: (p.name || 'Company').trim() || 'Company',
-            avatar_url: url && /^https?:\/\//i.test(url) ? url : null,
-          }
-        }
-      }
-
-      const list: Job[] = jobRows.map((j) => {
-        const cid = j.company_id as string | null
-        const c = cid ? companyById[cid] : undefined
-        return {
-          id: j.id as string,
-          title: String(j.title ?? ''),
-          category: String(j.category ?? ''),
-          budget_type: String(j.budget_type ?? ''),
-          budget_amount: typeof j.budget_amount === 'number' ? j.budget_amount : null,
-          budget_currency: typeof j.budget_currency === 'string' ? j.budget_currency : null,
-          location_type: String(j.location_type ?? ''),
-          company_id: cid,
-          company_name: c?.name ?? 'Company',
-          company_logo_url: c?.avatar_url ?? null,
-          status: String(j.status ?? ''),
-          is_solo_workspace: Boolean(j.is_solo_workspace),
-        }
-      })
-
-      setJobs(list)
-      setExternalJobs([])
-      if (cacheKey) setCache(cacheKey, { jobs: list, externalJobs: [] }, 35_000)
+      setJobs(loaded.data.jobs)
+      setExternalJobs(loaded.data.externalJobs)
+      cacheJobsFeed(user.id, loaded.feedTab, loaded.companyOnly, loaded.data)
       setLoading(false)
       hasLoadedRef.current = true
       lastLoadedAtRef.current = Date.now()
