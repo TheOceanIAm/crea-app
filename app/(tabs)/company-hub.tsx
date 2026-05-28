@@ -176,7 +176,7 @@ export default function CompanyHubScreen() {
                 if (t.disabled) {
                   Alert.alert(
                     'Business plan required',
-                    'Legal & insurance partners are included with Business and Enterprise on creaservices.de.'
+                    'This tool requires a Business or Enterprise plan on creaservices.de.'
                   )
                   return
                 }
