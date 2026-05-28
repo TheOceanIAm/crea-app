@@ -27,9 +27,12 @@ export function getCreaWebRegisterUrl(): string {
   return `${getCreaMarketingSiteUrl().replace(/\/$/, '')}/register`
 }
 
-/** First screen for logged-out users (App Store: subscribe before login on iOS). */
+/**
+ * First screen for logged-out users.
+ * Keep auth/basic access free; only gate premium actions behind subscription upsell.
+ */
 export function getLoggedOutEntryRoute(): '/paywall' | '/login' {
-  return Platform.OS === 'ios' ? '/paywall' : '/login'
+  return '/login'
 }
 
 export async function openCreaWebsiteInBrowser(): Promise<boolean> {

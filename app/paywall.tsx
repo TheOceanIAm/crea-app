@@ -48,8 +48,7 @@ const FREELANCER_PLANS: PlanCard[] = [
     key: 'pro',
     packageKey: RC_PACKAGE_PRO,
     title: 'Pro',
-    description:
-      'Apply to jobs, post listings, full Workspace, Sun Planner, Brief AI, and Invoicing. €8.99/mo or €59.99/yr.',
+    description: 'Apply to jobs, post listings, full Workspace, Sun Planner, Brief AI, and Invoicing.',
   },
 ]
 
@@ -58,8 +57,7 @@ const COMPANY_PLANS: PlanCard[] = [
     key: 'pro',
     packageKey: RC_PACKAGE_AGENCY,
     title: 'Pro',
-    description:
-      'Unlimited listings & pool, 2 team seats included, all hiring tools. €89/mo or €649.99/yr.',
+    description: 'Unlimited listings & pool, 2 team seats included, all hiring tools.',
   },
 ]
 
@@ -76,6 +74,7 @@ export default function PaywallScreen() {
   const [packages, setPackages] = useState<PurchasesPackage[]>([])
   const [loadingOfferings, setLoadingOfferings] = useState(true)
   const [busyPackageId, setBusyPackageId] = useState<string | null>(null)
+  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null)
   const [restoring, setRestoring] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -136,17 +135,38 @@ export default function PaywallScreen() {
     void loadOfferings()
   }, [ready, loadOfferings])
 
-  const packageForCard = useCallback(
-    (packageKey: string) => {
-      const productId = RC_PACKAGE_TO_PRODUCT[packageKey]
-      return packages.find(
-        (p) =>
-          p.identifier === packageKey ||
-          (productId && p.product.identifier === productId)
-      )
-    },
-    [packages]
-  )
+  const availableOptions = useMemo(() => {
+    const packageKey =
+      role === 'company'
+        ? COMPANY_PLANS[0]?.packageKey ?? RC_PACKAGE_AGENCY
+        : FREELANCER_PLANS[0]?.packageKey ?? RC_PACKAGE_PRO
+    const primaryProductId = RC_PACKAGE_TO_PRODUCT[packageKey]
+    const matching = packages.filter((pkg) => {
+      if (pkg.identifier === packageKey) return true
+      if (primaryProductId && pkg.product.identifier === primaryProductId) return true
+      return false
+    })
+    const filtered = matching.length ? matching : packages
+
+    const rank = (pkg: PurchasesPackage) => {
+      const type = (pkg.packageType || '').toLowerCase()
+      if (type.includes('annual') || type.includes('year')) return 0
+      if (type.includes('monthly') || type.includes('month')) return 1
+      return 2
+    }
+
+    return [...filtered].sort((a, b) => rank(a) - rank(b))
+  }, [packages, role])
+
+  useEffect(() => {
+    if (!availableOptions.length) {
+      setSelectedPackageId(null)
+      return
+    }
+    if (!selectedPackageId || !availableOptions.some((pkg) => pkg.identifier === selectedPackageId)) {
+      setSelectedPackageId(availableOptions[0]?.identifier ?? null)
+    }
+  }, [availableOptions, selectedPackageId])
 
   const purchase = async (pkg: PurchasesPackage, planKey: SubscriptionPlanKey) => {
     if (!configured) {
@@ -207,6 +227,12 @@ export default function PaywallScreen() {
   }
 
   const canGoBack = router.canGoBack()
+  const selectedPackage = availableOptions.find((pkg) => pkg.identifier === selectedPackageId) ?? null
+  const selectedPlan = planCards[0]
+  const selectedPackageType = (selectedPackage?.packageType || '').toLowerCase()
+  const ctaLabel = selectedPackageType.includes('annual') || selectedPackageType.includes('year')
+    ? 'Get Pro Yearly'
+    : 'Get Pro'
 
   const goBack = useCallback(() => {
     if (canGoBack) router.back()
@@ -226,8 +252,7 @@ export default function PaywallScreen() {
 
       <View style={styles.trialBanner}>
         <Text style={styles.trialBannerText}>
-          New subscribers: <Text style={styles.trialStrong}>3 months free</Text>, then billed monthly
-          through Apple.
+          New subscribers: <Text style={styles.trialStrong}>3 months free</Text> trial with your Apple ID.
         </Text>
       </View>
 
@@ -245,67 +270,79 @@ export default function PaywallScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-          {planCards.map((card) => {
-            const pkg = packageForCard(card.packageKey)
-            const price = pkg?.product.priceString ?? '—'
-            const isCurrent = currentPlan === card.key
-            const busy = busyPackageId === pkg?.identifier
-            return (
-              <View key={card.key} style={[styles.card, isCurrent && styles.cardCurrent]}>
-                <View style={styles.cardTop}>
-                  <Text style={styles.cardTitle}>{card.title}</Text>
-                  {isCurrent ? (
-                    <View style={styles.currentPill}>
-                      <Text style={styles.currentPillText}>CURRENT</Text>
-                    </View>
-                  ) : null}
+          <View style={styles.card}>
+            <View style={styles.cardTop}>
+              <Text style={styles.cardTitle}>{selectedPlan?.title ?? 'Pro'}</Text>
+              {currentPlan === 'pro' ? (
+                <View style={styles.currentPill}>
+                  <Text style={styles.currentPillText}>CURRENT</Text>
                 </View>
-                <Text style={styles.cardPrice}>{price}</Text>
-                <Text style={styles.cardTerm}>1 month, auto-renewing subscription</Text>
-                <Text style={styles.cardDesc}>{card.description}</Text>
+              ) : null}
+            </View>
+            <Text style={styles.cardDesc}>{selectedPlan?.description ?? 'Unlock full access in CREA.'}</Text>
+
+            {availableOptions.map((pkg) => {
+              const isSelected = selectedPackageId === pkg.identifier
+              const isBusy = busyPackageId === pkg.identifier
+              const type = (pkg.packageType || '').toLowerCase()
+              const cadence = type.includes('annual') || type.includes('year') ? 'Yearly' : 'Monthly'
+              return (
                 <TouchableOpacity
-                  style={[styles.primaryBtn, (!pkg || busy || isCurrent) && styles.btnDisabled]}
-                  disabled={!pkg || busy || isCurrent}
-                  onPress={() => pkg && void purchase(pkg, card.key)}
+                  key={pkg.identifier}
+                  style={[styles.optionRow, isSelected && styles.optionRowSelected]}
+                  onPress={() => setSelectedPackageId(pkg.identifier)}
+                  disabled={isBusy}
                 >
-                  <Text style={styles.primaryBtnText}>
-                    {isCurrent ? 'Active' : busy ? 'Processing…' : 'Subscribe'}
-                  </Text>
+                  <View>
+                    <Text style={styles.optionLabel}>{cadence}</Text>
+                    <Text style={styles.optionSub}>
+                      {type.includes('annual') || type.includes('year') ? 'Auto-renewing yearly' : 'Auto-renewing monthly'}
+                    </Text>
+                  </View>
+                  <Text style={styles.optionPrice}>{pkg.product.priceString}</Text>
                 </TouchableOpacity>
-              </View>
-            )
-          })}
+              )
+            })}
+
+            <TouchableOpacity
+              style={[
+                styles.primaryBtn,
+                (!selectedPackage || currentPlan === 'pro' || !!busyPackageId) && styles.btnDisabled,
+              ]}
+              disabled={!selectedPackage || currentPlan === 'pro' || !!busyPackageId}
+              onPress={() => selectedPackage && selectedPlan && void purchase(selectedPackage, selectedPlan.key)}
+            >
+              <Text style={styles.primaryBtnText}>
+                {currentPlan === 'pro' ? 'Active' : busyPackageId ? 'Processing…' : ctaLabel}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           <Text style={styles.legal}>
-            Payment is charged to your Apple ID at confirmation. Subscriptions auto-renew each month until
-            cancelled in Settings → Apple ID → Subscriptions at least 24 hours before the end of the current period.
+            Payment is charged to your Apple ID at confirmation. Subscription auto-renews unless canceled at
+            least 24 hours before the current period ends.
           </Text>
 
           <View style={styles.legalLinks}>
             <TouchableOpacity onPress={openTerms} hitSlop={8}>
-              <Text style={styles.legalLink}>Terms of Use (EULA)</Text>
+              <Text style={styles.legalLink}>Terms of service</Text>
             </TouchableOpacity>
             <Text style={styles.legalDot}>·</Text>
             <TouchableOpacity onPress={openPrivacy} hitSlop={8}>
-              <Text style={styles.legalLink}>Privacy Policy</Text>
+              <Text style={styles.legalLink}>Privacy policy</Text>
+            </TouchableOpacity>
+            <Text style={styles.legalDot}>·</Text>
+            <TouchableOpacity
+              disabled={restoring}
+              onPress={() => void restore()}
+              hitSlop={8}
+            >
+              <Text style={styles.legalLink}>{restoring ? 'Restoring…' : 'Restore'}</Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.guestHint}>
-            No account required to subscribe. After purchase you can create an account to sync your subscription
-            across devices — or log in if you already have one.
-          </Text>
-
           <TouchableOpacity onPress={() => router.push('/login')} hitSlop={8}>
             <Text style={styles.loginLink}>Already have an account? Log in</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.secondaryBtn, restoring && styles.btnDisabled]}
-            disabled={restoring}
-            onPress={() => void restore()}
-          >
-            <Text style={styles.secondaryBtnText}>{restoring ? 'Restoring…' : 'Restore purchases'}</Text>
           </TouchableOpacity>
         </ScrollView>
       )}
@@ -316,54 +353,78 @@ export default function PaywallScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0a' },
   header: { paddingHorizontal: 20, paddingBottom: 12 },
-  back: { color: 'rgba(255,255,255,0.45)', fontSize: 14, marginBottom: 12 },
+  back: { color: 'rgba(250,246,234,0.5)', fontSize: 14, marginBottom: 12 },
   title: {
     color: '#FFDC00',
     fontSize: 28,
     fontWeight: '800',
     letterSpacing: 1,
   },
-  subtitle: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginTop: 6 },
+  subtitle: { color: 'rgba(250,246,234,0.52)', fontSize: 13, marginTop: 6 },
   trialBanner: {
     marginHorizontal: 20,
-    marginBottom: 16,
+    marginBottom: 14,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,220,0,0.2)',
     backgroundColor: 'rgba(255,220,0,0.06)',
     padding: 12,
   },
-  trialBannerText: { color: 'rgba(255,255,255,0.55)', fontSize: 12, lineHeight: 18 },
+  trialBannerText: { color: 'rgba(250,246,234,0.72)', fontSize: 12, lineHeight: 18 },
   trialStrong: { color: '#FFDC00', fontWeight: '700' },
   scroll: { paddingHorizontal: 20, paddingBottom: 24, gap: 14 },
   card: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: '#111',
+    borderColor: 'rgba(250,246,234,0.12)',
+    backgroundColor: '#12150f',
     padding: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
   },
-  cardCurrent: { borderColor: 'rgba(255,220,0,0.35)' },
+  cardCurrent: { borderColor: 'rgba(255,220,0,0.55)' },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  cardTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  cardTitle: { color: '#faf6ea', fontSize: 18, fontWeight: '700' },
   currentPill: {
-    backgroundColor: 'rgba(255,220,0,0.15)',
+    backgroundColor: 'rgba(255,220,0,0.2)',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
   },
   currentPillText: { color: '#FFDC00', fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
-  cardPrice: { color: '#FFDC00', fontSize: 22, fontWeight: '800', marginTop: 8 },
-  cardTerm: { color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 4 },
-  cardDesc: { color: 'rgba(255,255,255,0.45)', fontSize: 12, lineHeight: 18, marginTop: 8 },
-  primaryBtn: {
-    marginTop: 14,
-    backgroundColor: '#FFDC00',
-    borderRadius: 999,
-    paddingVertical: 12,
+  cardDesc: { color: 'rgba(250,246,234,0.62)', fontSize: 13, lineHeight: 20, marginTop: 8 },
+  optionRow: {
+    marginTop: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(250,246,234,0.14)',
+    backgroundColor: '#0c0f0a',
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  primaryBtnText: { color: '#0a0a0a', fontWeight: '800', fontSize: 14 },
+  optionRowSelected: {
+    borderColor: 'rgba(255,220,0,0.95)',
+    shadowColor: '#FFDC00',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  optionLabel: { color: '#faf6ea', fontSize: 16, fontWeight: '600' },
+  optionSub: { color: 'rgba(250,246,234,0.48)', fontSize: 12, marginTop: 2 },
+  optionPrice: { color: '#faf6ea', fontSize: 18, fontWeight: '700' },
+  primaryBtn: {
+    marginTop: 16,
+    backgroundColor: '#FFDC00',
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  primaryBtnText: { color: '#0a0a0a', fontWeight: '800', fontSize: 17 },
   secondaryBtn: {
     borderRadius: 999,
     borderWidth: 1,
@@ -375,10 +436,10 @@ const styles = StyleSheet.create({
   secondaryBtnText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' },
   btnDisabled: { opacity: 0.45 },
   legal: {
-    color: 'rgba(255,255,255,0.28)',
+    color: 'rgba(250,246,234,0.4)',
     fontSize: 11,
     lineHeight: 16,
-    marginTop: 8,
+    marginTop: 10,
     textAlign: 'center',
   },
   legalLinks: {
@@ -388,23 +449,19 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 12,
   },
-  legalLink: { color: '#FFDC00', fontSize: 12, fontWeight: '600' },
-  legalDot: { color: 'rgba(255,255,255,0.25)', fontSize: 12 },
-  guestHint: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    lineHeight: 16,
-    textAlign: 'center',
-    marginTop: 14,
-    paddingHorizontal: 8,
+  legalLink: {
+    color: 'rgba(250,246,234,0.58)',
+    fontSize: 12,
+    textDecorationLine: 'underline',
   },
+  legalDot: { color: 'rgba(250,246,234,0.25)', fontSize: 12 },
   loginLink: {
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 13,
+    color: 'rgba(250,246,234,0.74)',
+    fontSize: 16,
     textAlign: 'center',
-    marginTop: 12,
+    marginTop: 16,
     marginBottom: 4,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   loadingText: { color: 'rgba(255,255,255,0.4)', fontSize: 13 },
