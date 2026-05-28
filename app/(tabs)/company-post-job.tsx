@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -11,12 +11,16 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
-import { ChevronLeft } from 'lucide-react-native'
+import { ChevronLeft, Plus } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { parseIsoDateInput } from '@/lib/isoDateInput'
 import { formatJobCategoryRoles } from '@/lib/jobCategoryRoles'
+import {
+  FEATURED_JOB_LISTING_ROLES,
+  filterJobListingRoleCategories,
+} from '@/lib/jobListingRoleCategories'
 import {
   companyFreeJobListingLimitMessage,
   companyJobListingMonthStartUtc,
@@ -25,7 +29,6 @@ import {
 import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
 import { isWithinPlatformTrialPeriod } from '@/lib/platformTrial'
 
-const CATEGORIES = ['Film / Video', 'Photo', 'Post / Edit', 'Motion', 'Design', 'Other'] as const
 const BUDGET_TYPES = [
   { id: 'negotiable', label: 'Negotiable' },
   { id: 'day_rate', label: 'Day rate' },
@@ -43,7 +46,9 @@ export default function CompanyPostJobScreen() {
   const [allowed, setAllowed] = useState(false)
   const [saving, setSaving] = useState(false)
   const [title, setTitle] = useState('')
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([CATEGORIES[0]])
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
+  const [roleFilter, setRoleFilter] = useState('')
+  const [rolesExpanded, setRolesExpanded] = useState(false)
   const [budgetType, setBudgetType] = useState<(typeof BUDGET_TYPES)[number]['id']>('negotiable')
   const [budgetAmount, setBudgetAmount] = useState('')
   const [budgetCurrency, setBudgetCurrency] = useState('EUR')
@@ -82,6 +87,17 @@ export default function CompanyPostJobScreen() {
     }, [router])
   )
 
+  const filteredRoles = useMemo(
+    () => filterJobListingRoleCategories(roleFilter),
+    [roleFilter]
+  )
+
+  const toggleRole = useCallback((role: string) => {
+    setSelectedCategories((prev) =>
+      prev.includes(role) ? prev.filter((x) => x !== role) : [...prev, role]
+    )
+  }, [])
+
   const onPublish = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user || !allowed) return
@@ -91,7 +107,7 @@ export default function CompanyPostJobScreen() {
       return
     }
     if (selectedCategories.length === 0) {
-      Alert.alert('Roles', 'Pick at least one category.')
+      Alert.alert('Roles', 'Pick at least one role.')
       return
     }
     let amount: number | null = null
@@ -265,25 +281,88 @@ export default function CompanyPostJobScreen() {
         />
 
         <Text style={styles.label}>Roles</Text>
-        <Text style={styles.hintInline}>Pick one or more — they are stored together on the listing.</Text>
-        <View style={styles.chipRow}>
-          {CATEGORIES.map((c) => {
-            const sel = selectedCategories.includes(c)
-            return (
+        <Text style={styles.hintInline}>
+          Pick every discipline you need — shown as one listing; feed filters match any role.
+        </Text>
+        {selectedCategories.length > 0 ? (
+          <View style={[styles.chipRow, styles.selectedRoleRow]}>
+            {selectedCategories.map((c) => (
               <TouchableOpacity
-                key={c}
-                style={[styles.chip, sel && styles.chipSelected]}
-                onPress={() =>
-                  setSelectedCategories((prev) =>
-                    prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]
-                  )
-                }
+                key={`sel-${c}`}
+                style={[styles.chip, styles.chipSelected, styles.selectedRoleChip]}
+                onPress={() => toggleRole(c)}
               >
-                <Text style={[styles.chipText, sel && styles.chipTextSelected]}>{c}</Text>
+                <Text style={[styles.chipText, styles.chipTextSelected]}>
+                  {c}
+                  <Text style={styles.chipRemove}> ×</Text>
+                </Text>
               </TouchableOpacity>
-            )
-          })}
-        </View>
+            ))}
+          </View>
+        ) : null}
+        {rolesExpanded ? (
+          <>
+            <TextInput
+              style={[styles.input, styles.roleSearchInput]}
+              value={roleFilter}
+              onChangeText={setRoleFilter}
+              placeholder="Search roles…"
+              placeholderTextColor="rgba(255,255,255,0.28)"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={styles.chipRow}>
+              {filteredRoles.length === 0 ? (
+                <Text style={styles.roleEmpty}>No matching roles</Text>
+              ) : (
+                filteredRoles.map((c) => {
+                  const sel = selectedCategories.includes(c)
+                  return (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.chip, sel && styles.chipSelected]}
+                      onPress={() => toggleRole(c)}
+                    >
+                      <Text style={[styles.chipText, sel && styles.chipTextSelected]}>{c}</Text>
+                    </TouchableOpacity>
+                  )
+                })
+              )}
+            </View>
+            <TouchableOpacity
+              style={styles.roleLessBtn}
+              onPress={() => {
+                setRolesExpanded(false)
+                setRoleFilter('')
+              }}
+              hitSlop={8}
+            >
+              <Text style={styles.roleLessBtnText}>Show fewer roles</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={styles.chipRow}>
+            {FEATURED_JOB_LISTING_ROLES.map((c) => {
+              const sel = selectedCategories.includes(c)
+              return (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.chip, sel && styles.chipSelected]}
+                  onPress={() => toggleRole(c)}
+                >
+                  <Text style={[styles.chipText, sel && styles.chipTextSelected]}>{c}</Text>
+                </TouchableOpacity>
+              )
+            })}
+            <TouchableOpacity
+              style={[styles.chip, styles.chipMore]}
+              onPress={() => setRolesExpanded(true)}
+              accessibilityLabel="Show more roles"
+            >
+              <Plus size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
+            </TouchableOpacity>
+          </View>
+        )}
 
         <Text style={styles.label}>Budget</Text>
         <View style={styles.chipRow}>
@@ -438,6 +517,30 @@ const styles = StyleSheet.create({
   chipSelected: { borderColor: 'rgba(255,220,0,0.45)', backgroundColor: 'rgba(255,220,0,0.08)' },
   chipText: { color: 'rgba(255,255,255,0.65)', fontSize: 13, fontWeight: '600' },
   chipTextSelected: { color: '#FFDC00' },
+  selectedRoleRow: { marginBottom: 8 },
+  selectedRoleChip: { paddingRight: 10 },
+  chipRemove: { color: 'rgba(255,220,0,0.55)', fontWeight: '700' },
+  roleSearchInput: { marginBottom: 10 },
+  chipMore: {
+    minWidth: 44,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderColor: 'rgba(255,220,0,0.35)',
+    backgroundColor: 'rgba(255,220,0,0.06)',
+  },
+  roleLessBtn: { alignSelf: 'flex-start', marginBottom: 16, marginTop: -4 },
+  roleLessBtnText: {
+    color: 'rgba(255,220,0,0.85)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  roleEmpty: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 13,
+    paddingVertical: 8,
+    width: '100%',
+  },
   hintInline: {
     fontSize: 12,
     color: 'rgba(255,255,255,0.32)',
