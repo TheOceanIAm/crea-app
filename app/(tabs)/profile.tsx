@@ -38,6 +38,7 @@ import {
   Share2,
 } from 'lucide-react-native'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
+import { SubscriptionLegalLinks } from '@/components/SubscriptionLegalLinks'
 import { LocationAutocompleteInput } from '@/components/LocationAutocompleteInput'
 import { supabase } from '@/lib/supabase'
 import { deleteAccountViaApi } from '@/lib/deleteAccountApi'
@@ -2169,6 +2170,10 @@ export default function ProfileScreen() {
                     Subscriptions are managed through your Apple Account in Settings → Apple ID → Subscriptions.
                   </Text>
 
+                  <View style={styles.planIosLegalLinks}>
+                    <SubscriptionLegalLinks variant="dark" />
+                  </View>
+
                   {!ceo && !iosStoreSubscribed ? (
                     <TouchableOpacity
                       style={[styles.primaryBtn, styles.planIosFooterBtn, styles.planIosFooterBtnLast]}
@@ -3081,6 +3086,10 @@ const styles = StyleSheet.create({
     marginTop: 0,
     marginBottom: 4,
     lineHeight: 18,
+  },
+  planIosLegalLinks: {
+    marginTop: 4,
+    marginBottom: 4,
   },
   planIosFooterBtn: {
     marginTop: 0,

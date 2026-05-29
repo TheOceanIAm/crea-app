@@ -21,9 +21,14 @@ import Purchases, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Check, X } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
-import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { useSubscription } from '@/hooks/useSubscription'
 import { useRevenueCat } from '@/contexts/RevenueCatContext'
+import { SubscriptionLegalLinks } from '@/components/SubscriptionLegalLinks'
+import {
+  buildSubscriptionDisclosure,
+  subscriptionLengthLabel,
+  subscriptionProductTitle,
+} from '@/lib/subscriptionDisclosure'
 import {
   RC_DEFAULT_OFFERING_ID,
   RC_PACKAGE_AGENCY,
@@ -307,6 +312,8 @@ export default function PaywallScreen() {
     const isYearly = cadence === 'yearly'
     const priceMain = packagePriceMain(pkg, storeRole, cadence)
     const perMonthSub = isYearly ? yearlyPerMonthLabel(pkg, storeRole) : null
+    const productTitle = subscriptionProductTitle(pkg, storeRole)
+    const lengthLabel = subscriptionLengthLabel(cadence)
 
     return (
       <TouchableOpacity
@@ -317,7 +324,8 @@ export default function PaywallScreen() {
         activeOpacity={0.9}
       >
         <View style={styles.planCardLeft}>
-          <Text style={styles.planCardTitle}>{isYearly ? 'Yearly' : 'Monthly'}</Text>
+          <Text style={styles.planCardTitle}>{productTitle}</Text>
+          <Text style={styles.planCardLength}>{lengthLabel}</Text>
           {isYearly && savingsLabel ? (
             <View style={styles.savePill}>
               <Text style={styles.savePillText}>{savingsLabel}</Text>
@@ -331,6 +339,9 @@ export default function PaywallScreen() {
       </TouchableOpacity>
     )
   }
+
+  const selectedDisclosure =
+    selectedPackage && role ? buildSubscriptionDisclosure(selectedPackage, storeRole) : null
 
   return (
     <View style={styles.root}>
@@ -407,6 +418,24 @@ export default function PaywallScreen() {
                 })
               : null}
 
+            {selectedDisclosure ? (
+              <View style={styles.disclosureBox}>
+                <Text style={styles.disclosureTitle}>Auto-renewing subscription</Text>
+                <Text style={styles.disclosureLine}>
+                  <Text style={styles.disclosureLabel}>Title: </Text>
+                  {selectedDisclosure.title}
+                </Text>
+                <Text style={styles.disclosureLine}>
+                  <Text style={styles.disclosureLabel}>Length: </Text>
+                  {selectedDisclosure.length}
+                </Text>
+                <Text style={styles.disclosureLine}>
+                  <Text style={styles.disclosureLabel}>Price: </Text>
+                  {selectedDisclosure.price}
+                </Text>
+              </View>
+            ) : null}
+
             <TouchableOpacity
               style={[
                 styles.ctaBtn,
@@ -426,20 +455,11 @@ export default function PaywallScreen() {
             <Text style={styles.legal}>
               Payment will be charged to your Apple ID account at confirmation of purchase. Subscription
               automatically renews unless canceled at least 24 hours before the end of the current period.
+              Manage or cancel in Settings → Apple ID → Subscriptions.
             </Text>
 
             <View style={styles.legalLinks}>
-              <TouchableOpacity onPress={openPrivacy} hitSlop={8}>
-                <Text style={styles.legalLink}>Privacy policy</Text>
-              </TouchableOpacity>
-              <Text style={styles.legalDot}>·</Text>
-              <TouchableOpacity onPress={openTerms} hitSlop={8}>
-                <Text style={styles.legalLink}>Terms of service</Text>
-              </TouchableOpacity>
-              <Text style={styles.legalDot}>·</Text>
-              <TouchableOpacity disabled={restoring} onPress={() => void restore()} hitSlop={8}>
-                <Text style={styles.legalLink}>{restoring ? 'Restoring…' : 'Restore'}</Text>
-              </TouchableOpacity>
+              <SubscriptionLegalLinks onRestore={() => void restore()} restoring={restoring} />
             </View>
 
             <TouchableOpacity onPress={() => router.push('/login')} hitSlop={8}>
@@ -549,7 +569,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
   },
   planCardLeft: { flex: 1, paddingRight: 8 },
-  planCardTitle: { color: '#0a0a0a', fontSize: 17, fontWeight: '800' },
+  planCardTitle: { color: '#0a0a0a', fontSize: 16, fontWeight: '800' },
+  planCardLength: { color: 'rgba(10,10,10,0.45)', fontSize: 12, marginTop: 3, fontWeight: '600' },
   savePill: {
     alignSelf: 'flex-start',
     backgroundColor: '#FFDC00',
@@ -571,6 +592,27 @@ const styles = StyleSheet.create({
   },
   ctaBtnDisabled: { opacity: 0.45 },
   ctaBtnText: { color: '#0a0a0a', fontSize: 17, fontWeight: '800' },
+  disclosureBox: {
+    marginTop: 4,
+    marginBottom: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(10,10,10,0.08)',
+    backgroundColor: 'rgba(10,10,10,0.03)',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  disclosureTitle: {
+    color: '#0a0a0a',
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  disclosureLine: { color: 'rgba(10,10,10,0.62)', fontSize: 12, lineHeight: 17 },
+  disclosureLabel: { color: '#0a0a0a', fontWeight: '700' },
   currencyHint: {
     color: 'rgba(10,10,10,0.42)',
     fontSize: 11,
@@ -586,19 +628,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   legalLinks: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 6,
     marginTop: 12,
   },
-  legalLink: {
-    color: 'rgba(10,10,10,0.45)',
-    fontSize: 12,
-    textDecorationLine: 'underline',
-  },
-  legalDot: { color: 'rgba(10,10,10,0.25)', fontSize: 12 },
   loginLink: {
     color: 'rgba(10,10,10,0.55)',
     fontSize: 15,
