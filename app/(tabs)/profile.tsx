@@ -93,6 +93,7 @@ import {
 } from '@/lib/planCatalogPrices'
 import { openCompanySeatManagementOnWeb } from '@/lib/companySeatBilling'
 import { useAppStorePlanPrices } from '@/hooks/useAppStorePlanPrices'
+import { storeCurrencyRegionHint } from '@/lib/revenuecat/storeProductPrice'
 import { formatCatalogPrice } from '@/lib/planCatalogPrices'
 import { postTrialPlan } from '@/lib/trialPlanApi'
 import { setBillingNotice } from '@/lib/billingNotice'
@@ -390,8 +391,18 @@ export default function ProfileScreen() {
     : freelancer
       ? 'freelancer'
       : ''
-  const { displayPrice: iosStorePriceLine } = useAppStorePlanPrices(
-    Platform.OS === 'ios' ? iosPlanStoreRole : ''
+  const {
+    displayPrice: iosStorePriceLine,
+    usesCatalogFallback: iosUsesCatalogFallback,
+    reload: reloadIosStorePrices,
+  } = useAppStorePlanPrices(Platform.OS === 'ios' ? iosPlanStoreRole : '')
+
+  const iosStorePriceHint = useMemo(
+    () =>
+      iosUsesCatalogFallback
+        ? storeCurrencyRegionHint('USD', { usesCatalogFallback: true })
+        : null,
+    [iosUsesCatalogFallback]
   )
 
   const profileStrengthPct = useMemo(() => {
@@ -696,6 +707,13 @@ export default function ProfileScreen() {
       if (activeMenu !== 'billing' || !freelancer) return
       void loadStripeConnectStatus()
     }, [activeMenu, freelancer, loadStripeConnectStatus])
+  )
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'ios' || activeMenu !== 'plan') return
+      void reloadIosStorePrices()
+    }, [activeMenu, reloadIosStorePrices])
   )
 
   useEffect(() => {
@@ -2142,6 +2160,10 @@ export default function ProfileScreen() {
                   </>
                 )}
 
+                {iosStorePriceHint ? (
+                  <Text style={[styles.stripeFoot, styles.planIosPriceHint]}>{iosStorePriceHint}</Text>
+                ) : null}
+
                 <View style={styles.planIosFooter}>
                   <Text style={[styles.stripeFoot, styles.planIosStripeFoot]}>
                     Subscriptions are managed through your Apple Account in Settings → Apple ID → Subscriptions.
@@ -3048,6 +3070,12 @@ const styles = StyleSheet.create({
     marginTop: 12,
     gap: 16,
     paddingBottom: 8,
+  },
+  planIosPriceHint: {
+    marginTop: 8,
+    marginBottom: 4,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.42)',
   },
   planIosStripeFoot: {
     marginTop: 0,

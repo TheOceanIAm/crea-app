@@ -1,4 +1,4 @@
-import { getDeviceLocaleTag } from '@/lib/revenuecat/storeProductPrice'
+import { getRevenueCatPreferredLocale } from '@/lib/revenuecat/storeProductPrice'
 
 /** List prices (EUR) — must match Stripe + crea-services/lib/company-plan-catalog-prices.ts */
 export const FREELANCER_PLAN_PRICE_EUR = {
@@ -16,7 +16,7 @@ const CATALOG_CURRENCY = 'EUR'
 
 export function formatCatalogPrice(amount: number, currency = CATALOG_CURRENCY): string {
   try {
-    return new Intl.NumberFormat(getDeviceLocaleTag(), {
+    return new Intl.NumberFormat(getRevenueCatPreferredLocale(), {
       style: 'currency',
       currency,
       currencyDisplay: 'symbol',

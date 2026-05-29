@@ -1,3 +1,4 @@
+import Constants from 'expo-constants'
 import { NativeModules, Platform } from 'react-native'
 import type { PurchasesPackage } from 'react-native-purchases'
 import {
@@ -36,6 +37,58 @@ export function getDeviceLocaleTag(): string {
   return Intl.DateTimeFormat().resolvedOptions().locale || 'en-US'
 }
 
+/** iOS Region (not language) — e.g. Germany with English UI → `en-DE` → `DE`. */
+export function getDeviceRegionCode(): string | null {
+  try {
+    if (Platform.OS === 'ios') {
+      const settings = NativeModules.SettingsManager?.settings as
+        | { AppleLocale?: string; AppleLanguages?: string[] }
+        | undefined
+      const appleLocale = settings?.AppleLocale
+      if (typeof appleLocale === 'string' && appleLocale.trim()) {
+        const base = appleLocale.trim().split('@')[0]!.replace(/_/g, '-')
+        const parts = base.split('-').filter(Boolean)
+        if (parts.length >= 2) return parts[parts.length - 1]!.toUpperCase()
+      }
+      const lang0 = settings?.AppleLanguages?.[0]
+      if (typeof lang0 === 'string' && lang0.trim()) {
+        const parts = lang0.trim().replace(/_/g, '-').split('-').filter(Boolean)
+        if (parts.length >= 2) return parts[1]!.toUpperCase()
+      }
+    }
+  } catch {
+    // ignore
+  }
+  const fromTag = getDeviceLocaleTag().split('-')[1]?.toUpperCase()
+  return fromTag || null
+}
+
+/** Prefer German StoreKit formatting when the device region is Germany. */
+export function getRevenueCatPreferredLocale(): string {
+  if (getDeviceRegionCode() === 'DE') return 'de-DE'
+  return getDeviceLocaleTag()
+}
+
+function isTestFlightBuild(): boolean {
+  return Constants.executionEnvironment === 'storeClient'
+}
+
+const EU_REGIONS = new Set([
+  'DE',
+  'AT',
+  'CH',
+  'FR',
+  'IT',
+  'ES',
+  'NL',
+  'BE',
+  'IE',
+  'PT',
+  'FI',
+  'GR',
+  'LU',
+])
+
 const REGION_CURRENCY: Record<string, string> = {
   DE: 'EUR',
   AT: 'EUR',
@@ -63,9 +116,11 @@ const REGION_CURRENCY: Record<string, string> = {
 }
 
 export function expectedCurrencyForDeviceLocale(localeTag?: string): string | null {
-  const tag = (localeTag ?? getDeviceLocaleTag()).trim()
-  const region = tag.split('-')[1]?.toUpperCase()
+  const region = getDeviceRegionCode()
   if (region && REGION_CURRENCY[region]) return REGION_CURRENCY[region]
+  const tag = (localeTag ?? getDeviceLocaleTag()).trim()
+  const fromTag = tag.split('-')[1]?.toUpperCase()
+  if (fromTag && REGION_CURRENCY[fromTag]) return REGION_CURRENCY[fromTag]
   if (tag.toLowerCase().startsWith('de')) return 'EUR'
   return null
 }
@@ -105,12 +160,22 @@ export function formatPackagePrice(pkg: PurchasesPackage, cadence: 'monthly' | '
   return formatPackageDisplayPrice(pkg, 'freelancer', cadence).text
 }
 
-/** TestFlight/Sandbox often returns USD from StoreKit while the payment sheet uses the real storefront (e.g. EUR in DE). */
+/**
+ * TestFlight/Sandbox often returns USD from StoreKit while the payment sheet uses the real storefront (EUR in DE).
+ * Sandbox tester country ≠ iPhone region — TestFlight builds use catalog EUR when StoreKit still reports USD.
+ */
 export function shouldUseCatalogPriceFallback(product: StorePriceProduct): boolean {
-  const expected = expectedCurrencyForDeviceLocale()
   const actual = (product.currencyCode || '').toUpperCase()
-  if (!expected || !actual || actual === expected) return false
-  return expected === 'EUR' && actual === 'USD'
+  if (actual !== 'USD') return false
+
+  if (expectedCurrencyForDeviceLocale() === 'EUR') return true
+
+  const region = getDeviceRegionCode()
+  if (region && EU_REGIONS.has(region)) return true
+
+  if (isTestFlightBuild()) return true
+
+  return false
 }
 
 function catalogAmountForPackage(
@@ -153,13 +218,25 @@ export function packageCadence(pkg: PurchasesPackage): 'monthly' | 'yearly' | 'o
 export function formatMonthlyYearlyPriceLine(
   packages: PurchasesPackage[],
   role: 'freelancer' | 'company' = 'freelancer'
-): string | null {
+): { line: string | null; usesCatalogFallback: boolean } {
   const monthly = packages.find((p) => packageCadence(p) === 'monthly')
   const yearly = packages.find((p) => packageCadence(p) === 'yearly')
   const parts: string[] = []
-  if (monthly) parts.push(formatPackageDisplayPrice(monthly, role, 'monthly').text)
-  if (yearly) parts.push(formatPackageDisplayPrice(yearly, role, 'yearly').text)
-  return parts.length ? parts.join(' · ') : null
+  let usesCatalogFallback = false
+  if (monthly) {
+    const m = formatPackageDisplayPrice(monthly, role, 'monthly')
+    parts.push(m.text)
+    usesCatalogFallback = usesCatalogFallback || m.usesCatalogFallback
+  }
+  if (yearly) {
+    const y = formatPackageDisplayPrice(yearly, role, 'yearly')
+    parts.push(y.text)
+    usesCatalogFallback = usesCatalogFallback || y.usesCatalogFallback
+  }
+  return {
+    line: parts.length ? parts.join(' · ') : null,
+    usesCatalogFallback,
+  }
 }
 
 /** Hint when StoreKit currency does not match device region (common in TestFlight/Sandbox). */
@@ -168,6 +245,9 @@ export function storeCurrencyRegionHint(
   opts?: { usesCatalogFallback?: boolean }
 ): string | null {
   if (opts?.usesCatalogFallback) {
+    if (getDeviceRegionCode() === 'DE') {
+      return 'In TestFlight zeigt die App manchmal USD; beim Bezahlen gilt der Preis aus dem Apple-Dialog (z. B. 8,99 € in Deutschland).'
+    }
     return 'TestFlight often shows USD in the app; the Apple payment sheet shows your real price (e.g. €8.99 in Germany).'
   }
   const expected = expectedCurrencyForDeviceLocale()

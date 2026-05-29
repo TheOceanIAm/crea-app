@@ -8,6 +8,7 @@ import { formatMonthlyYearlyPriceLine } from '@/lib/revenuecat/storeProductPrice
 export function useAppStorePlanPrices(role: 'freelancer' | 'company' | '') {
   const { configured, ready } = useRevenueCat()
   const [priceLine, setPriceLine] = useState<string | null>(null)
+  const [usesCatalogFallback, setUsesCatalogFallback] = useState(false)
   const [loading, setLoading] = useState(Platform.OS === 'ios')
 
   const load = useCallback(async () => {
@@ -28,7 +29,9 @@ export function useAppStorePlanPrices(role: 'freelancer' | 'company' | '') {
         setPriceLine(null)
         return
       }
-      setPriceLine(formatMonthlyYearlyPriceLine(packages, role))
+      const formatted = formatMonthlyYearlyPriceLine(packages, role)
+      setPriceLine(formatted.line)
+      setUsesCatalogFallback(formatted.usesCatalogFallback)
     } catch {
       setPriceLine(null)
     } finally {
@@ -43,6 +46,7 @@ export function useAppStorePlanPrices(role: 'freelancer' | 'company' | '') {
 
   return {
     priceLine,
+    usesCatalogFallback,
     loading,
     displayPrice: priceLine ?? (loading ? 'Loading App Store pricing…' : 'App Store pricing'),
     reload: load,

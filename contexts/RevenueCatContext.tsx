@@ -12,7 +12,7 @@ import { Platform } from 'react-native'
 import Purchases, { type CustomerInfo } from 'react-native-purchases'
 import { supabase } from '@/lib/supabase'
 import { revenueCatApiKey } from '@/lib/revenuecat/config'
-import { getDeviceLocaleTag } from '@/lib/revenuecat/storeProductPrice'
+import { getRevenueCatPreferredLocale } from '@/lib/revenuecat/storeProductPrice'
 import { purchasesUnavailableUserMessage } from '@/lib/revenuecat/purchasesEnvironment'
 import {
   isSubscribedFromCustomerInfo,
@@ -75,7 +75,7 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
       }
       try {
         Purchases.setLogLevel(__DEV__ ? Purchases.LOG_LEVEL.DEBUG : Purchases.LOG_LEVEL.WARN)
-        const preferredUILocaleOverride = getDeviceLocaleTag()
+        const preferredUILocaleOverride = getRevenueCatPreferredLocale()
         await Purchases.configure({ apiKey, preferredUILocaleOverride })
         await Purchases.overridePreferredLocale(preferredUILocaleOverride)
         if (!Purchases.isConfigured()) {
