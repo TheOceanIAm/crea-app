@@ -11,6 +11,8 @@ type ShowBootstrapOptions = {
 
 type AppBootstrapOverlayContextValue = {
   quickBootstrap: boolean
+  /** True while splash is visible or fading out — block modals (e.g. Good News) until clear. */
+  isBootstrapOverlayBlocking: boolean
   showBootstrapOverlay: (opts?: ShowBootstrapOptions) => void
   hideBootstrapOverlay: () => void
 }
@@ -27,10 +29,15 @@ export function useAppBootstrapOverlay() {
 
 export function AppBootstrapOverlayProvider({ children }: { children: React.ReactNode }) {
   const [visible, setVisible] = useState(false)
+  const [isBootstrapOverlayBlocking, setIsBootstrapOverlayBlocking] = useState(false)
   const [quickBootstrap, setQuickBootstrap] = useState(true)
   const failsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fadeRef = useRef(new Animated.Value(1)).current
   const hidingRef = useRef(false)
+
+  const clearBlocking = useCallback(() => {
+    setIsBootstrapOverlayBlocking(false)
+  }, [])
 
   const hideBootstrapOverlay = useCallback(() => {
     if (failsafeRef.current) {
@@ -49,24 +56,27 @@ export function AppBootstrapOverlayProvider({ children }: { children: React.Reac
       if (finished) {
         setVisible(false)
         fadeRef.setValue(1)
+        clearBlocking()
       }
     })
-  }, [fadeRef])
+  }, [fadeRef, clearBlocking])
 
   const showBootstrapOverlay = useCallback(
     (opts?: ShowBootstrapOptions) => {
       hidingRef.current = false
       fadeRef.setValue(1)
       setQuickBootstrap(opts?.quick !== false)
+      setIsBootstrapOverlayBlocking(true)
       setVisible(true)
       if (failsafeRef.current) clearTimeout(failsafeRef.current)
       failsafeRef.current = setTimeout(() => {
         failsafeRef.current = null
         setVisible(false)
         fadeRef.setValue(1)
+        clearBlocking()
       }, FAILSAFE_MS)
     },
-    [fadeRef]
+    [fadeRef, clearBlocking]
   )
 
   useEffect(() => {
@@ -78,10 +88,11 @@ export function AppBootstrapOverlayProvider({ children }: { children: React.Reac
   const ctx = useMemo(
     () => ({
       quickBootstrap,
+      isBootstrapOverlayBlocking,
       showBootstrapOverlay,
       hideBootstrapOverlay,
     }),
-    [quickBootstrap, showBootstrapOverlay, hideBootstrapOverlay]
+    [quickBootstrap, isBootstrapOverlayBlocking, showBootstrapOverlay, hideBootstrapOverlay]
   )
 
   return (

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
+  ImageBackground,
   Platform,
   ScrollView,
   StyleSheet,
@@ -9,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
+import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
 import Purchases, {
   PURCHASES_ERROR_CODE,
@@ -16,6 +19,7 @@ import Purchases, {
   type PurchasesPackage,
 } from 'react-native-purchases'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { Check, X } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { useSubscription } from '@/hooks/useSubscription'
@@ -28,6 +32,7 @@ import {
 } from '@/lib/revenuecat/config'
 import { resolveAppRole } from '@/lib/profileRole'
 import { PLATFORM_TRIAL_DAYS } from '@/lib/platformTrial'
+import { formatCatalogPrice } from '@/lib/planCatalogPrices'
 import { filterPackagesForRole } from '@/lib/revenuecat/offeringsPackages'
 import {
   offeringsEmptyMessage,
@@ -39,34 +44,81 @@ import {
   packageCadence,
   storeCurrencyRegionHint,
 } from '@/lib/revenuecat/storeProductPrice'
+import { ICON_STROKE } from '@/lib/iconTheme'
+
+const HEADER_IMAGE = require('@/assets/header_image.jpg')
+
+type PaywallRole = 'freelancer' | 'company'
+
+const PAYWALL_COPY: Record<
+  PaywallRole,
+  { headline: string; features: readonly string[]; trialLead: string; cta: string }
+> = {
+  freelancer: {
+    headline: 'Land the job that changes everything.',
+    features: [
+      'Apply to unlimited jobs',
+      'Get instant job alerts',
+      'Full Workspace, Sun Planner & Invoicing',
+    ],
+    trialLead: 'New subscribers:',
+    cta: 'Get Pro',
+  },
+  company: {
+    headline: 'Fill your roster and hire faster on every shoot.',
+    features: [
+      'Unlimited job listings & talent pool',
+      '2 team seats included on Pro',
+      'Applications, postings & hiring dashboard',
+    ],
+    trialLead: 'New company accounts:',
+    cta: 'Get Company Pro',
+  },
+}
 
 type PlanCard = {
   key: SubscriptionPlanKey
   packageKey: string
   title: string
-  description: string
 }
 
-const FREELANCER_PLANS: PlanCard[] = [
-  {
-    key: 'pro',
-    packageKey: RC_PACKAGE_PRO,
-    title: 'Pro',
-    description: 'Apply to jobs, post listings, full Workspace, Sun Planner, Brief AI, and Invoicing.',
-  },
-]
+const FREELANCER_PLANS: PlanCard[] = [{ key: 'pro', packageKey: RC_PACKAGE_PRO, title: 'Pro' }]
+const COMPANY_PLANS: PlanCard[] = [{ key: 'pro', packageKey: RC_PACKAGE_AGENCY, title: 'Pro' }]
 
-const COMPANY_PLANS: PlanCard[] = [
-  {
-    key: 'pro',
-    packageKey: RC_PACKAGE_AGENCY,
-    title: 'Pro',
-    description: 'Unlimited listings & pool, 2 team seats included, all hiring tools.',
-  },
-]
+const HERO_HEIGHT = Math.min(420, Math.round(Dimensions.get('window').height * 0.46))
 
 function isPurchaseCancelled(error: PurchasesError): boolean {
   return error.code === PURCHASES_ERROR_CODE.PURCHASE_CANCELLED_ERROR
+}
+
+function packagePriceMain(
+  pkg: PurchasesPackage,
+  role: 'freelancer' | 'company',
+  cadence: 'monthly' | 'yearly'
+): string {
+  const display = formatPackageDisplayPrice(pkg, role, cadence)
+  return display.text.replace(/\/mo$|\/yr$/i, '').trim()
+}
+
+function yearlyPerMonthLabel(
+  yearlyPkg: PurchasesPackage,
+  role: 'freelancer' | 'company'
+): string | null {
+  const perMonth = yearlyPkg.product.price / 12
+  if (!Number.isFinite(perMonth) || perMonth <= 0) return null
+  return `${formatCatalogPrice(perMonth)}/mo`
+}
+
+function yearlySavingsLabel(
+  monthlyPkg: PurchasesPackage | undefined,
+  yearlyPkg: PurchasesPackage
+): string | null {
+  const monthly = monthlyPkg?.product.price
+  const yearly = yearlyPkg.product.price
+  if (monthly == null || !Number.isFinite(monthly) || !Number.isFinite(yearly)) return null
+  const save = monthly * 12 - yearly
+  if (save < 0.5) return null
+  return `SAVE ${formatCatalogPrice(save)}/YR`
 }
 
 export default function PaywallScreen() {
@@ -82,10 +134,9 @@ export default function PaywallScreen() {
   const [restoring, setRestoring] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const planCards = useMemo(
-    () => (role === 'company' ? COMPANY_PLANS : FREELANCER_PLANS),
-    [role]
-  )
+  const storeRole: PaywallRole = role === 'company' ? 'company' : 'freelancer'
+  const planCards = useMemo(() => (role === 'company' ? COMPANY_PLANS : FREELANCER_PLANS), [role])
+  const copy = PAYWALL_COPY[storeRole]
 
   const loadOfferings = useCallback(async () => {
     if (Platform.OS !== 'ios') {
@@ -102,8 +153,7 @@ export default function PaywallScreen() {
     setLoadError(null)
     try {
       const offerings = await Purchases.getOfferings()
-      const offering =
-        offerings.all[RC_DEFAULT_OFFERING_ID] ?? offerings.current ?? null
+      const offering = offerings.all[RC_DEFAULT_OFFERING_ID] ?? offerings.current ?? null
       setPackages(offering?.availablePackages ?? [])
       if (!offering?.availablePackages?.length) {
         setLoadError(offeringsEmptyMessage())
@@ -120,17 +170,19 @@ export default function PaywallScreen() {
       const {
         data: { user },
       } = await supabase.auth.getUser()
-      if (user) {
-        const { data: pr } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .maybeSingle()
-        const r = resolveAppRole(pr?.role, user)
-        setRole(r === 'company' ? 'company' : 'freelancer')
-      } else {
+      if (!user) {
         setRole('freelancer')
+        return
       }
+      const roleHint = resolveAppRole(user.user_metadata?.role, user)
+      if (roleHint === 'company') setRole('company')
+      const { data: pr } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle()
+      const r = resolveAppRole(pr?.role, user)
+      setRole(r === 'company' ? 'company' : 'freelancer')
     })()
   }, [])
 
@@ -141,17 +193,26 @@ export default function PaywallScreen() {
 
   const availableOptions = useMemo(() => {
     if (!role) return packages
-    return filterPackagesForRole(packages, role === 'company' ? 'company' : 'freelancer')
-  }, [packages, role])
+    return filterPackagesForRole(packages, storeRole)
+  }, [packages, role, storeRole])
+
+  const yearlyPackage = useMemo(
+    () => availableOptions.find((p) => packageCadence(p) === 'yearly') ?? null,
+    [availableOptions]
+  )
+  const monthlyPackage = useMemo(
+    () => availableOptions.find((p) => packageCadence(p) === 'monthly') ?? null,
+    [availableOptions]
+  )
 
   const usesCatalogPriceFallback = useMemo(() => {
     if (!role || !availableOptions.length) return false
     return availableOptions.some((pkg) => {
       const cadence = packageCadence(pkg)
       if (cadence === 'other') return false
-      return formatPackageDisplayPrice(pkg, role, cadence).usesCatalogFallback
+      return formatPackageDisplayPrice(pkg, storeRole, cadence).usesCatalogFallback
     })
-  }, [availableOptions, role])
+  }, [availableOptions, role, storeRole])
 
   const currencyHint = useMemo(() => {
     const sample = availableOptions[0]?.product
@@ -164,10 +225,12 @@ export default function PaywallScreen() {
       setSelectedPackageId(null)
       return
     }
+    const preferred =
+      yearlyPackage?.identifier ?? monthlyPackage?.identifier ?? availableOptions[0]?.identifier ?? null
     if (!selectedPackageId || !availableOptions.some((pkg) => pkg.identifier === selectedPackageId)) {
-      setSelectedPackageId(availableOptions[0]?.identifier ?? null)
+      setSelectedPackageId(preferred)
     }
-  }, [availableOptions, selectedPackageId])
+  }, [availableOptions, yearlyPackage, monthlyPackage, selectedPackageId])
 
   const purchase = async (pkg: PurchasesPackage, planKey: SubscriptionPlanKey) => {
     if (!configured) {
@@ -227,260 +290,321 @@ export default function PaywallScreen() {
     }
   }
 
-  const canGoBack = router.canGoBack()
   const selectedPackage = availableOptions.find((pkg) => pkg.identifier === selectedPackageId) ?? null
   const selectedPlan = planCards[0]
-  const selectedPackageType = (selectedPackage?.packageType || '').toLowerCase()
-  const ctaLabel = selectedPackageType.includes('annual') || selectedPackageType.includes('year')
-    ? 'Get Pro Yearly'
-    : 'Get Pro'
+  const savingsLabel =
+    yearlyPackage && role ? yearlySavingsLabel(monthlyPackage ?? undefined, yearlyPackage) : null
+  const busy = !!busyPackageId
 
   const goBack = useCallback(() => {
-    if (canGoBack) router.back()
-  }, [canGoBack, router])
+    if (router.canGoBack()) router.back()
+    else router.replace('/login')
+  }, [router])
+
+  const renderPlanOption = (pkg: PurchasesPackage, cadence: 'monthly' | 'yearly') => {
+    if (!role) return null
+    const isSelected = selectedPackageId === pkg.identifier
+    const isYearly = cadence === 'yearly'
+    const priceMain = packagePriceMain(pkg, storeRole, cadence)
+    const perMonthSub = isYearly ? yearlyPerMonthLabel(pkg, storeRole) : null
+
+    return (
+      <TouchableOpacity
+        key={pkg.identifier}
+        style={[styles.planCard, isSelected && styles.planCardSelected]}
+        onPress={() => setSelectedPackageId(pkg.identifier)}
+        disabled={busy}
+        activeOpacity={0.9}
+      >
+        <View style={styles.planCardLeft}>
+          <Text style={styles.planCardTitle}>{isYearly ? 'Yearly' : 'Monthly'}</Text>
+          {isYearly && savingsLabel ? (
+            <View style={styles.savePill}>
+              <Text style={styles.savePillText}>{savingsLabel}</Text>
+            </View>
+          ) : null}
+        </View>
+        <View style={styles.planCardRight}>
+          <Text style={styles.planCardPrice}>{priceMain}</Text>
+          {perMonthSub ? <Text style={styles.planCardSubPrice}>{perMonthSub}</Text> : null}
+        </View>
+      </TouchableOpacity>
+    )
+  }
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
-      <View style={styles.header}>
-        {canGoBack ? (
-          <TouchableOpacity onPress={goBack} hitSlop={12}>
-            <Text style={styles.back}>← Back</Text>
-          </TouchableOpacity>
-        ) : null}
-        <Text style={styles.title}>Choose your plan</Text>
-        <Text style={styles.subtitle}>CREA Services — subscribe with your Apple ID</Text>
-      </View>
-
-      <View style={styles.trialBanner}>
-        <Text style={styles.trialBannerText}>
-          New freelancer and company accounts get{' '}
-          <Text style={styles.trialStrong}>{PLATFORM_TRIAL_DAYS} days of Pro features</Text>, then automatically move
-          to the Free plan. Subscribe below to stay on Pro after your trial.
-        </Text>
-      </View>
-
-      {loadingOfferings ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color="#FFDC00" />
-          <Text style={styles.loadingText}>Loading plans from the App Store…</Text>
-        </View>
-      ) : loadError ? (
-        <View style={styles.centered}>
-          <Text style={styles.errorText}>{loadError}</Text>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={() => void loadOfferings()}>
-            <Text style={styles.secondaryBtnText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-          <View style={styles.card}>
-            <View style={styles.cardTop}>
-              <Text style={styles.cardTitle}>{selectedPlan?.title ?? 'Pro'}</Text>
-              {currentPlan === 'pro' ? (
-                <View style={styles.currentPill}>
-                  <Text style={styles.currentPillText}>CURRENT</Text>
-                </View>
-              ) : null}
+    <View style={styles.root}>
+      <ImageBackground source={HEADER_IMAGE} style={[styles.hero, { height: HERO_HEIGHT }]} resizeMode="cover">
+        <LinearGradient
+          colors={['rgba(0,0,0,0.15)', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.92)']}
+          locations={[0, 0.45, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={[styles.heroContent, { paddingTop: insets.top + 8 }]}>
+          <View style={styles.heroTopRow}>
+            <View style={styles.brandRow}>
+              <Text style={styles.brandLogo}>CREA</Text>
+              <View style={styles.proBadge}>
+                <Text style={styles.proBadgeText}>Pro</Text>
+              </View>
             </View>
-            <Text style={styles.cardDesc}>{selectedPlan?.description ?? 'Unlock full access in CREA.'}</Text>
+            <TouchableOpacity
+              onPress={goBack}
+              hitSlop={12}
+              style={styles.closeBtn}
+              accessibilityLabel="Close"
+            >
+              <X size={22} color="#ffffff" strokeWidth={ICON_STROKE} />
+            </TouchableOpacity>
+          </View>
 
-            {availableOptions.map((pkg) => {
-              const isSelected = selectedPackageId === pkg.identifier
-              const isBusy = busyPackageId === pkg.identifier
-              const type = (pkg.packageType || '').toLowerCase()
-              const cadence = type.includes('annual') || type.includes('year') ? 'Yearly' : 'Monthly'
-              return (
-                <TouchableOpacity
-                  key={pkg.identifier}
-                  style={[styles.optionRow, isSelected && styles.optionRowSelected]}
-                  onPress={() => setSelectedPackageId(pkg.identifier)}
-                  disabled={isBusy}
-                >
-                  <View>
-                    <Text style={styles.optionLabel}>{cadence}</Text>
-                    <Text style={styles.optionSub}>
-                      {type.includes('annual') || type.includes('year') ? 'Auto-renewing yearly' : 'Auto-renewing monthly'}
-                    </Text>
-                  </View>
-                  <Text style={styles.optionPrice}>
-                    {role && packageCadence(pkg) !== 'other'
-                      ? formatPackageDisplayPrice(pkg, role, packageCadence(pkg) as 'monthly' | 'yearly').text
-                      : '—'}
-                  </Text>
-                </TouchableOpacity>
-              )
-            })}
+          <Text style={styles.headline}>{copy.headline}</Text>
+
+          <View style={styles.featureList}>
+            {copy.features.map((line) => (
+              <View key={line} style={styles.featureRow}>
+                <Check size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                <Text style={styles.featureText}>{line}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </ImageBackground>
+
+      <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
+        {loadingOfferings ? (
+          <View style={styles.sheetCentered}>
+            <ActivityIndicator color="#0a0a0a" />
+            <Text style={styles.sheetMuted}>Loading plans from the App Store…</Text>
+          </View>
+        ) : loadError ? (
+          <View style={styles.sheetCentered}>
+            <Text style={styles.sheetError}>{loadError}</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={() => void loadOfferings()}>
+              <Text style={styles.retryBtnText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.sheetScroll}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <Text style={styles.trialLine}>
+              {copy.trialLead}{' '}
+              <Text style={styles.trialStrong}>{PLATFORM_TRIAL_DAYS}-day free trial</Text>, then billed
+              through Apple.
+            </Text>
+
+            {yearlyPackage ? renderPlanOption(yearlyPackage, 'yearly') : null}
+            {monthlyPackage ? renderPlanOption(monthlyPackage, 'monthly') : null}
+
+            {!yearlyPackage && !monthlyPackage
+              ? availableOptions.map((pkg) => {
+                  const cadence = packageCadence(pkg)
+                  if (cadence === 'other') return null
+                  return renderPlanOption(pkg, cadence)
+                })
+              : null}
 
             <TouchableOpacity
               style={[
-                styles.primaryBtn,
-                (!selectedPackage || currentPlan === 'pro' || !!busyPackageId) && styles.btnDisabled,
+                styles.ctaBtn,
+                (!selectedPackage || currentPlan === 'pro' || busy) && styles.ctaBtnDisabled,
               ]}
-              disabled={!selectedPackage || currentPlan === 'pro' || !!busyPackageId}
+              disabled={!selectedPackage || currentPlan === 'pro' || busy}
               onPress={() => selectedPackage && selectedPlan && void purchase(selectedPackage, selectedPlan.key)}
+              activeOpacity={0.9}
             >
-              <Text style={styles.primaryBtnText}>
-                {currentPlan === 'pro' ? 'Active' : busyPackageId ? 'Processing…' : ctaLabel}
+              <Text style={styles.ctaBtnText}>
+                {currentPlan === 'pro' ? 'Active' : busy ? 'Processing…' : copy.cta}
               </Text>
             </TouchableOpacity>
-          </View>
 
-          {currencyHint ? <Text style={styles.currencyHint}>{currencyHint}</Text> : null}
+            {currencyHint ? <Text style={styles.currencyHint}>{currencyHint}</Text> : null}
 
-          <Text style={styles.legal}>
-            Payment is charged to your Apple ID at confirmation. Subscription auto-renews unless canceled at
-            least 24 hours before the current period ends.
-          </Text>
+            <Text style={styles.legal}>
+              Payment will be charged to your Apple ID account at confirmation of purchase. Subscription
+              automatically renews unless canceled at least 24 hours before the end of the current period.
+            </Text>
 
-          <View style={styles.legalLinks}>
-            <TouchableOpacity onPress={openTerms} hitSlop={8}>
-              <Text style={styles.legalLink}>Terms of service</Text>
+            <View style={styles.legalLinks}>
+              <TouchableOpacity onPress={openPrivacy} hitSlop={8}>
+                <Text style={styles.legalLink}>Privacy policy</Text>
+              </TouchableOpacity>
+              <Text style={styles.legalDot}>·</Text>
+              <TouchableOpacity onPress={openTerms} hitSlop={8}>
+                <Text style={styles.legalLink}>Terms of service</Text>
+              </TouchableOpacity>
+              <Text style={styles.legalDot}>·</Text>
+              <TouchableOpacity disabled={restoring} onPress={() => void restore()} hitSlop={8}>
+                <Text style={styles.legalLink}>{restoring ? 'Restoring…' : 'Restore'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity onPress={() => router.push('/login')} hitSlop={8}>
+              <Text style={styles.loginLink}>Already have an account? Log in</Text>
             </TouchableOpacity>
-            <Text style={styles.legalDot}>·</Text>
-            <TouchableOpacity onPress={openPrivacy} hitSlop={8}>
-              <Text style={styles.legalLink}>Privacy policy</Text>
-            </TouchableOpacity>
-            <Text style={styles.legalDot}>·</Text>
-            <TouchableOpacity
-              disabled={restoring}
-              onPress={() => void restore()}
-              hitSlop={8}
-            >
-              <Text style={styles.legalLink}>{restoring ? 'Restoring…' : 'Restore'}</Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity onPress={() => router.push('/login')} hitSlop={8}>
-            <Text style={styles.loginLink}>Already have an account? Log in</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      )}
+          </ScrollView>
+        )}
+      </View>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0a' },
-  header: { paddingHorizontal: 20, paddingBottom: 12 },
-  back: { color: 'rgba(250,246,234,0.5)', fontSize: 14, marginBottom: 12 },
-  title: {
-    color: '#FFDC00',
+  hero: { width: '100%', justifyContent: 'flex-end' },
+  heroContent: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 22, paddingBottom: 22 },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  brandLogo: {
+    color: '#ffffff',
     fontSize: 28,
     fontWeight: '800',
-    letterSpacing: 1,
+    letterSpacing: 3,
   },
-  subtitle: { color: 'rgba(250,246,234,0.52)', fontSize: 13, marginTop: 6 },
-  trialBanner: {
-    marginHorizontal: 20,
-    marginBottom: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,220,0,0.2)',
-    backgroundColor: 'rgba(255,220,0,0.06)',
-    padding: 12,
-  },
-  trialBannerText: { color: 'rgba(250,246,234,0.72)', fontSize: 12, lineHeight: 18 },
-  trialStrong: { color: '#FFDC00', fontWeight: '700' },
-  scroll: { paddingHorizontal: 20, paddingBottom: 24, gap: 14 },
-  card: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(250,246,234,0.12)',
-    backgroundColor: '#12150f',
-    padding: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-  },
-  cardCurrent: { borderColor: 'rgba(255,220,0,0.55)' },
-  cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  cardTitle: { color: '#faf6ea', fontSize: 18, fontWeight: '700' },
-  currentPill: {
-    backgroundColor: 'rgba(255,220,0,0.2)',
+  proBadge: {
+    backgroundColor: '#FFDC00',
+    borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 999,
   },
-  currentPillText: { color: '#FFDC00', fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
-  cardDesc: { color: 'rgba(250,246,234,0.62)', fontSize: 13, lineHeight: 20, marginTop: 8 },
-  optionRow: {
-    marginTop: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(250,246,234,0.14)',
-    backgroundColor: '#0c0f0a',
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  proBadgeText: { color: '#0a0a0a', fontSize: 11, fontWeight: '800' },
+  closeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
-  optionRowSelected: {
-    borderColor: 'rgba(255,220,0,0.95)',
+  headline: {
+    color: '#FFDC00',
+    fontSize: 30,
+    fontWeight: '800',
+    lineHeight: 36,
+    marginBottom: 16,
+  },
+  featureList: { gap: 10 },
+  featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  featureText: { color: '#ffffff', fontSize: 15, fontWeight: '500', flex: 1 },
+  sheet: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    marginTop: -20,
+    overflow: 'hidden',
+  },
+  sheetScroll: { paddingHorizontal: 22, paddingTop: 22, paddingBottom: 8 },
+  sheetCentered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 28,
+    gap: 12,
+  },
+  sheetMuted: { color: 'rgba(10,10,10,0.45)', fontSize: 13 },
+  sheetError: { color: '#b91c1c', fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  retryBtn: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(10,10,10,0.15)',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  retryBtnText: { color: '#0a0a0a', fontWeight: '700', fontSize: 14 },
+  trialLine: {
+    color: 'rgba(10,10,10,0.45)',
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  trialStrong: { color: '#0a0a0a', fontWeight: '700' },
+  planCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(10,10,10,0.12)',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
+    backgroundColor: '#ffffff',
+  },
+  planCardSelected: {
+    borderColor: '#FFDC00',
+    borderWidth: 2,
     shadowColor: '#FFDC00',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
   },
-  optionLabel: { color: '#faf6ea', fontSize: 16, fontWeight: '600' },
-  optionSub: { color: 'rgba(250,246,234,0.48)', fontSize: 12, marginTop: 2 },
-  optionPrice: { color: '#faf6ea', fontSize: 18, fontWeight: '700' },
-  primaryBtn: {
-    marginTop: 16,
+  planCardLeft: { flex: 1, paddingRight: 8 },
+  planCardTitle: { color: '#0a0a0a', fontSize: 17, fontWeight: '800' },
+  savePill: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFDC00',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 6,
+  },
+  savePillText: { color: '#0a0a0a', fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
+  planCardRight: { alignItems: 'flex-end' },
+  planCardPrice: { color: '#0a0a0a', fontSize: 20, fontWeight: '800' },
+  planCardSubPrice: { color: 'rgba(10,10,10,0.42)', fontSize: 12, marginTop: 2, fontWeight: '600' },
+  ctaBtn: {
+    marginTop: 8,
     backgroundColor: '#FFDC00',
     borderRadius: 999,
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: 'center',
   },
-  primaryBtnText: { color: '#0a0a0a', fontWeight: '800', fontSize: 17 },
-  secondaryBtn: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  secondaryBtnText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' },
-  btnDisabled: { opacity: 0.45 },
+  ctaBtnDisabled: { opacity: 0.45 },
+  ctaBtnText: { color: '#0a0a0a', fontSize: 17, fontWeight: '800' },
   currencyHint: {
-    color: 'rgba(250,246,234,0.45)',
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 8,
-    textAlign: 'center',
-    paddingHorizontal: 4,
-  },
-  legal: {
-    color: 'rgba(250,246,234,0.4)',
+    color: 'rgba(10,10,10,0.42)',
     fontSize: 11,
     lineHeight: 16,
     marginTop: 10,
+    textAlign: 'center',
+  },
+  legal: {
+    color: 'rgba(10,10,10,0.38)',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 14,
     textAlign: 'center',
   },
   legalLinks: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     marginTop: 12,
   },
   legalLink: {
-    color: 'rgba(250,246,234,0.58)',
+    color: 'rgba(10,10,10,0.45)',
     fontSize: 12,
     textDecorationLine: 'underline',
   },
-  legalDot: { color: 'rgba(250,246,234,0.25)', fontSize: 12 },
+  legalDot: { color: 'rgba(10,10,10,0.25)', fontSize: 12 },
   loginLink: {
-    color: 'rgba(250,246,234,0.74)',
-    fontSize: 16,
+    color: 'rgba(10,10,10,0.55)',
+    fontSize: 15,
     textAlign: 'center',
     marginTop: 16,
     marginBottom: 4,
     fontWeight: '500',
   },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
-  loadingText: { color: 'rgba(255,255,255,0.4)', fontSize: 13 },
-  errorText: { color: '#f87171', fontSize: 13, textAlign: 'center' },
 })

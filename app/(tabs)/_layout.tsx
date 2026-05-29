@@ -7,6 +7,7 @@ import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
+import { useAppBootstrapOverlay } from '@/contexts/AppBootstrapOverlayContext'
 import { markGoodNewsModalShownToday, shouldShowGoodNewsModalToday } from '@/lib/goodNewsDailyGate'
 import { mainTabFromPathname, writeLastMainTab } from '@/lib/appEntryRoute'
 import { prefetchMainTabData } from '@/lib/prefetchTabData'
@@ -25,8 +26,10 @@ let realtimeTopicSeq = 0
 
 export default function TabLayout() {
   const pathname = usePathname()
+  const { isBootstrapOverlayBlocking } = useAppBootstrapOverlay()
   const [userId, setUserId] = useState<string | null>(null)
   const [goodNewsPopup, setGoodNewsPopup] = useState<{ body: string; source?: string } | null>(null)
+  const [pendingGoodNews, setPendingGoodNews] = useState<{ body: string; source?: string } | null>(null)
   const [unreadAlertsCount, setUnreadAlertsCount] = useState(0)
   /** Company: workspace projects tab. Freelancer/CEO: marketplace job pool tab. */
   const [showWorkspaceProjectsTab, setShowWorkspaceProjectsTab] = useState(false)
@@ -120,29 +123,35 @@ export default function TabLayout() {
     void Notifications.setBadgeCountAsync(total).catch(() => {})
   }, [unreadDmCount, unreadAlertsCount])
 
-  /** First open each calendar day: uplifting headline (same source as CEO Good News widget). */
+  /** Prefetch daily headline while splash/feed load; show only after bootstrap overlay is gone. */
   useEffect(() => {
     if (!userId) return
     let cancelled = false
-    const tryShow = async () => {
+    const loadHeadline = async () => {
       const open = await shouldShowGoodNewsModalToday()
       if (!open || cancelled) return
       const news = await fetchGoodNewsOfTheDayHeadline()
       if (cancelled || !news) return
-      setGoodNewsPopup(news)
+      setPendingGoodNews(news)
     }
-    const task = InteractionManager.runAfterInteractions(() => {
-      void tryShow()
-    })
+    void loadHeadline()
     const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') void tryShow()
+      if (s === 'active') void loadHeadline()
     })
     return () => {
       cancelled = true
-      task.cancel()
       sub.remove()
     }
   }, [userId])
+
+  useEffect(() => {
+    if (!userId || isBootstrapOverlayBlocking || !pendingGoodNews || goodNewsPopup) return
+    const task = InteractionManager.runAfterInteractions(() => {
+      setGoodNewsPopup(pendingGoodNews)
+      setPendingGoodNews(null)
+    })
+    return () => task.cancel()
+  }, [userId, isBootstrapOverlayBlocking, pendingGoodNews, goodNewsPopup])
 
   const dismissGoodNewsPopup = useCallback(async () => {
     await markGoodNewsModalShownToday()
