@@ -1,5 +1,10 @@
 import { NativeModules, Platform } from 'react-native'
 import type { PurchasesPackage } from 'react-native-purchases'
+import {
+  COMPANY_PLAN_PRICE_EUR,
+  FREELANCER_PLAN_PRICE_EUR,
+  formatCatalogPrice,
+} from '@/lib/planCatalogPrices'
 
 export type StorePriceProduct = {
   price: number
@@ -97,10 +102,47 @@ export function formatStoreProductPrice(
 }
 
 export function formatPackagePrice(pkg: PurchasesPackage, cadence: 'monthly' | 'yearly'): string {
-  return formatStoreProductPrice(pkg.product, cadence === 'yearly' ? { perYear: true } : { perMonth: true })
+  return formatPackageDisplayPrice(pkg, 'freelancer', cadence).text
 }
 
-function packageCadence(pkg: PurchasesPackage): 'monthly' | 'yearly' | 'other' {
+/** TestFlight/Sandbox often returns USD from StoreKit while the payment sheet uses the real storefront (e.g. EUR in DE). */
+export function shouldUseCatalogPriceFallback(product: StorePriceProduct): boolean {
+  const expected = expectedCurrencyForDeviceLocale()
+  const actual = (product.currencyCode || '').toUpperCase()
+  if (!expected || !actual || actual === expected) return false
+  return expected === 'EUR' && actual === 'USD'
+}
+
+function catalogAmountForPackage(
+  pkg: PurchasesPackage,
+  role: 'freelancer' | 'company'
+): number | null {
+  const cadence = packageCadence(pkg)
+  if (role === 'company') {
+    return cadence === 'yearly' ? COMPANY_PLAN_PRICE_EUR.proYearly : COMPANY_PLAN_PRICE_EUR.proMonthly
+  }
+  return cadence === 'yearly' ? FREELANCER_PLAN_PRICE_EUR.proYearly : FREELANCER_PLAN_PRICE_EUR.proMonthly
+}
+
+export function formatPackageDisplayPrice(
+  pkg: PurchasesPackage,
+  role: 'freelancer' | 'company',
+  cadence: 'monthly' | 'yearly'
+): { text: string; usesCatalogFallback: boolean } {
+  if (shouldUseCatalogPriceFallback(pkg.product)) {
+    const amount = catalogAmountForPackage(pkg, role)
+    if (amount != null) {
+      const suffix = cadence === 'yearly' ? '/yr' : '/mo'
+      return { text: `${formatCatalogPrice(amount)}${suffix}`, usesCatalogFallback: true }
+    }
+  }
+  return {
+    text: formatStoreProductPrice(pkg.product, cadence === 'yearly' ? { perYear: true } : { perMonth: true }),
+    usesCatalogFallback: false,
+  }
+}
+
+export function packageCadence(pkg: PurchasesPackage): 'monthly' | 'yearly' | 'other' {
   const type = (pkg.packageType || '').toLowerCase()
   if (type.includes('annual') || type.includes('year')) return 'yearly'
   if (type.includes('monthly') || type.includes('month')) return 'monthly'
@@ -109,18 +151,25 @@ function packageCadence(pkg: PurchasesPackage): 'monthly' | 'yearly' | 'other' {
 
 /** Human-readable price line for settings (monthly · yearly). */
 export function formatMonthlyYearlyPriceLine(
-  packages: PurchasesPackage[]
+  packages: PurchasesPackage[],
+  role: 'freelancer' | 'company' = 'freelancer'
 ): string | null {
   const monthly = packages.find((p) => packageCadence(p) === 'monthly')
   const yearly = packages.find((p) => packageCadence(p) === 'yearly')
   const parts: string[] = []
-  if (monthly) parts.push(formatPackagePrice(monthly, 'monthly'))
-  if (yearly) parts.push(formatPackagePrice(yearly, 'yearly'))
+  if (monthly) parts.push(formatPackageDisplayPrice(monthly, role, 'monthly').text)
+  if (yearly) parts.push(formatPackageDisplayPrice(yearly, role, 'yearly').text)
   return parts.length ? parts.join(' · ') : null
 }
 
-/** Hint when device locale suggests EUR but App Store storefront returns USD (common in US sandbox testers). */
-export function storeCurrencyRegionHint(productCurrency: string): string | null {
+/** Hint when StoreKit currency does not match device region (common in TestFlight/Sandbox). */
+export function storeCurrencyRegionHint(
+  productCurrency: string,
+  opts?: { usesCatalogFallback?: boolean }
+): string | null {
+  if (opts?.usesCatalogFallback) {
+    return 'TestFlight often shows USD in the app; the Apple payment sheet shows your real price (e.g. €8.99 in Germany).'
+  }
   const expected = expectedCurrencyForDeviceLocale()
   const actual = (productCurrency || '').toUpperCase()
   if (!expected || !actual || actual === expected) return null

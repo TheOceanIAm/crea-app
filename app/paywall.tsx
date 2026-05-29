@@ -35,7 +35,8 @@ import {
   purchasesUnavailableUserMessage,
 } from '@/lib/revenuecat/purchasesEnvironment'
 import {
-  formatStoreProductPrice,
+  formatPackageDisplayPrice,
+  packageCadence,
   storeCurrencyRegionHint,
 } from '@/lib/revenuecat/storeProductPrice'
 
@@ -143,11 +144,20 @@ export default function PaywallScreen() {
     return filterPackagesForRole(packages, role === 'company' ? 'company' : 'freelancer')
   }, [packages, role])
 
+  const usesCatalogPriceFallback = useMemo(() => {
+    if (!role || !availableOptions.length) return false
+    return availableOptions.some((pkg) => {
+      const cadence = packageCadence(pkg)
+      if (cadence === 'other') return false
+      return formatPackageDisplayPrice(pkg, role, cadence).usesCatalogFallback
+    })
+  }, [availableOptions, role])
+
   const currencyHint = useMemo(() => {
     const sample = availableOptions[0]?.product
     if (!sample?.currencyCode) return null
-    return storeCurrencyRegionHint(sample.currencyCode)
-  }, [availableOptions])
+    return storeCurrencyRegionHint(sample.currencyCode, { usesCatalogFallback: usesCatalogPriceFallback })
+  }, [availableOptions, usesCatalogPriceFallback])
 
   useEffect(() => {
     if (!availableOptions.length) {
@@ -292,7 +302,11 @@ export default function PaywallScreen() {
                       {type.includes('annual') || type.includes('year') ? 'Auto-renewing yearly' : 'Auto-renewing monthly'}
                     </Text>
                   </View>
-                  <Text style={styles.optionPrice}>{formatStoreProductPrice(pkg.product)}</Text>
+                  <Text style={styles.optionPrice}>
+                    {role && packageCadence(pkg) !== 'other'
+                      ? formatPackageDisplayPrice(pkg, role, packageCadence(pkg) as 'monthly' | 'yearly').text
+                      : '—'}
+                  </Text>
                 </TouchableOpacity>
               )
             })}

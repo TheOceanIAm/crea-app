@@ -28,7 +28,7 @@ export function useAppStorePlanPrices(role: 'freelancer' | 'company' | '') {
         setPriceLine(null)
         return
       }
-      setPriceLine(formatMonthlyYearlyPriceLine(packages))
+      setPriceLine(formatMonthlyYearlyPriceLine(packages, role))
     } catch {
       setPriceLine(null)
     } finally {
