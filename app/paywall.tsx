@@ -138,6 +138,7 @@ export default function PaywallScreen() {
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null)
   const [restoring, setRestoring] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
 
   const storeRole: PaywallRole = role === 'company' ? 'company' : 'freelancer'
   const planCards = useMemo(() => (role === 'company' ? COMPANY_PLANS : FREELANCER_PLANS), [role])
@@ -176,9 +177,11 @@ export default function PaywallScreen() {
         data: { user },
       } = await supabase.auth.getUser()
       if (!user) {
+        setIsLoggedIn(false)
         setRole('freelancer')
         return
       }
+      setIsLoggedIn(true)
       const roleHint = resolveAppRole(user.user_metadata?.role, user)
       if (roleHint === 'company') setRole('company')
       const { data: pr } = await supabase
@@ -459,12 +462,22 @@ export default function PaywallScreen() {
             </Text>
 
             <View style={styles.legalLinks}>
-              <SubscriptionLegalLinks onRestore={() => void restore()} restoring={restoring} />
+              <SubscriptionLegalLinks
+                layout="stack"
+                onRestore={() => void restore()}
+                restoring={restoring}
+              />
             </View>
 
-            <TouchableOpacity onPress={() => router.push('/login')} hitSlop={8}>
-              <Text style={styles.loginLink}>Already have an account? Log in</Text>
-            </TouchableOpacity>
+            {!isLoggedIn ? (
+              <TouchableOpacity
+                style={styles.loginBtn}
+                onPress={() => router.push('/login')}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.loginLink}>Already have an account? Log in</Text>
+              </TouchableOpacity>
+            ) : null}
           </ScrollView>
         )}
       </View>
@@ -522,7 +535,7 @@ const styles = StyleSheet.create({
     marginTop: -20,
     overflow: 'hidden',
   },
-  sheetScroll: { paddingHorizontal: 22, paddingTop: 22, paddingBottom: 8 },
+  sheetScroll: { paddingHorizontal: 22, paddingTop: 22, paddingBottom: 24 },
   sheetCentered: {
     flex: 1,
     alignItems: 'center',
@@ -628,14 +641,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   legalLinks: {
-    marginTop: 12,
+    marginTop: 14,
+    marginBottom: 4,
+  },
+  loginBtn: {
+    alignSelf: 'center',
+    marginTop: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
   },
   loginLink: {
     color: 'rgba(10,10,10,0.55)',
     fontSize: 15,
     textAlign: 'center',
-    marginTop: 16,
-    marginBottom: 4,
     fontWeight: '500',
   },
 })
