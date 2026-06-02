@@ -20,7 +20,7 @@ export function getWebAuthConfirmRedirectUrl(): string | null {
   return `${base.replace(/\/$/, '')}/auth/confirm`
 }
 
-/** Open a path on the Crea web app (company contracts, Crea Pay, etc.). */
+/** Open a path on the Crea web app (company contracts, invoice payment, etc.). */
 export async function openCreaWebPath(path: string): Promise<boolean> {
   const base = getCreaWebBaseUrl().trim().replace(/\/$/, '')
   if (!base) return false
@@ -42,41 +42,12 @@ export function openProjectOnWeb(projectId: string, path = ''): void {
   Linking.openURL(`${base}/projects/${projectId}${suffix}`).catch(() => {})
 }
 
-/** Optional override for dedicated payment route, otherwise falls back to web invoice detail. */
-export function getCreaPayBaseUrl(): string {
-  return (process.env.EXPO_PUBLIC_CREA_PAY_URL || '').replace(/\/$/, '')
-}
-
-/** Opens CREA Pay for a specific invoice in the web app. */
+/** Opens invoice payment on creaservices.de (web-only). */
 export async function openInvoicePayOnWeb(invoiceId: string): Promise<boolean> {
-  const payBase = getCreaPayBaseUrl()
   const webBase = getCreaWebBaseUrl()
-  const target = payBase
-    ? `${payBase}/invoices/${invoiceId}`
-    : webBase
-      ? `${webBase}/invoices/${invoiceId}?pay=1`
-      : ''
-  if (!target) return false
+  if (!webBase) return false
   try {
-    await Linking.openURL(target)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** Opens CREA Pay with Apple Pay preselection hint (handled by web if supported). */
-export async function openInvoiceApplePayOnWeb(invoiceId: string): Promise<boolean> {
-  const payBase = getCreaPayBaseUrl()
-  const webBase = getCreaWebBaseUrl()
-  const target = payBase
-    ? `${payBase}/invoices/${invoiceId}?method=apple_pay`
-    : webBase
-      ? `${webBase}/invoices/${invoiceId}?pay=1&method=apple_pay`
-      : ''
-  if (!target) return false
-  try {
-    await Linking.openURL(target)
+    await Linking.openURL(`${webBase}/invoices/${invoiceId}?pay=1`)
     return true
   } catch {
     return false

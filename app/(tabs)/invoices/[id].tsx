@@ -8,24 +8,15 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
-  Linking,
-  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import * as Device from 'expo-device'
 import { useFocusEffect } from '@react-navigation/native'
 import { ChevronLeft } from 'lucide-react-native'
-import { useStripe, PlatformPay } from '@stripe/stripe-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isCeoProfile, resolveAppRole } from '@/lib/profileRole'
-import {
-  getCreaPayBaseUrl,
-  getCreaWebBaseUrl,
-  openInvoiceApplePayOnWeb,
-  openInvoicePayOnWeb,
-} from '@/lib/creaWeb'
+import { getCreaWebBaseUrl, openInvoicePayOnWeb } from '@/lib/creaWeb'
 import {
   formatDate,
   formatDateTime,
@@ -35,72 +26,6 @@ import {
 } from '@/lib/invoiceFormatting'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
-
-/** Matches StripeProvider urlScheme (`crea` in app.json); required on iOS for redirect-capable Payment Sheet methods / 3DS. */
-const STRIPE_IOS_RETURN_URL = 'crea://stripe-redirect'
-
-const CREA_API_FETCH_MS = 38_000
-/** Hosted checkout: Vercel cold start + Stripe Connect + Checkout session — allow generous budgets. */
-const CREA_CHECKOUT_FETCH_MS = 120_000
-const CREA_CHECKOUT_RETRY_MS = 90_000
-const CREA_CHECKOUT_FINAL_MS = 75_000
-const STRIPE_APPLE_PAY_CHECK_MS = 12_000
-const STRIPE_INIT_SHEET_MS = 45_000
-const STRIPE_PRESENT_SHEET_MS = 120_000
-const STRIPE_APPLE_PAY_CONFIRM_MS = 120_000
-
-/** Prevents a stuck Pay button when network / native Stripe calls never settle. */
-async function fetchWithTimeoutMs(url: string, init: RequestInit, ms: number): Promise<Response> {
-  const ac = new AbortController()
-  const tid = setTimeout(() => ac.abort(), ms)
-  try {
-    return await fetch(url, { ...init, signal: ac.signal })
-  } finally {
-    clearTimeout(tid)
-  }
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let tid: ReturnType<typeof setTimeout> | undefined
-  const expired = new Promise<T>((_, reject) => {
-    tid = setTimeout(
-      () =>
-        reject(new Error(`${label} timed out (${Math.round(ms / 1000)}s). Try again or use browser checkout.`)),
-      ms
-    )
-  })
-  return Promise.race([
-    promise.finally(() => {
-      if (tid !== undefined) clearTimeout(tid)
-    }),
-    expired,
-  ])
-}
-
-/**
- * Prefer Stripe Checkout (browser) instead of native Payment Sheet on simulators/emulators where
- * `Device.isDevice` can be unreliable and Apple Pay / the sheet often fail or hang.
- */
-function prefersHostedCreaPayOverNativeSheet(): boolean {
-  if (!Device.isDevice) return true
-  const model = `${Device.modelName ?? ''} ${Device.designName ?? ''}`.toLowerCase()
-  const product = `${Device.productName ?? ''}`.toLowerCase()
-  return /simulator|emulator|sdk_gphone|sdk_phone|generic_x86|genymotion/.test(
-    `${model} ${product}`
-  )
-}
-
-/** Stripe Hosted Checkout session URLs — reject accidental non-Stripe redirects. */
-function isStripeHostedCheckoutUrl(candidate: string): boolean {
-  try {
-    const u = new URL(candidate.trim())
-    if (u.protocol !== 'https:') return false
-    const host = u.hostname.toLowerCase()
-    return host === 'checkout.stripe.com' || host.endsWith('.checkout.stripe.com')
-  } catch {
-    return false
-  }
-}
 
 type InvoiceRecord = Record<string, unknown> & { id: string; status?: string }
 
@@ -211,8 +136,6 @@ export default function InvoiceDetailScreen() {
   const [lastPaymentCheckAt, setLastPaymentCheckAt] = useState<Date | null>(null)
   const pollAttemptsRef = useRef(0)
   const MAX_PAYMENT_SYNC_POLLS = 20
-  const { initPaymentSheet, presentPaymentSheet, isPlatformPaySupported, confirmPlatformPayPayment } = useStripe()
-  type PlatformPaySupportArg = Parameters<typeof isPlatformPaySupported>[0]
 
   const load = useCallback(async () => {
     if (!id || typeof id !== 'string') {
@@ -374,10 +297,10 @@ export default function InvoiceDetailScreen() {
     void (async () => {
       setReceivedBusy(true)
       try {
-        const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
+        const base = getCreaWebBaseUrl()
         if (!base) {
           Alert.alert(
-            'Missing CREA web URL',
+            'Missing web URL',
             'Set EXPO_PUBLIC_CREA_WEB_URL in crea-app/.env.local, restart Expo with npx expo start --clear.'
           )
           return
@@ -425,449 +348,29 @@ export default function InvoiceDetailScreen() {
     })()
   }
 
-  /** Hosted Stripe Checkout — primary on simulator/emulator where native Payment Sheet is unreliable. */
-  const runHostedStripeCheckout = async (preferApplePay: boolean): Promise<void> => {
-    if (!id || typeof id !== 'string') return
-
-    const fallbackOpen = async (): Promise<boolean> => {
-      const ok = preferApplePay ? await openInvoiceApplePayOnWeb(id) : await openInvoicePayOnWeb(id)
-      if (!ok) {
-        Alert.alert(
-          'Payment unavailable',
-          'Could not open the payment page (browser). Check EXPO_PUBLIC_CREA_WEB_URL, or try again.'
-        )
-        return false
-      }
-      setPaymentSyncPending(true)
-      setPaymentSyncTimedOut(false)
-      pollAttemptsRef.current = 0
-      return true
-    }
-
-    /** Never auto-open CREA invoice in Safari (no cookie): that often redirects to the homepage — user must tap to open and sign in. */
-    const offerOpenInvoiceOnWebsite = (title: string, message: string) => {
-      Alert.alert(title, message, [
-        { text: 'OK', style: 'cancel' },
-        {
-          text: 'Open invoice on website',
-          onPress: () => {
-            void (async () => {
-              await fallbackOpen()
-            })()
-          },
-        },
-      ])
-    }
-
-    try {
-      const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
-      if (!base) {
-        Alert.alert(
-          'Configuration',
-          'Set EXPO_PUBLIC_CREA_WEB_URL in crea-app/.env.local (e.g. https://www.creaservices.de), restart Expo.'
-        )
-        return
-      }
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      const token = session?.access_token
-      if (!token) {
-        offerOpenInvoiceOnWebsite(
-          'Session expired',
-          'Please sign in again in the app. To pay on the website, tap below and log in — then Pay on the invoice page.'
-        )
-        return
-      }
-      const checkoutInit: RequestInit = {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          invoiceId: id,
-          paymentMethodHint: preferApplePay ? 'apple_pay' : 'card',
-        }),
-      }
-      const checkoutUrl = `${base}/api/stripe/crea-pay/checkout`
-
-      let res: Response
-      try {
-        const timeouts = [CREA_CHECKOUT_FETCH_MS, CREA_CHECKOUT_RETRY_MS, CREA_CHECKOUT_FINAL_MS]
-        let lastFe: unknown
-        let got: Response | undefined
-        for (let attempt = 0; attempt < timeouts.length; attempt++) {
-          try {
-            got = await fetchWithTimeoutMs(checkoutUrl, checkoutInit, timeouts[attempt])
-            break
-          } catch (fe) {
-            lastFe = fe
-            const aborted =
-              fe instanceof Error && /aborted|abort/i.test(fe.message + (fe as Error).name)
-            if (!aborted) throw fe
-            if (attempt < timeouts.length - 1) {
-              await new Promise((r) => setTimeout(r, 900 * (attempt + 1)))
-            }
-          }
-        }
-        if (!got) throw lastFe
-        res = got
-      } catch (fe) {
-        const aborted =
-          fe instanceof Error && /aborted|abort/i.test(fe.message + (fe as Error).name)
-        offerOpenInvoiceOnWebsite(
-          'CREA Pay (checkout)',
-          aborted
-            ? 'The checkout request took too long (server cold start or slow network). Try Pay now again. If it keeps failing, check EXPO_PUBLIC_CREA_WEB_URL (e.g. https://www.creaservices.de) and your connection. You can open the invoice on the website after signing in there.'
-            : fe instanceof Error
-              ? fe.message
-              : 'Network error.'
-        )
-        return
-      }
-      const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string; code?: string }
-      if (!res.ok || !json.url) {
-        const msg =
-          (typeof json.error === 'string' && json.error.trim()) ||
-          `Could not start Stripe checkout (${res.status}).`
-        Alert.alert('CREA Pay (checkout)', msg, [
-          { text: 'OK', style: 'cancel' },
-          {
-            text: 'Open invoice on website',
-            onPress: () => {
-              void (async () => {
-                await fallbackOpen()
-              })()
-            },
-          },
-        ])
-        return
-      }
-      const url = String(json.url || '').trim()
-      if (!url || !isStripeHostedCheckoutUrl(url)) {
-        offerOpenInvoiceOnWebsite(
-          'Checkout link unavailable',
-          'Expected a Stripe Checkout link but got something else. Try Pay now again after a moment or pay signed in on the website.'
-        )
-        return
-      }
-      try {
-        await Linking.openURL(url)
-        setPaymentSyncPending(true)
-        setPaymentSyncTimedOut(false)
-        pollAttemptsRef.current = 0
-      } catch (linkErr) {
-        Alert.alert(
-          'Could not open Stripe',
-          linkErr instanceof Error
-            ? linkErr.message
-            : 'Safari/checkout did not open. Try again or pay on creaservices.de in your browser.',
-          [
-            { text: 'OK', style: 'cancel' },
-            {
-              text: 'Open invoice on website',
-              onPress: () => {
-                void (async () => {
-                  await fallbackOpen()
-                })()
-              },
-            },
-          ]
-        )
-      }
-    } catch (e) {
-      offerOpenInvoiceOnWebsite(
-        'Payment failed',
-        e instanceof Error ? e.message : 'Could not open Stripe checkout.'
-      )
-    }
-  }
-
-  const startCheckout = (preferApplePay: boolean) => {
-    void runHostedStripeCheckout(preferApplePay)
-  }
-
-  const openCreaPay = () => {
+  const payOnWeb = () => {
     if (!id || typeof id !== 'string') return
     void (async () => {
       setPayBusy(true)
       try {
-        if (prefersHostedCreaPayOverNativeSheet()) {
-          await runHostedStripeCheckout(false)
-          return
-        }
-        const pk = (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim()
-        if (!pk) {
+        const ok = await openInvoicePayOnWeb(id)
+        if (!ok) {
           Alert.alert(
-            'Stripe not configured',
-            'Add EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY to crea-app/.env.local (your pk_live_… from Stripe), restart Expo (stop + npx expo start --clear), then try again. Opening browser checkout instead…'
+            'Pay on web',
+            'Set EXPO_PUBLIC_CREA_WEB_URL (e.g. https://www.creaservices.de), or open this invoice on creaservices.de in your browser.'
           )
-          startCheckout(false)
-          return
-        }
-
-        const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
-        if (!base) {
-          Alert.alert(
-            'Missing CREA web URL',
-            'Set EXPO_PUBLIC_CREA_WEB_URL in crea-app/.env.local (e.g. https://www.creaservices.de), restart Expo with npx expo start --clear.'
-          )
-          return
-        }
-        const {
-          data: { session },
-        } = await supabase.auth.getSession()
-        const token = session?.access_token
-        if (!token) {
-          Alert.alert('Session expired', 'Please sign in again to continue payment.')
-          return
-        }
-        let createRes: Response
-        try {
-          createRes = await fetchWithTimeoutMs(
-            `${base}/api/stripe/crea-pay/mobile-intent`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ invoiceId: id }),
-            },
-            CREA_API_FETCH_MS
-          )
-        } catch (fe) {
-          const aborted =
-            fe instanceof Error && /aborted|abort/i.test(fe.message + (fe as Error).name)
-          if (aborted) {
-            await runHostedStripeCheckout(false)
-            return
-          }
-          throw new Error(fe instanceof Error ? fe.message : 'Network error')
-        }
-        const createJson = (await createRes.json().catch(() => ({}))) as {
-          clientSecret?: string
-          customerName?: string
-          amountCents?: number
-          currency?: string
-          error?: string
-          code?: string
-        }
-        if (!createRes.ok || !createJson.clientSecret) {
-          Alert.alert(
-            'CREA Pay (app)',
-            createJson.error?.trim()
-              ? createJson.error
-              : `Could not start payment in the app (${createRes.status}). Opening browser checkout if possible…`
-          )
-          startCheckout(false)
-          return
-        }
-
-        let appleOk = false
-        if (Platform.OS === 'ios') {
-          try {
-            appleOk = await withTimeout(
-              isPlatformPaySupported({
-                applePay: { merchantCountryCode: 'DE' },
-              } as PlatformPaySupportArg),
-              STRIPE_APPLE_PAY_CHECK_MS,
-              'Apple Pay check'
-            )
-          } catch {
-            appleOk = false
-          }
-        }
-        const init = await withTimeout(
-          initPaymentSheet({
-            merchantDisplayName: 'CREA',
-            paymentIntentClientSecret: createJson.clientSecret,
-            ...(Platform.OS === 'ios' ? { returnURL: STRIPE_IOS_RETURN_URL } : {}),
-            ...(appleOk ? { applePay: { merchantCountryCode: 'DE' } } : {}),
-            defaultBillingDetails: createJson.customerName
-              ? {
-                  name: createJson.customerName,
-                }
-              : undefined,
-          }),
-          STRIPE_INIT_SHEET_MS,
-          'Stripe payment sheet'
-        )
-        if (init.error) {
-          Alert.alert(
-            'Stripe Payment Sheet',
-            `${init.error.message ?? 'Could not initialize payment sheet.'}\n\nOpening browser checkout instead…`
-          )
-          startCheckout(false)
-          return
-        }
-
-        const present = await withTimeout(presentPaymentSheet(), STRIPE_PRESENT_SHEET_MS, 'Payment confirmation')
-        if (present.error) {
-          // User cancel should not throw a hard error.
-          if (present.error.code && String(present.error.code).toLowerCase().includes('canceled')) return
-          Alert.alert(
-            'Payment',
-            `${present.error.message ?? 'Payment sheet closed.'}\n\nYou can try again or use browser checkout.`
-          )
-          startCheckout(false)
           return
         }
         setPaymentSyncPending(true)
         setPaymentSyncTimedOut(false)
         pollAttemptsRef.current = 0
-      } catch (e) {
-        await runHostedStripeCheckout(false)
       } finally {
         setPayBusy(false)
       }
     })()
   }
 
-  const openApplePayQuick = () => {
-    if (!id || typeof id !== 'string') return
-    void (async () => {
-      setPayBusy(true)
-      try {
-        if (prefersHostedCreaPayOverNativeSheet()) {
-          await runHostedStripeCheckout(true)
-          return
-        }
-        const pk = (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim()
-        if (!pk) {
-          Alert.alert(
-            'Stripe not configured',
-            'Apple Pay uses the same native Stripe setup as Pay now. Add EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY to .env.local and restart Expo. Opening browser checkout…'
-          )
-          startCheckout(true)
-          return
-        }
-
-        try {
-        const base = getCreaWebBaseUrl() || getCreaPayBaseUrl()
-        if (!base) {
-          Alert.alert(
-            'Configuration',
-            'Set EXPO_PUBLIC_CREA_WEB_URL so we can reach creaservices.de for CREA Pay.'
-          )
-          return
-        }
-        const {
-          data: { session },
-        } = await supabase.auth.getSession()
-        const token = session?.access_token
-        if (!token) {
-          Alert.alert('Session expired', 'Please sign in again to continue payment.')
-          return
-        }
-        let createRes: Response
-        try {
-          createRes = await fetchWithTimeoutMs(
-            `${base}/api/stripe/crea-pay/mobile-intent`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ invoiceId: id }),
-            },
-            CREA_API_FETCH_MS
-          )
-        } catch (fe) {
-          const aborted =
-            fe instanceof Error && /aborted|abort/i.test(fe.message + (fe as Error).name)
-          if (aborted) {
-            await runHostedStripeCheckout(true)
-            return
-          }
-          throw new Error(fe instanceof Error ? fe.message : 'Network error')
-        }
-        const createJson = (await createRes.json().catch(() => ({}))) as {
-          clientSecret?: string
-          amountCents?: number
-          currency?: string
-          error?: string
-        }
-        if (!createRes.ok || !createJson.clientSecret) {
-          Alert.alert(
-            'CREA Pay (Apple Pay)',
-            createJson.error?.trim()
-              ? createJson.error
-              : `Could not start Apple Pay (${createRes.status}). Trying browser checkout…`
-          )
-          startCheckout(true)
-          return
-        }
-
-        let platformSupported = false
-        try {
-          platformSupported = await withTimeout(
-            isPlatformPaySupported({
-              applePay: { merchantCountryCode: 'DE' },
-            } as PlatformPaySupportArg),
-            STRIPE_APPLE_PAY_CHECK_MS,
-            'Apple Pay check'
-          )
-        } catch {
-          platformSupported = false
-        }
-        if (!platformSupported) {
-          const hint =
-            Platform.OS === 'ios'
-              ? 'The iOS Simulator usually has no usable Apple Wallet for Apple Pay. On a real iPhone, add a card to Wallet — or use Pay now below for cards.'
-              : 'Apple Pay is not supported on this device. Use Pay now (card payment sheet) or checkout in your browser.'
-          Alert.alert('Apple Pay not available', `${hint}`, [
-            { text: 'Use card sheet', style: 'default', onPress: () => openCreaPay() },
-            {
-              text: 'Browser checkout',
-              style: 'cancel',
-              onPress: () => startCheckout(false),
-            },
-          ])
-          return
-        }
-
-        const amount = ((createJson.amountCents ?? 0) / 100).toFixed(2)
-        const confirm = await withTimeout(
-          confirmPlatformPayPayment(createJson.clientSecret, {
-            applePay: {
-              merchantCountryCode: 'DE',
-              currencyCode: (createJson.currency || 'EUR').toUpperCase(),
-              cartItems: [{ label: 'CREA invoice', amount, paymentType: PlatformPay.PaymentType.Immediate }],
-            },
-          }),
-          STRIPE_APPLE_PAY_CONFIRM_MS,
-          'Apple Pay'
-        )
-        if (confirm.error) {
-          if (confirm.error.code && String(confirm.error.code).toLowerCase().includes('canceled')) return
-          Alert.alert(
-            confirm.error.localizedMessage || 'Apple Pay',
-            confirm.error.message ?? 'Apple Pay could not finish. You can pay with card or in the browser.',
-            [
-              { text: 'Card sheet', onPress: () => openCreaPay() },
-              { text: 'Browser', style: 'cancel', onPress: () => startCheckout(false) },
-            ]
-          )
-          return
-        }
-
-        setPaymentSyncPending(true)
-        setPaymentSyncTimedOut(false)
-        pollAttemptsRef.current = 0
-      } catch (e) {
-        await runHostedStripeCheckout(true)
-      }
-      } finally {
-        setPayBusy(false)
-      }
-    })()
-  }
-
-  useEffect(() => {
+    useEffect(() => {
     if (!paymentSyncPending) return
     const timer = setInterval(() => {
       void (async () => {
@@ -960,7 +463,7 @@ export default function InvoiceDetailScreen() {
   const versionNo = num(invoice.version_no) ?? 1
   const isLatest = invoice.is_latest !== false
   const receiptConfirmed = hasConfirmedReceipt(invoice)
-  const creaPayReady = isLatest && receiptConfirmed
+  const canPayOnWeb = isLatest && receiptConfirmed
 
   const descriptionDisplay =
     str(invoice.description)?.trim() ||
@@ -1050,13 +553,12 @@ export default function InvoiceDetailScreen() {
                       )}
                     </TouchableOpacity>
                     <Text style={styles.receiptHint}>
-                      Confirm on CREA that you received this invoice. CREA Pay card and Apple Pay unlock after this
-                      step (same rule as on the website).
+                      Confirm that you received this invoice. Payment on creaservices.de unlocks after this step.
                     </Text>
                   </>
                 ) : null}
                 {isLatest && receiptConfirmed ? (
-                  <Text style={styles.receiptOkHint}>Receipt confirmed — you can pay with CREA Pay below.</Text>
+                  <Text style={styles.receiptOkHint}>Receipt confirmed — pay on the website below.</Text>
                 ) : null}
                 {!isLatest ? (
                   <Text style={styles.receiptHint}>
@@ -1066,31 +568,23 @@ export default function InvoiceDetailScreen() {
                 <TouchableOpacity
                   style={[
                     styles.actionBtnPrimary,
-                    (payBusy || statusBusy || !creaPayReady) && styles.dim,
+                    (payBusy || statusBusy || !canPayOnWeb) && styles.dim,
                   ]}
-                  disabled={payBusy || statusBusy || !creaPayReady}
-                  onPress={openCreaPay}
+                  disabled={payBusy || statusBusy || !canPayOnWeb}
+                  onPress={payOnWeb}
                 >
                   {payBusy ? (
                     <ActivityIndicator color="#0a0a0a" />
                   ) : (
-                    <Text style={styles.actionBtnPrimaryText}>Pay now (recommended)</Text>
+                    <Text style={styles.actionBtnPrimaryText}>Pay on website</Text>
                   )}
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionBtn, (payBusy || statusBusy || !creaPayReady) && styles.dim]}
-                  disabled={payBusy || statusBusy || !creaPayReady}
-                  onPress={openApplePayQuick}
-                >
-                  <Text style={styles.actionBtnText}>Quick pay with Apple Pay</Text>
-                </TouchableOpacity>
                 <Text style={styles.flowHint}>
-                  Pay now takes you to Stripe to finish payment: on a real phone or tablet you get the in-app payment
-                  sheet (cards and more). On a simulator or emulator we open Stripe Checkout in the system browser
-                  instead. Quick pay with Apple Pay only works where Wallet supports Apple Pay; otherwise use Pay now.
+                  Opens creaservices.de in your browser (sign in if needed). Return here and tap refresh if status does
+                  not update automatically.
                 </Text>
                 {paymentSyncPending ? (
-                  <Text style={styles.syncHint}>Waiting for CREA Pay confirmation…</Text>
+                  <Text style={styles.syncHint}>Waiting for payment confirmation on the website…</Text>
                 ) : null}
                 {paymentSyncTimedOut ? (
                   <View style={styles.syncCard}>
@@ -1122,7 +616,7 @@ export default function InvoiceDetailScreen() {
               </>
             )}
             {status === 'paid' ? (
-              <Text style={styles.paidHint}>Paid via CREA Pay or manual confirmation.</Text>
+              <Text style={styles.paidHint}>Paid on the website or marked manually.</Text>
             ) : null}
             <TouchableOpacity
               style={[styles.deleteBtn, deleteBusy && styles.dim]}

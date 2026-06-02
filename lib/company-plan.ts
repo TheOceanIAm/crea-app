@@ -27,10 +27,6 @@ export function companyCanReviewApplications(plan: ResolvedCompanyPlan): boolean
   return isCompanyPro(plan)
 }
 
-export function companyHasBryterAndAxa(plan: ResolvedCompanyPlan): boolean {
-  return plan === 'pro'
-}
-
 export function companyHasAccountingIntegrations(plan: ResolvedCompanyPlan): boolean {
   return plan === 'pro'
 }

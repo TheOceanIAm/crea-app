@@ -363,13 +363,6 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="company-hub"
-          options={{
-            href: null,
-            title: 'Company tools',
-          }}
-        />
-        <Tabs.Screen
           name="company-post-job"
           options={{
             href: null,

@@ -98,6 +98,7 @@ import { storeCurrencyRegionHint } from '@/lib/revenuecat/storeProductPrice'
 import { formatCatalogPrice } from '@/lib/planCatalogPrices'
 import { postTrialPlan } from '@/lib/trialPlanApi'
 import { setBillingNotice } from '@/lib/billingNotice'
+import { openCreaServicesStripeUrl } from '@/lib/stripeWebCheckout'
 import {
   fetchFreelancerStripeConnectFromSupabase,
   fetchFreelancerStripeConnectStatus,
@@ -105,7 +106,6 @@ import {
   openFreelancerStripeConnectOnboarding,
   type FreelancerStripeConnectStatus,
 } from '@/lib/freelancerStripeConnect'
-import { openCreaServicesStripeUrl } from '@/lib/stripeWebCheckout'
 import {
   computeCompanyProfileCompletion,
   computeFreelancerProfileCompletion,
@@ -321,15 +321,16 @@ export default function ProfileScreen() {
   const [vatRegistered, setVatRegistered] = useState(false)
   const [savingInvoice, setSavingInvoice] = useState(false)
 
-  const [connectStatusLoading, setConnectStatusLoading] = useState(false)
-  const [connectStatusError, setConnectStatusError] = useState<string | null>(null)
-  const [connectStatus, setConnectStatus] = useState<FreelancerStripeConnectStatus | null>(null)
-  const [connectBusy, setConnectBusy] = useState(false)
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false)
 
   const [notif, setNotif] = useState<NotificationSettings>({ ...DEFAULT_NOTIFICATION_SETTINGS })
   const [savingNotif, setSavingNotif] = useState(false)
   const [registeringPush, setRegisteringPush] = useState(false)
+
+  const [connectStatusLoading, setConnectStatusLoading] = useState(false)
+  const [connectStatusError, setConnectStatusError] = useState<string | null>(null)
+  const [connectStatus, setConnectStatus] = useState<FreelancerStripeConnectStatus | null>(null)
+  const [connectBusy, setConnectBusy] = useState(false)
 
   const [subscriptionTier, setSubscriptionTier] = useState<'free' | 'pro'>('free')
   /** ISO from `profiles.trial_ends_at` — platform exploration end (same as web). */
@@ -1878,10 +1879,10 @@ export default function ProfileScreen() {
               </View>
 
               <View style={styles.sectionCard}>
-                <Text style={styles.cardTitle}>CREA Pay — Stripe payouts</Text>
+                <Text style={styles.cardTitle}>Stripe payouts</Text>
                 <Text style={styles.cardSubtitle}>
-                  Connect your bank through Stripe for in-app card payouts. Your IBAN below is still used for manual
-                  transfers and PDF invoices.
+                  Connect your bank through Stripe for card payouts when clients pay on the web. Your IBAN below is
+                  still used for manual transfers and PDF invoices.
                 </Text>
                 {connectStatusLoading ? (
                   <ActivityIndicator color="#FFDC00" style={styles.connectSpinner} />
@@ -1922,6 +1923,7 @@ export default function ProfileScreen() {
                       setConnectBusy(true)
                       await openFreelancerStripeConnectOnboarding()
                       setConnectBusy(false)
+                      void loadStripeConnectStatus()
                     })()
                   }
                 >
@@ -2405,7 +2407,7 @@ export default function ProfileScreen() {
                             <View style={styles.notifyBlockText}>
                               <Text style={styles.notifyBlockTitle}>Client confirmed receipt</Text>
                               <Text style={styles.notifyBlockSub}>
-                                When a client acknowledges your invoice before paying (CREA Pay).
+                                When a client acknowledges your invoice before paying on the website.
                               </Text>
                             </View>
                             <Switch

@@ -3,15 +3,12 @@ import {
   Briefcase,
   CalendarDays,
   ClipboardList,
-  FileText,
   Layers,
   MessageCircle,
   PlusCircle,
   Receipt,
   Settings2,
-  Shield,
   Users,
-  Wallet,
 } from 'lucide-react-native'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
@@ -46,7 +43,7 @@ export type DashboardQuickAction = {
   label: string
   icon: LucideIcon
   href?: `/(tabs)/${string}`
-  /** Company-only tools that live on the web app (contracts, Crea Pay, …). */
+  /** Company-only tools that live on the web app (e.g. contracts). */
   webPath?: string
   disabled?: boolean
   hint?: string
@@ -143,8 +140,6 @@ export function quickActionsForRole(
   opts?: { freelancerPlan?: FreelancerPlan; companyPlan?: CompanySubscriptionPlanDb }
 ): DashboardQuickAction[] {
   if (isCompanyProfile(role ?? undefined)) {
-    const plan = opts?.companyPlan ?? 'free'
-    const businessPlus = isCompanyPro(plan)
     return [
       { label: 'Post project', icon: PlusCircle, href: '/(tabs)/company-post-job' },
       { label: 'Applications', icon: ClipboardList, href: '/(tabs)/company-applications' },
@@ -152,16 +147,6 @@ export function quickActionsForRole(
       { label: 'Talent pool', icon: Users, href: '/(tabs)/talent-pool' },
       { label: 'Messages', icon: MessageCircle, href: '/(tabs)/messages' },
       { label: 'Invoices', icon: Receipt, href: '/(tabs)/invoices' },
-      { label: 'Hiring tools', icon: Layers, href: '/(tabs)/company-hub' },
-      { label: 'Contracts', icon: FileText, webPath: '/resources' },
-      { label: 'Crea Pay', icon: Wallet, webPath: '/company-dashboard/payments' },
-      {
-        label: 'Legal partners',
-        icon: Shield,
-        webPath: '/company-dashboard/partners',
-        disabled: !businessPlus,
-        hint: businessPlus ? undefined : 'Pro plan',
-      },
       { label: 'Settings', icon: Settings2, href: '/(tabs)/profile' },
     ]
   }

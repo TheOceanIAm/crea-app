@@ -25,7 +25,7 @@ export type NotificationSettings = {
   pushJobMatch: boolean
   pushMessage: boolean
   pushInvoicePaid: boolean
-  /** Freelancer: client confirmed invoice receipt before paying (CREA Pay). */
+  /** Freelancer: client confirmed invoice receipt before paying on the web. */
   pushInvoiceReceiptConfirmed: boolean
   pushNewApplication: boolean
   pushInvoiceReceived: boolean

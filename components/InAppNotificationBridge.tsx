@@ -160,7 +160,7 @@ export function InAppNotificationBridge() {
             Alert.alert(
               'Invoice receipt confirmed',
               lab
-                ? `Your client confirmed receipt of «${lab}». They can continue with CREA Pay.`
+                ? `Your client confirmed receipt of «${lab}». They can pay on creaservices.de.`
                 : 'Your client confirmed receipt of your invoice.',
               [
                 { text: 'View invoice', onPress: () => router.push(`/(tabs)/invoices/${invId}`) },
