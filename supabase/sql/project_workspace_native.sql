@@ -253,6 +253,7 @@ create table if not exists public.project_milestones (
   title text not null,
   sort_order int not null default 0,
   completed boolean not null default false,
+  scheduled_at timestamptz,
   created_at timestamptz not null default now()
 );
 
