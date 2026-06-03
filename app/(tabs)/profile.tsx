@@ -116,6 +116,7 @@ import {
 import { PlatformTrialBar } from '@/components/PlatformTrialBar'
 import {
   isWithinPlatformTrialPeriod,
+  PLATFORM_TRIAL_DAYS,
   platformTrialDaysLeft,
 } from '@/lib/platformTrial'
 
@@ -2109,7 +2110,8 @@ export default function ProfileScreen() {
               <View style={styles.sectionCard}>
                 <Text style={styles.cardTitle}>Plan</Text>
                 <Text style={styles.cardSubtitle}>
-                  Free or Pro — subscribe in the app with Apple In-App Purchase (same entitlements as creaservices.de).
+                  {PLATFORM_TRIAL_DAYS}-day Pro trial, then Free or subscribe to Pro via Apple In-App Purchase (same as
+                  creaservices.de).
                 </Text>
 
                 <CurrentPlanSummary
@@ -2201,7 +2203,8 @@ export default function ProfileScreen() {
               <View style={styles.sectionCard}>
                 <Text style={styles.cardTitle}>Plan &amp; billing</Text>
                 <Text style={styles.cardSubtitle}>
-                  Same plans as creaservices.de — Stripe Checkout in the browser, or manage on the website.
+                  {PLATFORM_TRIAL_DAYS}-day Pro trial, then Free or subscribe to Pro — same plans as creaservices.de (Stripe
+                  in browser or on the website).
                 </Text>
 
                 <CurrentPlanSummary

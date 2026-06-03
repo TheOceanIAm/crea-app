@@ -72,6 +72,6 @@ export function platformTrialProgressPercent(daysLeft: number): number {
 }
 
 export function platformTrialDaysFreeLabel(daysLeft: number): string {
-  if (daysLeft <= 0) return 'Trial ended'
-  return daysLeft === 1 ? '1 day free' : `${daysLeft} days free`
+  if (daysLeft <= 0) return 'Pro trial ended'
+  return daysLeft === 1 ? '1 day of Pro left' : `${daysLeft} days of Pro left`
 }

@@ -48,7 +48,7 @@ export function PlatformTrialBar({
         <Text style={styles.label}>
           {active ? (
             <>
-              <Text style={styles.labelStrong}>{daysLeft}</Text> days free
+              <Text style={styles.labelStrong}>{daysLeft}</Text> days Pro left
             </>
           ) : (
             label
