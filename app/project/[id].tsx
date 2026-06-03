@@ -26,6 +26,7 @@ import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { ensureSoloWorkspaceProjectRow } from '@/lib/ensureSoloWorkspaceProject'
 import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProjectMilestonesTab } from '@/components/project/ProjectMilestonesTab'
 import { ProjectMessagesTab } from '@/components/project/ProjectMessagesTab'
@@ -688,6 +689,14 @@ export default function ProjectWorkspaceScreen() {
     }
     setProject((prev) => (prev ? { ...prev, status: next } : null))
     setOverviewStatus(next)
+    if (next === 'completed' && project.job_id) {
+      void notifyExpoEvent({
+        kind: 'workspace_activity',
+        jobId: project.job_id,
+        activity: 'completed',
+        detail: 'Project marked as completed',
+      })
+    }
   }
 
   const saveOverview = async () => {

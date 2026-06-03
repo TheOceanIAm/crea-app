@@ -254,13 +254,15 @@ export default function NotificationsScreen() {
                     ? 'Invitation'
                     : item.kind === 'project_message'
                       ? 'Project chat'
-                      : item.kind === 'job_application'
-                        ? 'Application'
-                        : item.kind === 'invoice_incoming' || item.kind === 'invoice_freelancer'
-                          ? 'Invoice'
-                          : item.kind === 'workspace_ready'
-                            ? 'Workspace'
-                            : 'Project'}
+                      : item.kind === 'project_completed'
+                        ? 'Completed'
+                        : item.kind === 'job_application'
+                          ? 'Application'
+                          : item.kind === 'invoice_incoming' || item.kind === 'invoice_freelancer'
+                            ? 'Invoice'
+                            : item.kind === 'workspace_ready'
+                              ? 'Workspace'
+                              : 'Project'}
                 </Text>
                 <Text style={styles.time}>{timeAgo(item.at)}</Text>
               </View>

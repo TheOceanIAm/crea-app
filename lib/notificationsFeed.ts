@@ -7,6 +7,7 @@ import {
 export type NotificationKind =
   | 'invite'
   | 'project_update'
+  | 'project_completed'
   | 'project_message'
   | 'job_application'
   | 'invoice_incoming'
@@ -71,9 +72,7 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     .order('created_at', { ascending: false })
     .limit(200)
 
-  const projectIds = [...new Set((memberships ?? []).map((m) => String(m.project_id)))].filter((pid) =>
-    accessCtx.accessibleProjectIds.has(pid)
-  )
+  const projectIds = [...accessCtx.accessibleProjectIds]
 
   const { data: projects } = projectIds.length
     ? await supabase
@@ -282,7 +281,46 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     freelancerRows = [...invoiceFreelancerRows, ...workspaceRows]
   }
 
-  return [...inviteRows, ...messageRows, ...updateRows, ...companyRows, ...freelancerRows]
+  let completedRows: NotificationRow[] = []
+  if (myRole === 'freelancer' && accessCtx.recentlyCompletedJobIds.size > 0) {
+    const completedJobIds = [...accessCtx.recentlyCompletedJobIds]
+    const { data: completedJobs } = await supabase
+      .from('jobs')
+      .select('id, title, updated_at, project_status, status')
+      .in('id', completedJobIds)
+    const jobMeta = new Map<string, { title: string; updated_at: string }>()
+    for (const j of completedJobs ?? []) {
+      const jid = String((j as { id?: string }).id ?? '').trim()
+      if (!jid) continue
+      jobMeta.set(jid, {
+        title: String((j as { title?: string | null }).title ?? 'Project'),
+        updated_at: String((j as { updated_at?: string | null }).updated_at ?? ''),
+      })
+    }
+    const { data: completedProjs } = await supabase
+      .from('projects')
+      .select('id, title, job_id, updated_at')
+      .in('job_id', completedJobIds)
+    completedRows = (completedProjs ?? [])
+      .filter((p) => accessCtx.recentlyCompletedProjectIds.has(String(p.id)))
+      .map((p) => {
+        const pid = String(p.id)
+        const jid = String(p.job_id ?? '').trim()
+        const meta = jid ? jobMeta.get(jid) : undefined
+        const at = meta?.updated_at || String(p.updated_at ?? '')
+        return {
+          id: `project-completed-${pid}-${at}`,
+          kind: 'project_completed' as const,
+          projectId: pid,
+          jobId: jid || undefined,
+          title: String(p.title || meta?.title || 'Project'),
+          body: 'Project marked as completed.',
+          at: at || new Date().toISOString(),
+        }
+      })
+  }
+
+  return [...inviteRows, ...messageRows, ...updateRows, ...completedRows, ...companyRows, ...freelancerRows]
     .filter((row) => filterNotificationRowByAccess(row, accessCtx, myRole))
     .sort((a, b) => +new Date(b.at) - +new Date(a.at))
     .slice(0, 100)

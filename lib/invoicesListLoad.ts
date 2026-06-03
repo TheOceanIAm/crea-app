@@ -51,6 +51,8 @@ export type ReadyInvoiceJob = {
   title: string
   clientName: string
   isSolo: boolean
+  completedAt: string
+  budgetLabel: string
 }
 
 export type InvoicesListCache = {
@@ -270,17 +272,25 @@ export async function loadInvoicesListCache(user: User): Promise<InvoicesListCac
       .eq('freelancer_id', user.id)
       .eq('status', 'accepted')
     const crewIds = [...new Set((apps ?? []).map((a) => a.job_id).filter(Boolean))] as string[]
+    const { data: leadProjects } = await supabase
+      .from('projects')
+      .select('job_id')
+      .eq('freelancer_id', user.id)
+      .not('job_id', 'is', null)
+    const leadJobIds = [...new Set((leadProjects ?? []).map((p) => String(p.job_id)).filter(Boolean))]
     const { data: soloJobs } = await supabase
       .from('jobs')
       .select('id')
       .eq('company_id', user.id)
       .eq('is_solo_workspace', true)
     const soloIds = (soloJobs ?? []).map((j) => j.id)
-    const allJobIds = [...new Set([...crewIds, ...soloIds])]
+    const allJobIds = [...new Set([...crewIds, ...leadJobIds, ...soloIds])]
     if (allJobIds.length > 0) {
       const { data: jobs } = await supabase
         .from('jobs')
-        .select('id, title, company_id, project_status, status, is_solo_workspace')
+        .select(
+          'id, title, company_id, project_status, status, is_solo_workspace, updated_at, budget_type, budget_amount'
+        )
         .in('id', allJobIds)
       const completed = (jobs ?? []).filter((j) => {
         const ps = String(j.project_status ?? '').toLowerCase()
@@ -289,23 +299,48 @@ export async function loadInvoicesListCache(user: User): Promise<InvoicesListCac
       })
       const { data: invRows } = await supabase
         .from('invoices')
-        .select('job_id')
+        .select('job_id, status')
         .eq('freelancer_id', user.id)
+        .eq('is_latest', true)
         .not('job_id', 'is', null)
-      const invoiced = new Set((invRows ?? []).map((r) => r.job_id).filter(Boolean) as string[])
-      const missing = completed.filter((j) => j.id && !invoiced.has(j.id))
+      const invoicedJobIds = new Set(
+        (invRows ?? [])
+          .filter((r) => {
+            const st = String(r.status ?? '').toLowerCase()
+            return st === 'pending' || st === 'overdue' || st === 'paid'
+          })
+          .map((r) => r.job_id)
+          .filter(Boolean) as string[]
+      )
+      const missing = completed.filter((j) => j.id && !invoicedJobIds.has(j.id))
       const companyIds = [...new Set(missing.map((j) => j.company_id).filter(Boolean))] as string[]
       let names: Record<string, string> = {}
       if (companyIds.length > 0) {
         const { data: profs } = await supabase.from('profiles').select('id, name').in('id', companyIds)
         names = Object.fromEntries((profs ?? []).map((p) => [p.id, (p.name || 'Client').trim()]))
       }
-      readyJobs = missing.map((j) => ({
-        jobId: j.id,
-        title: (j.title || 'Project').trim(),
-        clientName: j.company_id ? names[String(j.company_id)] ?? 'Client' : 'Client',
-        isSolo: Boolean(j.is_solo_workspace) && j.company_id === user.id,
-      }))
+      readyJobs = missing
+        .map((j) => {
+          const budgetType = String(j.budget_type ?? '').toLowerCase()
+          const budgetAmount = typeof j.budget_amount === 'number' ? j.budget_amount : null
+          let budgetLabel = '—'
+          if (budgetType === 'fixed' && budgetAmount != null) {
+            budgetLabel = `€${budgetAmount.toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+          } else if (budgetType === 'day_rate') {
+            budgetLabel = budgetAmount != null ? `€${budgetAmount}/day` : 'Day rate'
+          } else if (budgetType === 'negotiable') {
+            budgetLabel = 'Negotiable'
+          }
+          return {
+            jobId: j.id,
+            title: (j.title || 'Project').trim(),
+            clientName: j.company_id ? names[String(j.company_id)] ?? 'Client' : 'Client',
+            isSolo: Boolean(j.is_solo_workspace) && j.company_id === user.id,
+            completedAt: String(j.updated_at ?? new Date().toISOString()),
+            budgetLabel,
+          }
+        })
+        .sort((a, b) => +new Date(b.completedAt) - +new Date(a.completedAt))
     }
   }
 

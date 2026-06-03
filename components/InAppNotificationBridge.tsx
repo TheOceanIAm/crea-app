@@ -333,6 +333,63 @@ export function InAppNotificationBridge() {
             })
           }
         )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'jobs' },
+          async (payload) => {
+            if (AppState.currentState !== 'active' || !uid) return
+            const row = payload.new as Record<string, unknown>
+            const oldRow =
+              typeof payload.old === 'object' && payload.old !== null
+                ? (payload.old as Record<string, unknown>)
+                : undefined
+            const ps = String(row.project_status ?? '').toLowerCase()
+            const prevPs = String(oldRow?.project_status ?? '').toLowerCase()
+            if (ps !== 'completed' || prevPs === 'completed') return
+            if (String(row.company_id) === uid) return
+
+            const jobId = typeof row.id === 'string' ? row.id : ''
+            if (!jobId) return
+
+            const { data: proj } = await supabase
+              .from('projects')
+              .select('id, title, freelancer_id')
+              .eq('job_id', jobId)
+              .maybeSingle()
+            if (!proj?.id) return
+
+            let allowed = String(proj.freelancer_id) === uid
+            if (!allowed) {
+              const { data: app } = await supabase
+                .from('job_applications')
+                .select('id')
+                .eq('job_id', jobId)
+                .eq('freelancer_id', uid)
+                .eq('status', 'accepted')
+                .maybeSingle()
+              allowed = Boolean(app)
+            }
+            if (!allowed) {
+              const { data: pm } = await supabase
+                .from('project_members')
+                .select('id')
+                .eq('project_id', proj.id)
+                .eq('profile_id', uid)
+                .maybeSingle()
+              allowed = Boolean(pm)
+            }
+            if (!allowed) return
+
+            invalidateAlertsBadge()
+            const pt = String(proj.title ?? row.title ?? 'Project').trim() || 'Project'
+            showBanner({
+              id: `job-completed-${jobId}`,
+              title: pt,
+              body: 'Project marked as completed.',
+              onPress: () => router.push(`/project/${proj.id}`),
+            })
+          }
+        )
         .subscribe()
 
       return () => {

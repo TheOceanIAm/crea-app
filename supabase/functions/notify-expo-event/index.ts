@@ -466,6 +466,7 @@ Deno.serve(async (req) => {
       milestone: 'New milestone',
       file: 'New file in workspace',
       report: 'Production report posted',
+      completed: 'Project completed',
     }
     const pushTitle = activityLabels[activity] ?? 'Workspace update'
     const pushBody = detail || `«${pt}» was updated`

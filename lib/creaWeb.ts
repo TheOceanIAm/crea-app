@@ -42,6 +42,13 @@ export function openProjectOnWeb(projectId: string, path = ''): void {
   Linking.openURL(`${base}/projects/${projectId}${suffix}`).catch(() => {})
 }
 
+/** Opens the invoice editor for a completed job on creaservices.de (web-only). */
+export async function openInvoiceOnWeb(jobId: string): Promise<boolean> {
+  const id = String(jobId ?? '').trim()
+  if (!id) return false
+  return openCreaWebPath(`/invoice?jobId=${encodeURIComponent(id)}`)
+}
+
 /** Opens invoice payment on creaservices.de (web-only). */
 export async function openInvoicePayOnWeb(invoiceId: string): Promise<boolean> {
   const webBase = getCreaWebBaseUrl()

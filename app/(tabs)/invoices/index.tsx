@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -79,6 +79,18 @@ function readInitialInvoices() {
     invoicingAllowed: cached.invoicingAllowed,
     readyToInvoice: cached.readyToInvoice,
   }
+}
+
+function timeAgo(str: string) {
+  const t = new Date(str).getTime()
+  if (Number.isNaN(t)) return 'now'
+  const diff = Date.now() - t
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'now'
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  if (h < 24) return `${h}h`
+  return `${Math.floor(h / 24)}d`
 }
 
 function applyInvoicesCache(
@@ -218,6 +230,26 @@ export default function InvoicesListScreen() {
     }, [load])
   )
 
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    void (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return
+      const onChange = () => void load({ force: true })
+      channel = supabase
+        .channel(`finance-ready-${user.id}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'jobs' }, onChange)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'projects' }, onChange)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'invoices' }, onChange)
+        .subscribe()
+    })()
+    return () => {
+      if (channel) void supabase.removeChannel(channel)
+    }
+  }, [load])
+
   const onRefresh = () => {
     setRefreshing(true)
     void load({ force: true })
@@ -282,7 +314,7 @@ export default function InvoicesListScreen() {
         <View style={styles.upgradeCenter}>
           <Text style={styles.upgradeTitle}>Invoicing is a Pro feature</Text>
           <Text style={styles.upgradeSub}>
-            Upgrade to Pro to create invoices, track earnings, and send payouts from the app.
+            Upgrade to Pro to track earnings and see when completed projects are ready to invoice on creaservices.de.
           </Text>
           <TouchableOpacity
             style={styles.upgradeBtn}
@@ -326,17 +358,10 @@ export default function InvoicesListScreen() {
         </View>
         <View style={styles.headerRight}>
           <View style={styles.badge}>
-            <Text style={styles.badgeText}>{rows.length} items</Text>
+            <Text style={styles.badgeText}>
+              {rows.length + readyToInvoice.length} {rows.length + readyToInvoice.length === 1 ? 'item' : 'items'}
+            </Text>
           </View>
-          {perspective === 'freelancer' ? (
-            <TouchableOpacity
-              style={styles.newBtn}
-              onPress={() => router.push('/(tabs)/invoices/new')}
-              activeOpacity={0.75}
-            >
-              <Text style={styles.newBtnText}>+ New</Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
       </View>
 
@@ -351,35 +376,9 @@ export default function InvoicesListScreen() {
               <Text style={styles.hint}>
                 {perspective === 'company'
                   ? 'Received from freelancers'
-                  : 'Paid work, pending payouts, and invoices you sent'}
+                  : 'Paid work, pending payouts, and projects ready to bill'}
               </Text>
             )}
-            {perspective === 'freelancer' && readyToInvoice.length > 0 ? (
-              <View style={styles.readySection}>
-                <Text style={styles.readySectionTitle}>Ready to send</Text>
-                <Text style={styles.readySectionSub}>
-                  The client marked these projects completed — you can send an invoice now.
-                </Text>
-                {readyToInvoice.map((r) => (
-                  <TouchableOpacity
-                    key={r.jobId}
-                    style={styles.readyCard}
-                    activeOpacity={0.75}
-                    onPress={() =>
-                      router.push(`/(tabs)/invoices/new?jobId=${encodeURIComponent(r.jobId)}`)
-                    }
-                  >
-                    <Text style={styles.readyCardTitle} numberOfLines={2}>
-                      {r.title}
-                    </Text>
-                    <Text style={styles.readyCardMeta}>
-                      {r.isSolo ? 'Private project' : r.clientName}
-                    </Text>
-                    <Text style={styles.readyCardCta}>Create invoice →</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ) : null}
             {showBudgetOverview && budgetOverview ? (
               <View style={styles.overviewCard}>
                 {perspective === 'company' ? (
@@ -453,76 +452,50 @@ export default function InvoicesListScreen() {
                   </>
                 ) : (
                   <>
-                    <Text style={styles.overviewTitleFreelancer}>Earnings overview</Text>
+                    <Text style={styles.overviewTitleFreelancer}>Earnings</Text>
                     <Text style={styles.overviewSubFreelancer}>
-                      Year to date · {new Date().getFullYear()}
+                      {new Date().getFullYear()} · paid invoices
                     </Text>
-                    <View style={styles.kpiStackFreelancer}>
-                      <View style={styles.kpiStatRow}>
-                        <View style={styles.kpiStatLeft}>
-                          <Text style={styles.kpiStatLabel}>Total earned</Text>
-                          <Text style={styles.kpiStatMeta}>
-                            {new Date().getFullYear()} YTD
-                          </Text>
-                        </View>
-                        <Text style={[styles.kpiStatValue, styles.kpiStatValueEarned]}>
+                    <View style={styles.earningsSimpleCard}>
+                      <View style={styles.earningsSimpleCol}>
+                        <Text style={styles.earningsSimpleLabel}>Earned</Text>
+                        <Text style={[styles.earningsSimpleAmount, styles.earningsSimpleEarned]}>
                           {money(budgetOverview.paidInvoices, budgetOverview.currency)}
                         </Text>
                       </View>
-                      <View style={styles.kpiStatRow}>
-                        <View style={styles.kpiStatLeft}>
-                          <Text style={styles.kpiStatLabel}>Pending</Text>
-                          <Text style={styles.kpiStatMeta}>
-                            {rows.filter((r) => String(r.status).toLowerCase() === 'pending').length} invoices
-                          </Text>
-                        </View>
-                        <Text style={[styles.kpiStatValue, styles.kpiStatValuePendingMuted]}>
+                      <View style={styles.earningsSimpleDivider} />
+                      <View style={styles.earningsSimpleCol}>
+                        <Text style={styles.earningsSimpleLabel}>Pending</Text>
+                        <Text style={[styles.earningsSimpleAmount, styles.earningsSimplePending]}>
                           {money(budgetOverview.pendingCosts, budgetOverview.currency)}
                         </Text>
-                      </View>
-                      <View style={[styles.kpiStatRow, styles.kpiStatRowLast]}>
-                        <View style={styles.kpiStatLeft}>
-                          <Text style={styles.kpiStatLabel}>Avg per project</Text>
-                          <Text style={styles.kpiStatMeta}>
-                            {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length} paid
-                          </Text>
-                        </View>
-                        <Text style={styles.kpiStatValue}>
-                          {rows.filter((r) => String(r.status).toLowerCase() === 'paid').length > 0
-                            ? money(
-                                budgetOverview.paidInvoices /
-                                  rows.filter((r) => String(r.status).toLowerCase() === 'paid').length,
-                                budgetOverview.currency
-                              )
-                            : '—'}
+                        <Text style={styles.earningsSimpleMeta}>
+                          {rows.filter((r) => String(r.status).toLowerCase() === 'pending').length} open
                         </Text>
                       </View>
-                    </View>
-                    <View style={styles.monthlyCard}>
-                      <Text style={styles.monthlyTitle}>Monthly earnings (paid)</Text>
-                      <View style={styles.monthsGrid}>
-                        {monthlyPaid.map((m) => (
-                          <View key={m.label} style={styles.monthCell}>
-                            <View
-                              style={[
-                                styles.monthBar,
-                                m.value > 0 && { backgroundColor: 'rgba(255,220,0,0.45)' },
-                              ]}
-                            />
-                            <Text style={styles.monthLabel}>{m.label}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-                    <View style={styles.historyHeaderFreelancer}>
-                      <Text style={styles.historyTitle}>Invoice history</Text>
-                      <TouchableOpacity onPress={() => router.push('/(tabs)/invoices/new')}>
-                        <Text style={styles.historyCta}>Send invoice (completed projects) →</Text>
-                      </TouchableOpacity>
                     </View>
                   </>
                 )}
               </View>
+            ) : null}
+            {perspective === 'freelancer' && readyToInvoice.length > 0 ? (
+              <View style={styles.readyListWrap}>
+                {readyToInvoice.map((r) => (
+                  <View key={r.jobId} style={[styles.readyAlertCard, styles.readyAlertCardActive]}>
+                    <View style={styles.readyKickerRow}>
+                      <Text style={styles.readyKicker}>Ready to invoice</Text>
+                      <Text style={styles.readyTime}>{timeAgo(r.completedAt)}</Text>
+                    </View>
+                    <Text style={styles.readyCardTitle} numberOfLines={2}>
+                      {r.title}
+                    </Text>
+                    <Text style={styles.readyCardBody}>Project completed — you can send an invoice.</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {perspective === 'freelancer' && showBudgetOverview ? (
+              <Text style={styles.sectionLabel}>Invoice history</Text>
             ) : null}
             {perspective === 'company' ? (
               <View style={styles.annualBudgetCard}>
@@ -614,8 +587,16 @@ export default function InvoicesListScreen() {
         ListEmptyComponent={
           !error ? (
             <View style={styles.emptyWrap}>
-              <Text style={styles.emptyText}>No invoices yet</Text>
-              <Text style={styles.emptySub}>When rows exist in Supabase, they’ll show up here.</Text>
+              <Text style={styles.emptyText}>
+                {perspective === 'freelancer' && readyToInvoice.length > 0
+                  ? 'No sent invoices yet'
+                  : 'No invoices yet'}
+              </Text>
+              <Text style={styles.emptySub}>
+                {perspective === 'freelancer' && readyToInvoice.length > 0
+                  ? 'Sent invoices will appear here.'
+                  : 'When rows exist in Supabase, they’ll show up here.'}
+              </Text>
             </View>
           ) : null
         }
@@ -673,41 +654,27 @@ const styles = StyleSheet.create({
   newBtnText: { color: '#0a0a0a', fontSize: 12, fontWeight: '800' },
   badgeText: { color: '#FFDC00', fontSize: 11, fontWeight: '700' },
   hint: { fontSize: 12, color: 'rgba(255,255,255,0.35)', paddingHorizontal: 20, marginBottom: 16 },
-  readySection: {
+  readyListWrap: {
     marginHorizontal: 20,
     marginBottom: 16,
-    padding: 14,
+  },
+  readyAlertCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,220,0,0.22)',
-    backgroundColor: 'rgba(255,220,0,0.06)',
-  },
-  readySectionTitle: {
-    color: '#FFDC00',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  readySectionSub: {
-    color: 'rgba(255,255,255,0.42)',
-    fontSize: 12,
-    lineHeight: 17,
-    marginBottom: 12,
-  },
-  readyCard: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#121214',
-    borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#111',
+    padding: 12,
     marginBottom: 10,
   },
-  readyCardTitle: { fontSize: 15, fontWeight: '700', color: '#fff', marginBottom: 4 },
-  readyCardMeta: { fontSize: 12, color: 'rgba(255,255,255,0.38)', marginBottom: 8 },
-  readyCardCta: { fontSize: 13, fontWeight: '700', color: '#FFDC00' },
+  readyAlertCardActive: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,220,0,0.15)',
+  },
+  readyKickerRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  readyKicker: { color: '#FFDC00', fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
+  readyTime: { color: 'rgba(255,255,255,0.35)', fontSize: 11 },
+  readyCardTitle: { color: '#fff', fontSize: 14, fontWeight: '700', marginBottom: 4 },
+  readyCardBody: { color: 'rgba(255,255,255,0.62)', fontSize: 12, lineHeight: 17 },
   overviewCard: {
     marginHorizontal: 20,
     marginBottom: 16,
@@ -728,13 +695,62 @@ const styles = StyleSheet.create({
   overviewSubCompany: { color: 'rgba(255,255,255,0.42)', fontSize: 12, marginBottom: 12, lineHeight: 17 },
   overviewTitleFreelancer: {
     color: '#FFDC00',
-    fontSize: 17,
+    fontSize: 13,
     fontWeight: '800',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
     marginBottom: 4,
   },
-  overviewSubFreelancer: { color: 'rgba(255,255,255,0.42)', fontSize: 12, marginBottom: 12, lineHeight: 17 },
+  overviewSubFreelancer: { color: 'rgba(255,255,255,0.38)', fontSize: 12, marginBottom: 12, lineHeight: 17 },
+  earningsSimpleCard: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#111',
+    overflow: 'hidden',
+  },
+  earningsSimpleCol: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    alignItems: 'flex-start',
+  },
+  earningsSimpleDivider: {
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginVertical: 12,
+  },
+  earningsSimpleLabel: {
+    color: 'rgba(255,255,255,0.42)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  earningsSimpleAmount: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  earningsSimpleEarned: { color: '#00df6f' },
+  earningsSimplePending: { color: '#FFDC00' },
+  earningsSimpleMeta: {
+    marginTop: 4,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.32)',
+  },
+  sectionLabel: {
+    marginHorizontal: 20,
+    marginBottom: 10,
+    color: 'rgba(255,255,255,0.38)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  },
   kpiStackCompany: {
     borderRadius: 12,
     borderWidth: 1,
