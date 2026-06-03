@@ -30,6 +30,12 @@ export function cacheNotifications(userId: string, data: NotificationsCache): vo
   setCache(notificationsCacheKey(userId), data, MEM_TTL_MS)
 }
 
+/** Drop in-memory + disk alert cache (e.g. after crew remove or project delete). */
+export async function clearNotificationsCache(userId: string): Promise<void> {
+  setCache(notificationsCacheKey(userId), { rows: [], reads: [] }, 0)
+  await writePersistedCache(notificationsDiskKey(userId), { rows: [], reads: [] }, 0)
+}
+
 export async function hydrateNotificationsFromDisk(userId: string): Promise<boolean> {
   const hit = await readPersistedCache<NotificationsCache>(notificationsDiskKey(userId))
   if (!hit) return false

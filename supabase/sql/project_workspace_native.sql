@@ -85,9 +85,9 @@ create policy "project_members_insert_lead" on public.project_members
   );
 
 drop policy if exists "project_members_delete_lead" on public.project_members;
-create policy "project_members_delete_lead" on public.project_members
+create policy "project_members_delete_company_crew" on public.project_members
   for delete using (
-    member_role = 'crew'
+    lower(coalesce(member_role, '')) <> 'company'
     and exists (
       select 1 from public.projects p
       where p.id = project_id

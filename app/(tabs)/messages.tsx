@@ -25,6 +25,9 @@ import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 const MESSAGES_STALE_MS = 30_000
 
+/** Unique Supabase Realtime topic — reusing the same name returns an already-subscribed channel. */
+let messagesRealtimeTopicSeq = 0
+
 function readInitialMessages(): { inbox: ConvoRow[]; archived: ConvoRow[]; loading: boolean } {
   const uid = peekWarmedOverview()?.userId
   if (!uid) return { inbox: [], archived: [], loading: true }
@@ -110,6 +113,9 @@ export default function MessagesScreen() {
     reloadTimer.current = setTimeout(() => void refreshList(), 320)
   }, [refreshList])
 
+  const scheduleReloadRef = useRef(scheduleReload)
+  scheduleReloadRef.current = scheduleReload
+
   useFocusEffect(
     useCallback(() => {
       if (!initialLoadingDone.current) {
@@ -134,24 +140,36 @@ export default function MessagesScreen() {
   )
 
   useEffect(() => {
-    const channel = supabase
-      .channel('messages-list')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'conversations' },
-        () => scheduleReload()
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'messages' },
-        () => scheduleReload()
-      )
-      .subscribe()
+    let cancelled = false
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
+    void (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (cancelled) return
+      const topic = `messages-list-${user?.id ?? 'anon'}-${++messagesRealtimeTopicSeq}`
+      channel = supabase
+        .channel(topic)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'conversations' },
+          () => scheduleReloadRef.current()
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'messages' },
+          () => scheduleReloadRef.current()
+        )
+        .subscribe()
+    })()
 
     return () => {
-      void supabase.removeChannel(channel)
+      cancelled = true
+      if (reloadTimer.current) clearTimeout(reloadTimer.current)
+      if (channel) void supabase.removeChannel(channel)
     }
-  }, [scheduleReload])
+  }, [])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)

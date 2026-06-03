@@ -39,6 +39,9 @@ function timeAgo(str: string) {
 
 const ALERTS_STALE_MS = 30_000
 
+/** Unique Supabase Realtime topic — reusing the same name returns an already-subscribed channel. */
+let alertsRealtimeTopicSeq = 0
+
 function readInitialNotifications(): {
   rows: NotificationRow[]
   readKeys: Set<string>
@@ -127,6 +130,9 @@ export default function NotificationsScreen() {
     }, 280)
   }, [load])
 
+  const scheduleReloadRef = useRef(scheduleReload)
+  scheduleReloadRef.current = scheduleReload
+
   useEffect(() => {
     const sub = supabase.auth.onAuthStateChange(() => void load())
     return () => sub.data.subscription.unsubscribe()
@@ -147,20 +153,34 @@ export default function NotificationsScreen() {
   )
 
   useEffect(() => {
-    const channel = supabase
-      .channel('alerts-feed-refresh')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, scheduleReload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_messages' }, scheduleReload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, scheduleReload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, scheduleReload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, scheduleReload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_alert_reads' }, scheduleReload)
-      .subscribe()
+    let cancelled = false
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
+    void (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (cancelled) return
+      const topic = `alerts-feed-refresh-${user?.id ?? 'anon'}-${++alertsRealtimeTopicSeq}`
+      const onChange = () => scheduleReloadRef.current()
+      channel = supabase
+        .channel(topic)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, onChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, onChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'project_messages' }, onChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, onChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, onChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, onChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'user_alert_reads' }, onChange)
+        .subscribe()
+    })()
+
     return () => {
+      cancelled = true
       if (reloadTimer.current) clearTimeout(reloadTimer.current)
-      void supabase.removeChannel(channel)
+      if (channel) void supabase.removeChannel(channel)
     }
-  }, [scheduleReload])
+  }, [])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)

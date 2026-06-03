@@ -1,8 +1,13 @@
-import { Linking, Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native'
+import { useCallback } from 'react'
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native'
+import { TouchableOpacity } from 'react-native-gesture-handler'
 import { CalendarRange, ExternalLink } from 'lucide-react-native'
 import { useRouter } from 'expo-router'
+import type { Href } from 'expo-router'
 import type { BookingDmPayloadV1, BookingReplyStatus } from '@/lib/bookingDm'
-import { navigateCreaDeepLink, parseCreaDeepLinkHref } from '@/lib/parseCreaDeepLinkHref'
+import { getBookingNavigationHref, navigateBookingContext } from '@/lib/bookingNavigation'
+import { resolveBookingWorkspaceJobId } from '@/lib/bookingWorkspaceResolve'
+import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 
 function formatShortRange(start: string, end: string): string {
@@ -20,8 +25,10 @@ type Props = {
   payload: BookingDmPayloadV1
   mine: boolean
   replyStatus: BookingReplyStatus | null
+  bookingSenderId: string
   onAccept?: () => void
   onDecline?: () => void
+  onLongPress?: () => void
   replyBusy?: boolean
 }
 
@@ -29,29 +36,63 @@ export function BookingRequestCard({
   payload,
   mine,
   replyStatus,
+  bookingSenderId,
   onAccept,
   onDecline,
+  onLongPress,
   replyBusy,
 }: Props) {
   const router = useRouter()
   const days = payload.selectedIsoDates?.length ? payload.selectedIsoDates : [payload.isoStartDate]
   const rangeLabel = formatShortRange(payload.isoStartDate, payload.isoEndDate)
   const showActions = !mine && !replyStatus && onAccept && onDecline
+  const navOpts = { replyStatus, mine }
 
-  const openContext = () => {
+  const openContext = useCallback(async () => {
     const u = payload.openDeepLink.trim()
-    if (!u) return
-    if (navigateCreaDeepLink(router, u)) return
-    const href = parseCreaDeepLinkHref(u)
-    if (href) {
+    if (!u) {
+      Alert.alert('Could not open', 'This booking link is missing project details.')
+      return
+    }
+
+    if (navigateBookingContext(router, u, navOpts)) return
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      Alert.alert('Sign in required', 'Log in to open the project workspace.')
+      return
+    }
+
+    const jobId = await resolveBookingWorkspaceJobId({
+      openDeepLink: u,
+      projectTitle: payload.title,
+      userId: user.id,
+      bookingSenderId,
+      mine,
+    })
+
+    if (jobId) {
+      const openWorkspace = replyStatus === 'accepted' || mine
+      const href = (openWorkspace ? `/project/${jobId}` : `/jobs/${jobId}`) as Href
       router.push(href)
       return
     }
-    void Linking.openURL(u)
-  }
+
+    Alert.alert(
+      'Could not open project',
+      'Open the project from My Projects or ask the client to resend the booking invite.'
+    )
+  }, [payload.openDeepLink, payload.title, navOpts, router, bookingSenderId, mine, replyStatus])
 
   return (
-    <View style={[styles.card, mine ? styles.cardMine : styles.cardTheirs]}>
+    <TouchableOpacity
+      activeOpacity={1}
+      onLongPress={onLongPress}
+      delayLongPress={380}
+      style={[styles.card, mine ? styles.cardMine : styles.cardTheirs]}
+    >
       <View style={styles.cardHeader}>
         <Text style={styles.kicker}>Booking request</Text>
         <Text style={styles.title} numberOfLines={3}>
@@ -84,14 +125,16 @@ export function BookingRequestCard({
         </View>
       ) : null}
 
-      <Pressable
-        onPress={openContext}
-        style={({ pressed }) => [styles.linkBtn, pressed && styles.linkBtnPressed]}
-        hitSlop={8}
+      <TouchableOpacity
+        onPress={() => void openContext()}
+        activeOpacity={0.75}
+        style={styles.linkBtn}
+        accessibilityRole="link"
+        accessibilityLabel="Open job or project workspace"
       >
         <ExternalLink size={16} color="#FFDC00" strokeWidth={ICON_STROKE} />
         <Text style={styles.linkBtnText}>Open job / project</Text>
-      </Pressable>
+      </TouchableOpacity>
 
       {mine && !replyStatus ? (
         <View style={styles.statusPill}>
@@ -115,39 +158,33 @@ export function BookingRequestCard({
 
       {showActions ? (
         <View style={styles.actions}>
-          <Pressable
+          <TouchableOpacity
             onPress={onDecline}
             disabled={replyBusy}
-            style={({ pressed }) => [
-              styles.declineBtn,
-              (pressed || replyBusy) && styles.actionPressed,
-              replyBusy && styles.actionDisabled,
-            ]}
+            activeOpacity={0.85}
+            style={[styles.declineBtn, replyBusy && styles.actionDisabled]}
           >
             {replyBusy ? (
               <ActivityIndicator color="rgba(255,255,255,0.6)" size="small" />
             ) : (
               <Text style={styles.declineBtnText}>Decline</Text>
             )}
-          </Pressable>
-          <Pressable
+          </TouchableOpacity>
+          <TouchableOpacity
             onPress={onAccept}
             disabled={replyBusy}
-            style={({ pressed }) => [
-              styles.acceptBtn,
-              (pressed || replyBusy) && styles.actionPressed,
-              replyBusy && styles.actionDisabled,
-            ]}
+            activeOpacity={0.85}
+            style={[styles.acceptBtn, replyBusy && styles.actionDisabled]}
           >
             {replyBusy ? (
               <ActivityIndicator color="#0a0a0a" size="small" />
             ) : (
               <Text style={styles.acceptBtnText}>Accept</Text>
             )}
-          </Pressable>
+          </TouchableOpacity>
         </View>
       ) : null}
-    </View>
+    </TouchableOpacity>
   )
 }
 
@@ -240,10 +277,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 2,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    minHeight: 44,
   },
-  linkBtnPressed: { opacity: 0.7 },
   linkBtnText: {
     fontSize: 14,
     fontWeight: '800',
@@ -302,6 +339,5 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   acceptBtnText: { fontSize: 14, fontWeight: '800', color: '#0a0a0a' },
-  actionPressed: { opacity: 0.88 },
   actionDisabled: { opacity: 0.55 },
 })

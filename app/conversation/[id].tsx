@@ -255,7 +255,11 @@ export default function ConversationThreadScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        <ScrollView style={styles.thread} contentContainerStyle={styles.threadContent}>
+        <ScrollView
+          style={styles.thread}
+          contentContainerStyle={styles.threadContent}
+          keyboardShouldPersistTaps="handled"
+        >
           {rows.length === 0 ? (
             <Text style={styles.empty}>No messages yet. Say hello.</Text>
           ) : (
@@ -314,6 +318,8 @@ export default function ConversationThreadScreen() {
                     key={m.id}
                     friction={2}
                     overshootRight={false}
+                    activeOffsetX={[-24, 24]}
+                    failOffsetY={[-12, 12]}
                     renderRightActions={() => (
                       <View style={styles.swipeDeleteOuter}>
                         <TouchableOpacity
@@ -329,17 +335,13 @@ export default function ConversationThreadScreen() {
                     )}
                   >
                     <View style={[styles.bubbleWrap, mine && styles.bubbleWrapMine]}>
-                      <TouchableOpacity
-                        activeOpacity={0.92}
-                        delayLongPress={380}
-                        onLongPress={() => confirmDeleteMessage(m)}
-                        accessibilityLabel="Booking request"
-                      >
                         <BookingRequestCard
                           payload={bookingPayload}
                           mine={mine}
                           replyStatus={replyStatus}
+                          bookingSenderId={m.sender_id}
                           replyBusy={replyingId === m.id}
+                          onLongPress={() => confirmDeleteMessage(m)}
                           onAccept={
                             !mine && !replyStatus
                               ? () => void submitBookingReply(m, 'accepted')
@@ -351,7 +353,6 @@ export default function ConversationThreadScreen() {
                               : undefined
                           }
                         />
-                      </TouchableOpacity>
                     </View>
                   </Swipeable>
                 )

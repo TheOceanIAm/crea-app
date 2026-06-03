@@ -174,6 +174,9 @@ export default function TabLayout() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => {
         void loadUnreadAlertsCount(userId)
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => {
+        void loadUnreadAlertsCount(userId)
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'project_messages' }, () => {
         void loadUnreadAlertsCount(userId)
       })

@@ -1,5 +1,6 @@
 import type { User } from '@supabase/supabase-js'
 import { getCache, setCache } from '@/lib/appCache'
+import { freelancerCustomerJobVisibleToFreelancer } from '@/lib/freelancerCustomerJobVisibility'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 import {
   canFreelancerCreatePrivateProjects,
@@ -271,22 +272,24 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
 
   const soloIds = (soloJobRows ?? []).map((r) => String((r as { id: string }).id))
   const allJobIds = [...new Set([...crewJobIds, ...soloIds, ...membershipJobIds, ...leadJobIds])]
+  const declinedCustomerJobIds = await loadDeclinedCustomerJobIds(user.id, allJobIds)
+  const visibleJobIds = allJobIds.filter((jid) => !declinedCustomerJobIds.has(jid))
 
   let jobsById: Record<string, JobRow> = {}
-  if (allJobIds.length > 0) {
+  if (visibleJobIds.length > 0) {
     const { data: jobRows, error: jobsErr } = await supabase
       .from('jobs')
       .select(
         'id, title, category, budget_type, budget_amount, budget_currency, status, project_status, company_id, is_solo_workspace, solo_workspace_client_label, updated_at, created_at'
       )
-      .in('id', allJobIds)
+      .in('id', visibleJobIds)
     if (jobsErr && __DEV__) console.warn('[workspace-projects] jobs', jobsErr.message)
     jobsById = Object.fromEntries(((jobRows ?? []) as JobRow[]).map((j) => [j.id, j]))
   }
 
   const workspaceProjectIdByJobId: Record<string, string> = {}
-  if (allJobIds.length > 0) {
-    const { data: linkRows } = await supabase.from('projects').select('id, job_id').in('job_id', allJobIds)
+  if (visibleJobIds.length > 0) {
+    const { data: linkRows } = await supabase.from('projects').select('id, job_id').in('job_id', visibleJobIds)
     for (const row of linkRows ?? []) {
       const jid = String((row as { job_id?: string | null }).job_id ?? '').trim()
       const pid = String((row as { id?: string | null }).id ?? '').trim()
@@ -317,9 +320,10 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
   const projectById = Object.fromEntries((projectRows ?? []).map((r) => [String(r.id), r]))
 
   const built: ProjectListing[] = []
-  for (const jid of allJobIds) {
+  for (const jid of visibleJobIds) {
     const job = jobsById[jid]
     if (!job) continue
+    if (!freelancerCustomerJobVisibleToFreelancer(job, user.id)) continue
 
     const isSolo = Boolean(job.is_solo_workspace) && job.company_id === user.id
     const budgetLine = formatBudgetDisplay({
@@ -406,6 +410,17 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
     canCreatePrivate: nextCanPrivate,
     viewerRole: 'freelancer',
   }
+}
+
+async function loadDeclinedCustomerJobIds(freelancerId: string, jobIds: string[]): Promise<Set<string>> {
+  if (jobIds.length === 0) return new Set()
+  const { data } = await supabase
+    .from('job_applications')
+    .select('job_id')
+    .eq('freelancer_id', freelancerId)
+    .eq('status', 'declined')
+    .in('job_id', jobIds)
+  return new Set((data ?? []).map((r) => String(r.job_id)).filter(Boolean))
 }
 
 let inflight: Promise<void> | null = null

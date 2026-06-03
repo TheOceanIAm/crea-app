@@ -320,7 +320,7 @@ export default function JobDetailScreen() {
 
   const openedFromBooking = Boolean(bookingMsgId && convIdParam)
 
-  /** Company owners skip this screen and open `/project/:id` unless booking deep-link needs this UI. */
+  /** Owners / accepted crew skip job listing and open workspace directly. */
   const [detailReady, setDetailReady] = useState(false)
   useEffect(() => {
     setDetailReady(false)
@@ -334,19 +334,40 @@ export default function JobDetailScreen() {
       return
     }
 
-    const skipToWorkspace =
-      isCompanyProfile(role ?? undefined) &&
-      uid === job.company_id &&
-      Boolean(projectId) &&
-      !openedFromBooking
+    const isCoOwner = isCompanyProfile(role ?? undefined) && uid === job.company_id
+    if (isCoOwner && projectId) {
+      router.replace(`/project/${projectId}`)
+      return
+    }
 
-    if (skipToWorkspace && projectId) {
+    const bookingAccepted =
+      openedFromBooking &&
+      bookingDeep.kind === 'ready' &&
+      bookingDeep.replyStatus === 'accepted'
+    const crewHasWorkspace =
+      Boolean(projectId) &&
+      (hasWorkspaceAccess || (freelancer && applicationStatus === 'accepted'))
+
+    if (bookingAccepted && crewHasWorkspace && projectId) {
       router.replace(`/project/${projectId}`)
       return
     }
 
     setDetailReady(true)
-  }, [loading, accessDenied, job, uid, role, projectId, openedFromBooking, router])
+  }, [
+    loading,
+    accessDenied,
+    job,
+    uid,
+    role,
+    projectId,
+    openedFromBooking,
+    bookingDeep,
+    hasWorkspaceAccess,
+    applicationStatus,
+    freelancer,
+    router,
+  ])
 
   const pendingBookingGate = bookingDeep.kind === 'ready' && bookingDeep.replyStatus === null
 

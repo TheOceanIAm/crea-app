@@ -1,4 +1,8 @@
 import { supabase } from '@/lib/supabase'
+import {
+  filterNotificationRowByAccess,
+  loadNotificationAccessContext,
+} from '@/lib/notification-feed-access'
 
 export type NotificationKind =
   | 'invite'
@@ -13,6 +17,7 @@ export type NotificationRow = {
   id: string
   kind: NotificationKind
   projectId: string
+  jobId?: string
   targetId?: string
   title: string
   body: string
@@ -53,10 +58,11 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     .maybeSingle()
   const myRole = String(myProfile?.role ?? '').trim().toLowerCase()
 
-  // CEO: project/invoice/application alerts are disabled; DMs use Messages only.
   if (myRole === 'ceo') {
     return []
   }
+
+  const accessCtx = await loadNotificationAccessContext(userId, myRole)
 
   const { data: memberships } = await supabase
     .from('project_members')
@@ -65,7 +71,9 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     .order('created_at', { ascending: false })
     .limit(200)
 
-  const projectIds = [...new Set((memberships ?? []).map((m) => String(m.project_id)))]
+  const projectIds = [...new Set((memberships ?? []).map((m) => String(m.project_id)))].filter((pid) =>
+    accessCtx.accessibleProjectIds.has(pid)
+  )
 
   const { data: projects } = projectIds.length
     ? await supabase
@@ -76,11 +84,14 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     : { data: [] as Array<Record<string, unknown>> }
 
   const projectTitle = new Map<string, string>()
+  const projectJobId = new Map<string, string>()
   const projectById = new Map<string, Record<string, unknown>>()
   for (const p of projects ?? []) {
     const id = String(p.id)
     projectTitle.set(id, String(p.title || 'Project'))
     projectById.set(id, p as Record<string, unknown>)
+    const jid = p.job_id != null ? String(p.job_id).trim() : ''
+    if (jid) projectJobId.set(id, jid)
   }
 
   const leadIds = [
@@ -105,11 +116,10 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       const pid = String(m.project_id)
       const t = projectTitle.get(pid) ?? 'Project'
       const proj = projectById.get(pid)
-      const jobId = proj?.job_id
-      const hasPublicJob = jobId != null && String(jobId).length > 0
-      const leadId =
-        typeof proj?.freelancer_id === 'string' ? String(proj.freelancer_id) : ''
-      const leadName = leadId ? leadNameById.get(leadId) ?? 'Project lead' : 'Project lead'
+      const jobId = projectJobId.get(pid)
+      const hasPublicJob = Boolean(jobId)
+      const leadId = typeof proj?.freelancer_id === 'string' ? String(proj.freelancer_id) : ''
+      const leadName = leadId ? (leadNameById.get(leadId) ?? 'Project lead') : 'Project lead'
       const body = hasPublicJob
         ? `You were added to «${t}».`
         : `${leadName} added you to the private project «${t}».`
@@ -117,18 +127,22 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
         id: `invite-${String(m.id)}`,
         kind: 'invite' as const,
         projectId: pid,
+        jobId,
         title: t,
         body,
         at: String(m.created_at),
       }
     })
 
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
   const updateRows: NotificationRow[] = (projects ?? [])
     .filter((p) => Boolean(p.updated_at))
+    .filter((p) => new Date(String(p.updated_at)).getTime() >= sevenDaysAgo)
     .map((p) => ({
       id: `project-update-${p.id}-${p.updated_at}`,
       kind: 'project_update' as const,
       projectId: String(p.id),
+      jobId: projectJobId.get(String(p.id)),
       title: String(p.title || 'Project'),
       body: `Project updated${p.status ? ` · ${String(p.status)}` : ''}.`,
       at: String(p.updated_at),
@@ -144,27 +158,36 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
         .limit(80)
     : { data: [] as Array<{ id: string; project_id: string; sender_id: string; body: string | null; created_at: string }> }
 
-  const messageRows: NotificationRow[] = (projectMessages ?? []).map((m) => ({
-    id: `project-msg-${m.id}`,
-    kind: 'project_message' as const,
-    projectId: String(m.project_id),
-    title: projectTitle.get(String(m.project_id)) ?? 'Project',
-    body: 'New message in project chat.',
-    at: String(m.created_at),
-  }))
+  const messageRows: NotificationRow[] = (projectMessages ?? []).map((m) => {
+    const pid = String(m.project_id)
+    return {
+      id: `project-msg-${m.id}`,
+      kind: 'project_message' as const,
+      projectId: pid,
+      jobId: projectJobId.get(pid),
+      title: projectTitle.get(pid) ?? 'Project',
+      body: 'New message in project chat.',
+      at: String(m.created_at),
+    }
+  })
 
   let companyRows: NotificationRow[] = []
   if (myRole === 'company') {
-    const { data: myJobs } = await supabase.from('jobs').select('id, title').eq('company_id', userId).limit(200)
-    const jobIds = [...new Set((myJobs ?? []).map((j) => String(j.id)))]
+    const activeJobIdList = [...accessCtx.activeCompanyJobIds]
+    const { data: myJobs } =
+      activeJobIdList.length > 0
+        ? await supabase.from('jobs').select('id, title').in('id', activeJobIdList).limit(200)
+        : { data: [] as { id: string; title: string | null }[] }
+    const jobIds = activeJobIdList
     const jobTitle = new Map<string, string>()
     for (const j of myJobs ?? []) jobTitle.set(String(j.id), String(j.title || 'Project'))
 
     const { data: apps } = jobIds.length
       ? await supabase
           .from('job_applications')
-          .select('id, job_id, created_at')
+          .select('id, job_id, status, created_at')
           .in('job_id', jobIds)
+          .eq('status', 'pending')
           .order('created_at', { ascending: false })
           .limit(60)
       : { data: [] as Array<{ id: string; job_id: string; created_at: string }> }
@@ -173,6 +196,7 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       id: `job-app-${a.id}`,
       kind: 'job_application' as const,
       projectId: '',
+      jobId: String(a.job_id),
       targetId: String(a.job_id),
       title: jobTitle.get(String(a.job_id)) ?? 'Project',
       body: 'New freelancer application received for your project.',
@@ -181,8 +205,9 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
 
     const { data: invoices } = await supabase
       .from('invoices')
-      .select('id, title, invoice_number, created_at')
+      .select('id, title, invoice_number, created_at, status')
       .eq('company_id', userId)
+      .in('status', ['pending', 'overdue'])
       .order('created_at', { ascending: false })
       .limit(60)
 
@@ -192,7 +217,7 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       projectId: '',
       targetId: String(inv.id),
       title: String(inv.title || inv.invoice_number || 'Invoice'),
-      body: 'Incoming invoice received.',
+      body: 'Invoice awaiting payment.',
       at: String(inv.created_at ?? new Date().toISOString()),
     }))
 
@@ -205,36 +230,50 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       .from('invoices')
       .select('id, title, invoice_number, status, created_at, updated_at')
       .eq('freelancer_id', userId)
-      .order('created_at', { ascending: false })
+      .order('updated_at', { ascending: false })
       .limit(80)
 
-    const invoiceFreelancerRows: NotificationRow[] = (finv ?? []).map((inv) => {
-      const st = String(inv.status ?? '').toLowerCase()
-      const paid = st === 'paid'
-      return {
-        id: `invoice-fl-${inv.id}-${paid ? 'paid' : 'open'}`,
-        kind: 'invoice_freelancer' as const,
-        projectId: '',
-        targetId: String(inv.id),
-        title: String(inv.title || inv.invoice_number || 'Invoice'),
-        body: paid ? 'Invoice was paid.' : 'Invoice update or payment pending.',
-        at: String(inv.updated_at ?? inv.created_at ?? new Date().toISOString()),
-      }
-    })
+    const invoiceFreelancerRows: NotificationRow[] = (finv ?? [])
+      .filter((inv) => {
+        const st = String(inv.status ?? '').toLowerCase()
+        return st === 'paid' || st === 'pending' || st === 'overdue'
+      })
+      .map((inv) => {
+        const st = String(inv.status ?? '').toLowerCase()
+        const paid = st === 'paid'
+        return {
+          id: `invoice-fl-${inv.id}-${paid ? 'paid' : 'open'}`,
+          kind: 'invoice_freelancer' as const,
+          projectId: '',
+          targetId: String(inv.id),
+          title: String(inv.title || inv.invoice_number || 'Invoice'),
+          body: paid ? 'Invoice was paid.' : 'Invoice update or payment pending.',
+          at: String(inv.updated_at ?? inv.created_at ?? new Date().toISOString()),
+        }
+      })
 
-    const { data: crewProjects } = await supabase
-      .from('projects')
-      .select('id, title, freelancer_id, created_at, job_id')
-      .eq('freelancer_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(40)
+    const { data: crewProjects } =
+      accessCtx.accessibleProjectIds.size > 0
+        ? await supabase
+            .from('projects')
+            .select('id, title, freelancer_id, created_at, job_id')
+            .in('id', [...accessCtx.accessibleProjectIds])
+            .not('job_id', 'is', null)
+            .order('created_at', { ascending: false })
+            .limit(40)
+        : { data: [] as Array<{ id: string; title: string | null; job_id: string | null; created_at: string | null }> }
 
     const workspaceRows: NotificationRow[] = (crewProjects ?? [])
       .filter((p) => p.job_id)
+      .filter((p) => {
+        const created = new Date(String(p.created_at ?? '')).getTime()
+        return Number.isFinite(created) && created >= sevenDaysAgo
+      })
       .map((p) => ({
         id: `workspace-${p.id}`,
         kind: 'workspace_ready' as const,
         projectId: String(p.id),
+        jobId: String(p.job_id),
         title: String(p.title || 'Project'),
         body: 'Your project workspace is available.',
         at: String(p.created_at ?? new Date().toISOString()),
@@ -243,15 +282,8 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     freelancerRows = [...invoiceFreelancerRows, ...workspaceRows]
   }
 
-  const next = [
-    ...inviteRows,
-    ...messageRows,
-    ...updateRows,
-    ...companyRows,
-    ...freelancerRows,
-  ]
+  return [...inviteRows, ...messageRows, ...updateRows, ...companyRows, ...freelancerRows]
+    .filter((row) => filterNotificationRowByAccess(row, accessCtx, myRole))
     .sort((a, b) => +new Date(b.at) - +new Date(a.at))
     .slice(0, 100)
-
-  return next
 }
