@@ -2,6 +2,23 @@ import { supabase } from '@/lib/supabase'
 import { formatBookingReplyBody, type BookingReplyStatus } from '@/lib/bookingDm'
 import { requestNotifyRecipientPush } from '@/lib/notifyMessagePush'
 
+function bookingAcceptErrorMessage(raw: string): string {
+  const m = raw.trim().toLowerCase()
+  if (m.includes('invalid booking payload') || m.includes('not a booking request')) {
+    return 'This booking invite could not be read. Ask the company to send a new invite from the job listing.'
+  }
+  if (m.includes('project not found')) {
+    return 'The linked project is no longer available. Ask the company to re-send the booking from an active job.'
+  }
+  if (m.includes('could not match job') || m.includes('could not parse project')) {
+    return 'We could not match this invite to a job. Ask the company to send it again from Jobs.'
+  }
+  if (m.includes('forbidden')) {
+    return 'You cannot accept this booking invite.'
+  }
+  return raw.trim() || 'Something went wrong. Try again.'
+}
+
 /**
  * Freelancer accepts/declines a structured booking DM; notifies the company via the same thread + push.
  */
@@ -28,7 +45,7 @@ export async function replyToBookingMessage(opts: {
     const { error: syncErr } = await supabase.rpc('sync_project_member_from_booking_accept', {
       p_booking_message_id: opts.bookingMessageId,
     })
-    if (syncErr) return { ok: false, error: syncErr.message }
+    if (syncErr) return { ok: false, error: bookingAcceptErrorMessage(syncErr.message) }
   }
 
   const payload: Record<string, unknown> = {
