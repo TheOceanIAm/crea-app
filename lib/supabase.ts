@@ -63,11 +63,34 @@ if (!supabaseUrl || !supabaseAnonKey) {
   )
 }
 
+const RETRYABLE_HTTP = new Set([408, 425, 429, 500, 502, 503, 504])
+const FETCH_MAX_ATTEMPTS = 3
+
+/** Brief backoff on gateway timeouts so login/session refresh survives transient Supabase/Cloudflare blips. */
+async function fetchWithGatewayRetry(
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> {
+  let last: Response | null = null
+  for (let attempt = 0; attempt < FETCH_MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(input, init)
+    if (res.ok || !RETRYABLE_HTTP.has(res.status)) return res
+    last = res
+    if (attempt < FETCH_MAX_ATTEMPTS - 1) {
+      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)))
+    }
+  }
+  return last!
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: new LargeSecureStore(),
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+  },
+  global: {
+    fetch: fetchWithGatewayRetry,
   },
 })

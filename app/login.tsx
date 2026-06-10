@@ -7,6 +7,7 @@ import {
 import { router } from 'expo-router'
 import Purchases from 'react-native-purchases'
 import { supabase } from '@/lib/supabase'
+import { isRetryableSupabaseError, sleep, userFacingErrorMessage } from '@/lib/userFacingError'
 import {
   IOS_SIGNUP_ON_WEB_ONLY,
   getCreaWebRegisterUrl,
@@ -20,9 +21,21 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     if (!email || !password) return
     setLoading(true)
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    let data: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>['data'] | null = null
+    let error: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>['error'] | null = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await supabase.auth.signInWithPassword({ email, password })
+      data = result.data
+      error = result.error
+      if (!error) break
+      if (!isRetryableSupabaseError(error) || attempt === 1) break
+      await sleep(900)
+    }
     setLoading(false)
-    if (error) { Alert.alert('Error', error.message); return }
+    if (error) {
+      Alert.alert('Could not sign in', userFacingErrorMessage(error))
+      return
+    }
     if (data.user?.id && Purchases.isConfigured()) {
       try {
         await Purchases.logIn(data.user.id)

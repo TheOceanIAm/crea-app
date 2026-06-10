@@ -14,6 +14,7 @@ import {
 import { router, useLocalSearchParams } from 'expo-router'
 import Purchases from 'react-native-purchases'
 import { supabase } from '@/lib/supabase'
+import { userFacingErrorMessage } from '@/lib/userFacingError'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { getWebAuthConfirmRedirectUrl } from '@/lib/creaWeb'
 import {
@@ -77,7 +78,7 @@ function RegisterForm() {
     })
     setLoading(false)
     if (error) {
-      Alert.alert('Error', error.message)
+      Alert.alert('Could not sign up', userFacingErrorMessage(error))
       return
     }
     if (data.session) {

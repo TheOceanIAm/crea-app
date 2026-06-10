@@ -12,6 +12,7 @@ import {
 } from 'react-native'
 import { router } from 'expo-router'
 import { supabase } from '@/lib/supabase'
+import { userFacingErrorMessage } from '@/lib/userFacingError'
 
 export default function ResetPasswordScreen() {
   const [ready, setReady] = useState(false)
@@ -52,7 +53,7 @@ export default function ResetPasswordScreen() {
     const { error } = await supabase.auth.updateUser({ password })
     setSaving(false)
     if (error) {
-      Alert.alert('Could not update', error.message)
+      Alert.alert('Could not update', userFacingErrorMessage(error))
       return
     }
     Alert.alert('Password updated', 'You can continue with your new password.', [

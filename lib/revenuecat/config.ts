@@ -13,19 +13,60 @@ export const RC_PACKAGE_PRO = 'crea_pro'
 export const RC_PACKAGE_STUDIO = 'crea_studio'
 export const RC_PACKAGE_AGENCY = 'crea_agency'
 
-/** App Store product identifiers (legacy — map to pro until new products ship). */
+/** Legacy App Store product identifiers (pre–de.creaservices.* migration). */
 export const RC_PRODUCT_STARTER = '56912026'
 export const RC_PRODUCT_PRO = '165846'
 export const RC_PRODUCT_STUDIO = '156715'
 export const RC_PRODUCT_AGENCY = '1156474'
 
+/** Current App Store subscription product IDs (see storekit/CreaSubscriptions.storekit). */
+export const RC_STORE_FREELANCER_PRO_MONTHLY = 'de.creaservices.freelancer.pro.monthly'
+export const RC_STORE_FREELANCER_PRO_YEARLY = 'de.creaservices.freelancer.pro.yearly'
+export const RC_STORE_COMPANY_PRO_MONTHLY = 'de.creaservices.company.pro.monthly'
+export const RC_STORE_COMPANY_PRO_YEARLY = 'de.creaservices.company.pro.yearly'
+
+export const RC_FREELANCER_PRODUCT_IDS = new Set([
+  RC_STORE_FREELANCER_PRO_MONTHLY,
+  RC_STORE_FREELANCER_PRO_YEARLY,
+  RC_PRODUCT_PRO,
+  RC_PRODUCT_STARTER,
+  RC_PRODUCT_STUDIO,
+])
+
+export const RC_COMPANY_PRODUCT_IDS = new Set([
+  RC_STORE_COMPANY_PRO_MONTHLY,
+  RC_STORE_COMPANY_PRO_YEARLY,
+  RC_PRODUCT_AGENCY,
+])
+
 export const RC_DEFAULT_OFFERING_ID = 'default'
 
 export const RC_PACKAGE_TO_PRODUCT: Record<string, string> = {
   [RC_PACKAGE_STARTER]: RC_PRODUCT_STARTER,
-  [RC_PACKAGE_PRO]: RC_PRODUCT_PRO,
+  [RC_PACKAGE_PRO]: RC_STORE_FREELANCER_PRO_MONTHLY,
   [RC_PACKAGE_STUDIO]: RC_PRODUCT_STUDIO,
-  [RC_PACKAGE_AGENCY]: RC_PRODUCT_AGENCY,
+  [RC_PACKAGE_AGENCY]: RC_STORE_COMPANY_PRO_MONTHLY,
+}
+
+export function isFreelancerStoreProductId(productId: string): boolean {
+  const id = String(productId ?? '').trim()
+  if (!id) return false
+  if (RC_FREELANCER_PRODUCT_IDS.has(id)) return true
+  return id.toLowerCase().includes('.freelancer.')
+}
+
+export function isCompanyStoreProductId(productId: string): boolean {
+  const id = String(productId ?? '').trim()
+  if (!id) return false
+  if (RC_COMPANY_PRODUCT_IDS.has(id)) return true
+  return id.toLowerCase().includes('.company.')
+}
+
+export function storeProductMatchesRole(
+  productId: string,
+  role: 'freelancer' | 'company'
+): boolean {
+  return role === 'company' ? isCompanyStoreProductId(productId) : isFreelancerStoreProductId(productId)
 }
 
 /** Normalized subscription tier for app logic (2-tier model). */

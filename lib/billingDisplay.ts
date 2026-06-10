@@ -50,7 +50,7 @@ export function companyStripePlanLabel(plan: CompanyStripePlan): string {
 export function companyStripePlanDescription(plan: CompanyStripePlan): string {
   switch (plan) {
     case 'pro':
-      return 'Unlimited job listings and pool saves, all features, 2 team seats included (extra seats €12.99/mo each).'
+      return 'Unlimited job listings and pool saves, all features, 5 team seats included (extra seats €12.99/mo each).'
     case 'free':
       return '1 job listing per month on Free — upgrade to Pro for unlimited listings and full hiring tools.'
     default:

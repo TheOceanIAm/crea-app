@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { userFacingErrorMessage } from '@/lib/userFacingError'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { getWebAuthConfirmRedirectUrl } from '@/lib/creaWeb'
 
@@ -40,7 +41,7 @@ export default function ForgotPasswordScreen() {
     const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo })
     setLoading(false)
     if (error) {
-      Alert.alert('Could not send', error.message)
+      Alert.alert('Could not send', userFacingErrorMessage(error))
       return
     }
     Alert.alert(

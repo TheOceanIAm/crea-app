@@ -1,4 +1,5 @@
 import type { PurchasesPackage } from 'react-native-purchases'
+import { storeProductMatchesRole } from '@/lib/revenuecat/config'
 import { formatPackageDisplayPrice, packageCadence } from '@/lib/revenuecat/storeProductPrice'
 
 const DEFAULT_TITLES = {
@@ -11,7 +12,9 @@ export function subscriptionProductTitle(
   role: 'freelancer' | 'company'
 ): string {
   const fromStore = pkg.product.title?.trim()
-  if (fromStore) return fromStore
+  if (fromStore && storeProductMatchesRole(pkg.product.identifier, role)) {
+    return fromStore
+  }
   return DEFAULT_TITLES[role]
 }
 

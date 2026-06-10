@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { userFacingErrorMessage } from '@/lib/userFacingError'
 import * as Linking from 'expo-linking'
 
 export type AuthDeepLinkDestination = 'home' | 'reset-password'
@@ -76,7 +77,7 @@ export async function handleSupabaseAuthCallbackUrl(url: string): Promise<AuthDe
     const code = fromSearch.get('code') || fromHash.get('code')
     if (code) {
       const { error } = await supabase.auth.exchangeCodeForSession(code)
-      if (error) return { handled: true, ok: false, message: error.message }
+      if (error) return { handled: true, ok: false, message: userFacingErrorMessage(error) }
       return {
         handled: true,
         ok: true,
@@ -88,7 +89,7 @@ export async function handleSupabaseAuthCallbackUrl(url: string): Promise<AuthDe
     const refresh_token = fromHash.get('refresh_token') || fromSearch.get('refresh_token')
     if (access_token && refresh_token) {
       const { error } = await supabase.auth.setSession({ access_token, refresh_token })
-      if (error) return { handled: true, ok: false, message: error.message }
+      if (error) return { handled: true, ok: false, message: userFacingErrorMessage(error) }
       return {
         handled: true,
         ok: true,
@@ -102,7 +103,10 @@ export async function handleSupabaseAuthCallbackUrl(url: string): Promise<AuthDe
       message: 'This link is missing sign-in data. Try opening the link from your email again.',
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Invalid link'
-    return { handled: true, ok: false, message: msg }
+    return {
+      handled: true,
+      ok: false,
+      message: userFacingErrorMessage(e, 'Invalid link. Try opening it from your email again.'),
+    }
   }
 }

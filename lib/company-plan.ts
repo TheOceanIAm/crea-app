@@ -61,8 +61,11 @@ export function maxPoolSaves(plan: ResolvedCompanyPlan): number {
   return plan === 'pro' ? Number.POSITIVE_INFINITY : 0
 }
 
+/** Pro includes this many team seats; extra seats via Stripe add-on on web. */
+export const INCLUDED_COMPANY_PRO_SEATS = 5
+
 export function maxTeamSeats(plan: ResolvedCompanyPlan, extraSeats = 0): number {
   if (plan !== 'pro') return 0
   const extra = Number.isFinite(extraSeats) ? Math.max(0, Math.floor(extraSeats)) : 0
-  return 2 + extra
+  return INCLUDED_COMPANY_PRO_SEATS + extra
 }

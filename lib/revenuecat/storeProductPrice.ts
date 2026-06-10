@@ -209,8 +209,9 @@ export function formatPackageDisplayPrice(
 
 export function packageCadence(pkg: PurchasesPackage): 'monthly' | 'yearly' | 'other' {
   const type = (pkg.packageType || '').toLowerCase()
-  if (type.includes('annual') || type.includes('year')) return 'yearly'
-  if (type.includes('monthly') || type.includes('month')) return 'monthly'
+  const productId = pkg.product.identifier.toLowerCase()
+  if (type.includes('annual') || type.includes('year') || productId.includes('.yearly')) return 'yearly'
+  if (type.includes('monthly') || type.includes('month') || productId.includes('.monthly')) return 'monthly'
   return 'other'
 }
 

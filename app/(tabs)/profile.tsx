@@ -240,7 +240,7 @@ function CompanySeatWebPanel() {
     <View style={styles.seatWebPanel}>
       <Text style={styles.seatWebTitle}>Team seats</Text>
       <Text style={styles.seatWebText}>
-        Pro includes 2 seats. Additional seats ({companySeatAddonPriceLine()}) are purchased on creaservices.de
+        Pro includes 5 seats. Additional seats ({companySeatAddonPriceLine()}) are purchased on creaservices.de
         via Stripe — not in the App Store.
       </Text>
       <TouchableOpacity

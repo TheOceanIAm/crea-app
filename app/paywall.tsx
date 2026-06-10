@@ -37,7 +37,11 @@ import {
 } from '@/lib/revenuecat/config'
 import { resolveAppRole } from '@/lib/profileRole'
 import { PLATFORM_TRIAL_DAYS } from '@/lib/platformTrial'
-import { formatCatalogPrice } from '@/lib/planCatalogPrices'
+import {
+  COMPANY_PLAN_PRICE_EUR,
+  FREELANCER_PLAN_PRICE_EUR,
+  formatCatalogPrice,
+} from '@/lib/planCatalogPrices'
 import { filterPackagesForRole } from '@/lib/revenuecat/offeringsPackages'
 import {
   offeringsEmptyMessage,
@@ -47,6 +51,7 @@ import {
 import {
   formatPackageDisplayPrice,
   packageCadence,
+  shouldUseCatalogPriceFallback,
   storeCurrencyRegionHint,
 } from '@/lib/revenuecat/storeProductPrice'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -73,7 +78,7 @@ const PAYWALL_COPY: Record<
     headline: 'Fill your roster and hire faster on every shoot.',
     features: [
       'Unlimited job listings & talent pool',
-      '2 team seats included on Pro',
+      '5 team seats included on Pro',
       'Applications, postings & hiring dashboard',
     ],
     trialLead: 'New company accounts:',
@@ -105,10 +110,21 @@ function packagePriceMain(
   return display.text.replace(/\/mo$|\/yr$/i, '').trim()
 }
 
+function catalogYearlyAmount(role: 'freelancer' | 'company'): number {
+  return role === 'company' ? COMPANY_PLAN_PRICE_EUR.proYearly : FREELANCER_PLAN_PRICE_EUR.proYearly
+}
+
+function catalogMonthlyAmount(role: 'freelancer' | 'company'): number {
+  return role === 'company' ? COMPANY_PLAN_PRICE_EUR.proMonthly : FREELANCER_PLAN_PRICE_EUR.proMonthly
+}
+
 function yearlyPerMonthLabel(
   yearlyPkg: PurchasesPackage,
   role: 'freelancer' | 'company'
 ): string | null {
+  if (shouldUseCatalogPriceFallback(yearlyPkg.product)) {
+    return `${formatCatalogPrice(catalogYearlyAmount(role) / 12)}/mo`
+  }
   const perMonth = yearlyPkg.product.price / 12
   if (!Number.isFinite(perMonth) || perMonth <= 0) return null
   return `${formatCatalogPrice(perMonth)}/mo`
@@ -116,8 +132,17 @@ function yearlyPerMonthLabel(
 
 function yearlySavingsLabel(
   monthlyPkg: PurchasesPackage | undefined,
-  yearlyPkg: PurchasesPackage
+  yearlyPkg: PurchasesPackage,
+  role: 'freelancer' | 'company'
 ): string | null {
+  if (
+    shouldUseCatalogPriceFallback(yearlyPkg.product) ||
+    (monthlyPkg && shouldUseCatalogPriceFallback(monthlyPkg.product))
+  ) {
+    const save = catalogMonthlyAmount(role) * 12 - catalogYearlyAmount(role)
+    if (save < 0.5) return null
+    return `SAVE ${formatCatalogPrice(save)}/YR`
+  }
   const monthly = monthlyPkg?.product.price
   const yearly = yearlyPkg.product.price
   if (monthly == null || !Number.isFinite(monthly) || !Number.isFinite(yearly)) return null
@@ -301,7 +326,9 @@ export default function PaywallScreen() {
   const selectedPackage = availableOptions.find((pkg) => pkg.identifier === selectedPackageId) ?? null
   const selectedPlan = planCards[0]
   const savingsLabel =
-    yearlyPackage && role ? yearlySavingsLabel(monthlyPackage ?? undefined, yearlyPackage) : null
+    yearlyPackage && role
+      ? yearlySavingsLabel(monthlyPackage ?? undefined, yearlyPackage, storeRole)
+      : null
   const busy = !!busyPackageId
 
   const goBack = useCallback(() => {
