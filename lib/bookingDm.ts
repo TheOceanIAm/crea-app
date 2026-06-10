@@ -38,17 +38,28 @@ export function parseBookingDm(raw: string): BookingDmPayloadV1 | null {
   if (t.startsWith(BOOKING_DM_PREFIX)) {
     const rest = t.slice(BOOKING_DM_PREFIX.length).trimStart().replace(/^\n+/, '')
     const line = rest.split(/\r?\n/)[0] ?? ''
-    try {
-      const o = JSON.parse(line) as BookingDmPayloadV1
-      if (o?.v === 1 && typeof o.title === 'string' && o.openDeepLink) return o
-    } catch {
-      return null
-    }
-    return null
+    const parsed = parseBookingDmJson(line) ?? parseBookingDmJson(rest.match(/\{[\s\S]*\}/)?.[0] ?? '')
+    if (parsed) return parsed
   }
   const webCal = parsePublicCalendarBookingDm(t)
   if (webCal) return webCal
   return parseLegacyBookingDm(t)
+}
+
+function parseBookingDmJson(line: string): BookingDmPayloadV1 | null {
+  const s = line.trim()
+  if (!s.startsWith('{')) return null
+  try {
+    const o = JSON.parse(s) as BookingDmPayloadV1
+    if (o?.v !== 1 || typeof o.title !== 'string') return null
+    const link = typeof o.openDeepLink === 'string' ? o.openDeepLink.trim() : ''
+    return {
+      ...o,
+      openDeepLink: link || 'crea://',
+    }
+  } catch {
+    return null
+  }
 }
 
 /**
