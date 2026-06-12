@@ -15,6 +15,8 @@ import {
   consumeInitialSupabaseAuthUrlForBootstrap,
   handleSupabaseAuthCallbackUrl,
 } from '@/lib/authDeepLink'
+import { isAppStoreScreenshotDeepLink } from '@/lib/appStoreScreenshotDeepLink'
+import { isAppStoreScreenshotModeEnabled } from '@/lib/appStoreScreenshotMode'
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
 
@@ -22,7 +24,21 @@ SplashScreen.preventAutoHideAsync().catch(() => {})
 function BootstrapAuthGate({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false)
   useEffect(() => {
-    void consumeInitialSupabaseAuthUrlForBootstrap().finally(() => setReady(true))
+    let cancelled = false
+    void (async () => {
+      if (isAppStoreScreenshotModeEnabled()) {
+        const initial = await Linking.getInitialURL()
+        if (isAppStoreScreenshotDeepLink(initial)) {
+          if (!cancelled) setReady(true)
+          return
+        }
+      }
+      await consumeInitialSupabaseAuthUrlForBootstrap()
+      if (!cancelled) setReady(true)
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
   if (!ready) return <View style={styles.authGate} />
   return <>{children}</>

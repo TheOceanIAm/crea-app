@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { ChevronLeft, Plus } from 'lucide-react-native'
 import { getAuthUser } from '@/lib/getAuthUser'
@@ -265,7 +266,7 @@ export default function CompanyPostJobScreen() {
         <Text style={styles.backText}>Tools</Text>
       </TouchableOpacity>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         <Text style={styles.title}>Post a project</Text>
         <Text style={styles.sub}>Freelancers can apply from the Jobs tab. Review applicants on Pro.</Text>
 
@@ -474,7 +475,7 @@ export default function CompanyPostJobScreen() {
             <Text style={styles.primaryBtnText}>Publish project</Text>
           )}
         </TouchableOpacity>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   )
 }
@@ -483,7 +484,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
   center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', padding: 24 },
   scroll: { flex: 1 },
-  content: { paddingHorizontal: 20, paddingBottom: 48 },
+  content: { paddingHorizontal: 20 },
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 10 },
   backText: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },
   title: { fontSize: 26, fontWeight: '900', color: '#fff', marginBottom: 8 },

@@ -5,15 +5,14 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   Alert,
-  ScrollView,
   Switch,
   Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView'
 import { router } from 'expo-router'
 import { Briefcase, Building2, Camera, ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
@@ -253,17 +252,12 @@ export default function OnboardingScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      <KeyboardAwareScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        includeTabBarInset={false}
+        extraBottomPadding={32}
       >
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
           <Text style={styles.kicker}>WELCOME TO CREA</Text>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.sub}>{sub}</Text>
@@ -487,8 +481,7 @@ export default function OnboardingScreen() {
           >
             <Text style={styles.signOutText}>Use a different account</Text>
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
     </SafeAreaView>
   )
 }

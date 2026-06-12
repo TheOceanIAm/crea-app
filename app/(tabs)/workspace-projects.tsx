@@ -2,8 +2,6 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Image,
-  Modal,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
@@ -11,7 +9,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
-import { useFocusEffect, useRouter, type Href } from 'expo-router'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { KeyboardFormModal } from '@/components/KeyboardFormModal'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
+import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo-router'
 import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { getAuthUser } from '@/lib/getAuthUser'
@@ -158,6 +159,8 @@ function readInitialWorkspaceProjects(): {
 
 export default function WorkspaceProjectsScreen() {
   const router = useRouter()
+  const { create: createParam } = useLocalSearchParams<{ create?: string }>()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const boot = useRef(readInitialWorkspaceProjects()).current
   const hasLoadedRef = useRef(!boot.loading)
   const lastLoadedAtRef = useRef(boot.loading ? 0 : Date.now())
@@ -560,6 +563,14 @@ export default function WorkspaceProjectsScreen() {
     }, [load])
   )
 
+  useFocusEffect(
+    useCallback(() => {
+      if (createParam !== '1') return
+      setCreateOpen(true)
+      router.setParams({ create: undefined })
+    }, [createParam, router])
+  )
+
   const listingSections = useMemo<ListingSection[]>(() => {
     if (viewerRole !== 'freelancer') {
       return [{ title: '', subtitle: '', data: listings }]
@@ -904,14 +915,25 @@ export default function WorkspaceProjectsScreen() {
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backText}>Dashboard</Text>
         </TouchableOpacity>
-        {canCreatePrivate ? (
-          <TouchableOpacity style={styles.newBtn} onPress={() => setCreateOpen(true)}>
-            <Plus size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
-            <Text style={styles.newBtnText}>New project</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.newBtnPlaceholder} />
-        )}
+        <View style={styles.topActions}>
+          {viewerRole === 'company' ? (
+            <TouchableOpacity
+              style={styles.postListingBtn}
+              onPress={() => router.push('/(tabs)/company-post-job' as Href)}
+            >
+              <Plus size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+              <Text style={styles.postListingBtnText}>Post listing</Text>
+            </TouchableOpacity>
+          ) : null}
+          {canCreatePrivate ? (
+            <TouchableOpacity style={styles.newBtn} onPress={() => setCreateOpen(true)}>
+              <Plus size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+              <Text style={styles.newBtnText}>New project</Text>
+            </TouchableOpacity>
+          ) : viewerRole !== 'company' ? (
+            <View style={styles.newBtnPlaceholder} />
+          ) : null}
+        </View>
       </View>
 
       <Text style={styles.title}>Projects</Text>
@@ -945,7 +967,7 @@ export default function WorkspaceProjectsScreen() {
           ) : null
         }
         SectionSeparatorComponent={() => <View style={styles.sectionGap} />}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: tabBarInset + 24 }]}
         ListEmptyComponent={
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>No projects yet</Text>
@@ -975,9 +997,7 @@ export default function WorkspaceProjectsScreen() {
         }
       />
 
-      <Modal visible={createOpen} transparent animationType="fade" onRequestClose={() => setCreateOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
+      <KeyboardFormModal visible={createOpen} onClose={() => setCreateOpen(false)}>
             <Text style={styles.modalTitle}>New project</Text>
             <Text style={styles.modalSub}>
               Creates a private workspace only. It will not appear on the Jobs tab for other users.
@@ -990,6 +1010,7 @@ export default function WorkspaceProjectsScreen() {
               onChangeText={setTitle}
               placeholder="e.g. Brand film — spring"
               placeholderTextColor="rgba(255,255,255,0.3)"
+              returnKeyType="next"
             />
 
             <Text style={styles.fieldLabel}>Notes (optional)</Text>
@@ -1016,16 +1037,12 @@ export default function WorkspaceProjectsScreen() {
                 onPress={onCreate}
                 disabled={!title.trim() || creating}
               >
-                <Text style={styles.modalBtnAccentText}>{creating ? 'Creating…' : 'Create & open workspace'}</Text>
+                <Text style={styles.modalBtnAccentText}>{creating ? 'Creating…' : 'Create'}</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
-      </Modal>
+      </KeyboardFormModal>
 
-      <Modal visible={editOpen} transparent animationType="fade" onRequestClose={() => setEditOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
+      <KeyboardFormModal visible={editOpen} onClose={() => setEditOpen(false)}>
             <Text style={styles.modalTitle}>Edit project</Text>
             <Text style={styles.modalSub}>Update project title and notes for this private workspace project.</Text>
 
@@ -1035,7 +1052,7 @@ export default function WorkspaceProjectsScreen() {
               value={editTitle}
               onChangeText={setEditTitle}
               placeholder="Project name"
-              placeholderTextColor="rgba(255,255,255,0.3)"
+              placeholderTextColor="rgba(255,255,255,0.3"
             />
 
             <Text style={styles.fieldLabel}>Notes (optional)</Text>
@@ -1065,9 +1082,7 @@ export default function WorkspaceProjectsScreen() {
                 <Text style={styles.modalBtnAccentText}>{actingId ? 'Saving…' : 'Save changes'}</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
-      </Modal>
+      </KeyboardFormModal>
     </SafeAreaView>
   )
 }
@@ -1084,6 +1099,17 @@ const styles = StyleSheet.create({
   },
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   backText: { fontSize: 16, color: '#FFDC00', fontWeight: '600' },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  postListingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: '#FFDC00',
+  },
+  postListingBtnText: { color: '#0a0a0a', fontWeight: '800', fontSize: 12 },
   newBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1253,16 +1279,6 @@ const styles = StyleSheet.create({
   archiveList: { marginTop: 8, gap: 12 },
   blockTitle: { fontSize: 19, color: '#fff', fontWeight: '800', marginBottom: 8 },
   blockSub: { fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 20 },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 20 },
-  modalCard: {
-    width: '100%',
-    maxWidth: 560,
-    backgroundColor: '#141414',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    padding: 18,
-  },
   modalTitle: { fontSize: 30, fontWeight: '900', color: '#FFDC00', textTransform: 'uppercase', marginBottom: 6 },
   modalSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', lineHeight: 18, marginBottom: 14 },
   fieldLabel: {
@@ -1285,10 +1301,18 @@ const styles = StyleSheet.create({
   },
   inputTall: { minHeight: 110 },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
-  modalBtn: { flex: 1, paddingVertical: 12, borderRadius: 999, alignItems: 'center' },
+  modalBtn: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 13,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   modalBtnGhost: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  modalBtnGhostText: { color: 'rgba(255,255,255,0.8)', fontWeight: '700' },
+  modalBtnGhostText: { color: 'rgba(255,255,255,0.8)', fontWeight: '700', fontSize: 14, textAlign: 'center' },
   modalBtnAccent: { backgroundColor: '#FFDC00' },
-  modalBtnAccentText: { color: '#0a0a0a', fontWeight: '800' },
+  modalBtnAccentText: { color: '#0a0a0a', fontWeight: '800', fontSize: 14, textAlign: 'center' },
   dim: { opacity: 0.6 },
 })

@@ -9,13 +9,13 @@ import {
   ActivityIndicator,
   ScrollView,
   Switch,
-  KeyboardAvoidingView,
   Platform,
   Linking,
   Image,
 } from 'react-native'
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView'
 import * as Device from 'expo-device'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect } from '@react-navigation/native'
 import { router, type Href } from 'expo-router'
 import type { LucideIcon } from 'lucide-react-native'
@@ -122,7 +122,8 @@ import {
 
 const SUPPORT_EMAIL = 'support@creaservices.com'
 const SUPPORT_MAILTO = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('CREA App Support')}`
-const TAB_BAR_HEIGHT = 80
+const PROFILE_MENU_EXTRA_BOTTOM = 28
+const PROFILE_PLAN_EXTRA_BOTTOM = 48
 
 type MenuId =
   | 'profile'
@@ -278,8 +279,6 @@ function CurrentPlanSummary({
 }
 
 export default function ProfileScreen() {
-  const insets = useSafeAreaInsets()
-
   const [loading, setLoading] = useState(true)
   const [activeMenu, setActiveMenu] = useState<MenuId>('profile')
   const [email, setEmail] = useState('')
@@ -1305,7 +1304,7 @@ export default function ProfileScreen() {
     )
   }
 
-  const bottomPad = TAB_BAR_HEIGHT + insets.bottom + (activeMenu === 'plan' ? 48 : 28)
+  const bottomExtra = activeMenu === 'plan' ? PROFILE_PLAN_EXTRA_BOTTOM : PROFILE_MENU_EXTRA_BOTTOM
 
   const placeholder = (title: string, body: string) => (
     <View style={styles.sectionCard}>
@@ -1376,16 +1375,11 @@ export default function ProfileScreen() {
           })}
         </ScrollView>
 
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        <KeyboardAwareScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          extraBottomPadding={bottomExtra}
         >
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
           {loadError ? (
             <View style={styles.errorBanner}>
               <Text style={styles.errorTitle}>Couldn’t load profile</Text>
@@ -2714,8 +2708,7 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </>
           )}
-          </ScrollView>
-        </KeyboardAvoidingView>
+          </KeyboardAwareScrollView>
       </View>
 
       <ShareSheetModal

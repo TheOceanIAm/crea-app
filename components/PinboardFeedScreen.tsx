@@ -25,6 +25,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { CreaFeedPostSkeleton, CreaInlineLoader } from '@/components/CreaLoading'
 import { PlatformTrialBanners } from '@/components/PlatformTrialBanners'
 import { TabScreenHeader } from '@/components/TabScreenHeader'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import {
   canFreelancerCreatePrivateProjects,
   freelancerCanPostJobs,
@@ -87,6 +88,7 @@ function readInitialFeed(): { posts: PinboardPost[]; loading: boolean; fetchedAt
 
 export function PinboardFeedScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const bootFeed = useRef(readInitialFeed()).current
   const { overview, refresh: refreshOverview } = useDashboardOverview()
   const userId = overview?.userId ?? null
@@ -412,27 +414,31 @@ export function PinboardFeedScreen() {
           <Text style={styles.noLinkTitle}>{PINBOARD_UPDATES_COPY.noLinkOptionsTitle}</Text>
           <Text style={styles.blockedText}>{PINBOARD_UPDATES_COPY.noLinkOptionsBody}</Text>
           <View style={styles.ctaRow}>
-            {canPostJobs ? (
+            {isCompanyProfile(role ?? undefined) ? (
               <TouchableOpacity
                 style={styles.ctaPrimary}
-                onPress={() =>
-                  router.push(
-                    (isCompanyProfile(role ?? undefined)
-                      ? '/(tabs)/company-post-job'
-                      : '/(tabs)/jobs') as Href
-                  )
-                }
+                onPress={() => router.push('/(tabs)/company-post-job' as Href)}
               >
                 <Text style={styles.ctaPrimaryText}>{PINBOARD_UPDATES_COPY.createListingLabel}</Text>
               </TouchableOpacity>
-            ) : null}
-            {!isCompanyProfile(role ?? undefined) &&
-            canFreelancerCreatePrivateProjects(freelancerPlan) ? (
+            ) : canFreelancerCreatePrivateProjects(freelancerPlan) ? (
+              <TouchableOpacity
+                style={styles.ctaPrimary}
+                onPress={() =>
+                  router.push({
+                    pathname: '/(tabs)/workspace-projects',
+                    params: { create: '1' },
+                  } as Href)
+                }
+              >
+                <Text style={styles.ctaPrimaryText}>{PINBOARD_UPDATES_COPY.createProjectLabel}</Text>
+              </TouchableOpacity>
+            ) : canPostJobs ? (
               <TouchableOpacity
                 style={styles.ctaSecondary}
-                onPress={() => router.push('/(tabs)/workspace-projects' as Href)}
+                onPress={() => router.push('/(tabs)/jobs' as Href)}
               >
-                <Text style={styles.ctaSecondaryText}>{PINBOARD_UPDATES_COPY.createProjectLabel}</Text>
+                <Text style={styles.ctaSecondaryText}>Browse job pool</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -491,7 +497,7 @@ export function PinboardFeedScreen() {
         keyExtractor={(p) => p.id}
         renderItem={renderPost}
         ListHeaderComponent={listHeader}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: tabBarInset + 24 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor="#FFDC00" />

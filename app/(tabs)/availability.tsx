@@ -9,11 +9,11 @@ import {
   ActivityIndicator,
   TextInput,
   Alert,
-  KeyboardAvoidingView,
   Platform,
   useWindowDimensions,
 } from 'react-native'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView'
 import { useRouter } from 'expo-router'
 import { ChevronLeft, ChevronRight } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
@@ -30,8 +30,6 @@ import {
 import { addMonths, buildMonthSlotMatrix, formatMonthTitle } from '@/lib/calendarMonth'
 import { readCachedAvailability, loadAvailabilityCache, cacheAvailability } from '@/lib/availabilityCache'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
-
-const TAB_BAR_HEIGHT = 80
 
 function readInitialAvailability(): {
   loading: boolean
@@ -161,7 +159,6 @@ function MonthPage({
 
 export default function AvailabilityScreen() {
   const router = useRouter()
-  const insets = useSafeAreaInsets()
   const { width: windowWidth } = useWindowDimensions()
   const cardGutter = 12
   const pageWidth = Math.max(280, windowWidth - cardGutter * 2)
@@ -326,14 +323,9 @@ export default function AvailabilityScreen() {
     )
   }
 
-  const bottomPad = TAB_BAR_HEIGHT + insets.bottom + 24
-
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <View style={styles.flex}>
         <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.backBtn}
@@ -345,12 +337,12 @@ export default function AvailabilityScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView
+        <KeyboardAwareScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}
+          contentContainerStyle={styles.scrollContent}
+          extraBottomPadding={24}
           keyboardShouldPersistTaps="always"
           nestedScrollEnabled
-          showsVerticalScrollIndicator={false}
         >
           <Text style={styles.kicker}>AVAILABILITY</Text>
           <Text style={styles.title}>Set it once.</Text>
@@ -466,8 +458,8 @@ export default function AvailabilityScreen() {
               <Text style={styles.saveBtnText}>Save</Text>
             )}
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
+      </View>
     </SafeAreaView>
   )
 }

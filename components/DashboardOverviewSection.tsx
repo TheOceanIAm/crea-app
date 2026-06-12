@@ -371,7 +371,7 @@ export function DashboardOverviewSection({
               onPress={() => {
                 if (a.disabled) return
                 if (a.href) {
-                  router.navigate(a.href as Href)
+                  router.push(a.href as Href)
                   return
                 }
                 if (a.webPath) void openCreaWebPath(a.webPath)

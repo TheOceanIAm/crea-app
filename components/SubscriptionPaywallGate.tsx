@@ -15,6 +15,7 @@ function normalizePath(pathname: string | null | undefined): string {
 function isProfilePlanTabPath(path: string): boolean {
   const n = normalizePath(path);
   if (n.includes("profile-preview")) return false;
+  if (n.includes("app-store-screenshots")) return false;
   const segments = n.split("/").filter(Boolean);
   const last = segments[segments.length - 1] ?? "";
   return last === "profile";
@@ -28,6 +29,7 @@ function isPaywallAllowedRoute(path: string): boolean {
   if (n === "/onboarding") return true;
   if (n === "/paywall") return true;
   if (n === "/platform-flow-preview") return true;
+  if (n.startsWith("/app-store-screenshots")) return true;
   if (isProfilePlanTabPath(n)) return true;
   return false;
 }

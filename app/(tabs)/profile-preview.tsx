@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect } from '@react-navigation/native'
 import { router } from 'expo-router'
 import { ChevronLeft, Eye, Share2 } from 'lucide-react-native'
@@ -28,10 +28,10 @@ import type { PublicProfileWidgets } from '@/lib/publicProfileWidgets'
 import { loadLiveCeoWidgets } from '@/lib/ceoLiveWidgets'
 import { profileShareUrl } from '@/lib/shareLinks'
 
-const TAB_BAR_HEIGHT = 80
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 
 export default function ProfilePreviewScreen() {
-  const insets = useSafeAreaInsets()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const [loading, setLoading] = useState(true)
   const [payload, setPayload] = useState<FreelancerPublicProfilePayload | null>(null)
   const [authUserId, setAuthUserId] = useState<string | null>(null)
@@ -98,7 +98,7 @@ export default function ProfilePreviewScreen() {
     [payload?.name]
   )
 
-  const bottomPad = TAB_BAR_HEIGHT + insets.bottom + 24
+  const bottomPad = tabBarInset + 24
 
   if (loading) {
     return (

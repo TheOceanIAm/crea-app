@@ -30,6 +30,8 @@
     "web": "bash scripts/expo-with-nvm.sh start --web",
     "deploy:supabase": "bash scripts/deploy-supabase.sh",
     "deploy:notify-push": "bash scripts/deploy-notify-push.sh",
+    "app-store-screenshots:dev": "EXPO_PUBLIC_APP_STORE_SCREENSHOTS=1 npm run dev:ios",
+    "app-store-screenshots:capture": "bash scripts/capture-app-store-screenshots.sh",
     "splash:transparent-bg": "node scripts/splash-make-transparent-bg.mjs",
     "splash:fix": "node scripts/splash-flatten-brand-yellow.mjs",
     "icon:flatten-yellow": "node scripts/icon-flatten-brand-yellow.mjs",

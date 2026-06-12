@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, InteractionManager, Platform, StyleSheet, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import { Tabs, usePathname } from 'expo-router'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Bell, Briefcase, House, LayoutDashboard, UserRound } from 'lucide-react-native'
+import { FloatingGlassTabBar } from '@/components/FloatingGlassTabBar'
+import { floatingTabBarSlotHeight } from '@/lib/floatingTabBarLayout'
 import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
 import { ICON_STROKE_TAB } from '@/lib/iconTheme'
 import { getAuthUser } from '@/lib/getAuthUser'
@@ -26,6 +29,7 @@ let realtimeTopicSeq = 0
 
 export default function TabLayout() {
   const pathname = usePathname()
+  const insets = useSafeAreaInsets()
   const { isBootstrapOverlayBlocking } = useAppBootstrapOverlay()
   const [userId, setUserId] = useState<string | null>(null)
   const [goodNewsPopup, setGoodNewsPopup] = useState<{ body: string; source?: string } | null>(null)
@@ -218,23 +222,21 @@ export default function TabLayout() {
       />
       <Tabs
         initialRouteName="feed"
+        tabBar={(props) => <FloatingGlassTabBar {...props} />}
         screenOptions={{
           headerShown: false,
           lazy: true,
-          tabBarStyle: {
-            backgroundColor: '#111111',
-            borderTopColor: 'rgba(255,255,255,0.06)',
-            borderTopWidth: 1,
-            height: 80,
-            paddingBottom: 20,
-            paddingTop: 10,
-          },
           tabBarActiveTintColor: '#FFDC00',
-          tabBarInactiveTintColor: 'rgba(255,255,255,0.25)',
-          tabBarLabelStyle: {
-            fontSize: 10,
-            fontWeight: '600',
-            letterSpacing: 0.5,
+          tabBarInactiveTintColor: 'rgba(255,255,255,0.38)',
+          tabBarStyle: {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'transparent',
+            borderTopWidth: 0,
+            elevation: 0,
+            height: floatingTabBarSlotHeight(insets.bottom),
           },
         }}
       >
