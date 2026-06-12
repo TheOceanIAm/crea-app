@@ -14,7 +14,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter, type Href } from 'expo-router'
-import { ChevronLeft, MapPin, Star } from 'lucide-react-native'
+import { ChevronLeft, MapPin, Plus, Star } from 'lucide-react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
@@ -666,8 +666,12 @@ export default function TalentPoolScreen() {
                     placeholder="Folder name"
                     placeholderTextColor="rgba(255,255,255,0.28)"
                   />
-                  <TouchableOpacity style={styles.chipOn} onPress={() => void createFolder()}>
-                    <Text style={[styles.chipTextOn, { paddingHorizontal: 12, paddingVertical: 10 }]}>Create</Text>
+                  <TouchableOpacity
+                    style={[styles.chipOn, { paddingHorizontal: 12, paddingVertical: 10, justifyContent: 'center', alignItems: 'center' }]}
+                    onPress={() => void createFolder()}
+                    accessibilityLabel="Create folder"
+                  >
+                    <Plus size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
                   </TouchableOpacity>
                 </View>
               ) : null}
