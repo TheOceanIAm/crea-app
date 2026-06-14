@@ -163,17 +163,19 @@ export default function PublicProfileShareScreen() {
         showsVerticalScrollIndicator={Platform.OS !== 'web'}
       >
         <View style={styles.topBar}>
-          <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
-            <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-            <Text style={styles.backText}>Back</Text>
+          <TouchableOpacity style={styles.topBarSide} onPress={() => router.back()} hitSlop={12}>
+            <ChevronLeft size={22} color="#fff" strokeWidth={ICON_STROKE} />
           </TouchableOpacity>
+          <Text style={styles.topBarTitle} numberOfLines={1}>
+            {name}
+          </Text>
           <TouchableOpacity
-            style={styles.shareIconBtn}
+            style={[styles.topBarSide, styles.topBarSideRight]}
             onPress={() => setShareOpen(true)}
             hitSlop={12}
             accessibilityLabel="Share profile"
           >
-            <Share2 size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+            <Share2 size={22} color="#fff" strokeWidth={ICON_STROKE} />
           </TouchableOpacity>
         </View>
 
@@ -192,7 +194,7 @@ export default function PublicProfileShareScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#0a0a0a' },
+  safe: { flex: 1, backgroundColor: '#000000' },
   pageScroll: { flex: 1 },
   pageScrollContent: { flexGrow: 1, paddingBottom: 24 },
   ceoSafe: { flex: 1, backgroundColor: '#000000' },
@@ -200,17 +202,23 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 4,
     paddingBottom: 8,
     maxWidth: 560,
     alignSelf: 'center',
     width: '100%',
   },
-  backRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  backText: { fontSize: 16, fontWeight: '600', color: '#FFDC00' },
-  shareIconBtn: { padding: 4 },
+  topBarSide: { width: 40, alignItems: 'flex-start', justifyContent: 'center' },
+  topBarSideRight: { alignItems: 'flex-end' },
+  topBarTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    paddingHorizontal: 8,
+  },
   scrollPad: { paddingHorizontal: 24, paddingBottom: 40, maxWidth: 560, alignSelf: 'center', width: '100%' },
   ceoScrollPad: {
     paddingHorizontal: 24,

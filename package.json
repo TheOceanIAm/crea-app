@@ -12,6 +12,8 @@
     "dev:fresh": "npm run dev:ios:clear",
     "dev:tunnel": "npm run metro:kill && bash scripts/expo-with-nvm.sh start --tunnel --scheme exp+crea-app",
     "dev:loopback": "npm run metro:kill && bash scripts/expo-with-nvm.sh start --localhost --scheme exp+crea-app",
+    "dev:attach": "bash scripts/expo-with-nvm.sh start --localhost --scheme exp+crea-app",
+    "sim:dev": "bash scripts/start-sim-dev.sh",
     "dev:xcode": "npm run dev:loopback",
     "sim": "npm run dev:ios",
     "start": "npm run dev",

@@ -33,6 +33,7 @@ import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { getCache, setCache } from '@/lib/appCache'
 import { runTimed } from '@/lib/perfMarks'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
+import { ResponsiveScreen } from '@/components/ResponsiveScreen'
 
 type ListingKind = 'private' | 'customer'
 
@@ -884,9 +885,11 @@ export default function WorkspaceProjectsScreen() {
   if (loading || allowed === null) {
     return (
       <SafeAreaView style={styles.safe}>
+        <ResponsiveScreen>
         <View style={styles.loadingShell}>
           <ScreenListSkeleton rows={6} />
         </View>
+        </ResponsiveScreen>
       </SafeAreaView>
     )
   }
@@ -894,6 +897,7 @@ export default function WorkspaceProjectsScreen() {
   if (!allowed) {
     return (
       <SafeAreaView style={styles.safe}>
+        <ResponsiveScreen>
         <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backText}>Back</Text>
@@ -904,12 +908,14 @@ export default function WorkspaceProjectsScreen() {
             This overview is for freelancer or company accounts.
           </Text>
         </View>
+        </ResponsiveScreen>
       </SafeAreaView>
     )
   }
 
   return (
     <SafeAreaView style={styles.safe}>
+      <ResponsiveScreen>
       <View style={styles.topRow}>
         <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
@@ -1083,6 +1089,7 @@ export default function WorkspaceProjectsScreen() {
               </TouchableOpacity>
             </View>
       </KeyboardFormModal>
+      </ResponsiveScreen>
     </SafeAreaView>
   )
 }

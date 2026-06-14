@@ -17,6 +17,7 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { ChevronLeft, MapPin, Plus, Star } from 'lucide-react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getAuthUser } from '@/lib/getAuthUser'
+import { formatProfileLocationEnglish } from '@/lib/formatProfileLocationEnglish'
 import { supabase } from '@/lib/supabase'
 import { getCache, setCache } from '@/lib/appCache'
 import { talentPoolCacheKey } from '@/lib/talentPoolPrefetch'
@@ -24,6 +25,7 @@ import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { isFreelancerTalentPoolPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { ResponsiveScreen } from '@/components/ResponsiveScreen'
 
 type TalentRow = {
   id: string
@@ -578,6 +580,7 @@ export default function TalentPoolScreen() {
   if (!allowed) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
+        <ResponsiveScreen>
         <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backText}>Back</Text>
@@ -588,12 +591,14 @@ export default function TalentPoolScreen() {
             Only available for Pro users. Upgrade to browse freelancers, save favorites, and filter by skills.
           </Text>
         </View>
+        </ResponsiveScreen>
       </SafeAreaView>
     )
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <ResponsiveScreen>
       <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
         <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
         <Text style={styles.backText}>Dashboard</Text>
@@ -790,7 +795,7 @@ export default function TalentPoolScreen() {
                     <View style={styles.locRow}>
                       <MapPin size={12} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
                       <Text style={styles.location} numberOfLines={1}>
-                        {item.location}
+                        {formatProfileLocationEnglish(item.location)}
                       </Text>
                     </View>
                   ) : null}
@@ -840,6 +845,7 @@ export default function TalentPoolScreen() {
           )
         }}
       />
+      </ResponsiveScreen>
     </SafeAreaView>
   )
 }

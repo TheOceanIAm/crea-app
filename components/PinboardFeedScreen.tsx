@@ -23,6 +23,7 @@ import { getCache, setCache, deleteCache } from '@/lib/appCache'
 import { isCompanyProfile, isFreelancerProfile } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { CreaFeedPostSkeleton, CreaInlineLoader } from '@/components/CreaLoading'
+import { ResponsiveScreen } from '@/components/ResponsiveScreen'
 import { PlatformTrialBanners } from '@/components/PlatformTrialBanners'
 import { TabScreenHeader } from '@/components/TabScreenHeader'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
@@ -473,6 +474,7 @@ export function PinboardFeedScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <ResponsiveScreen>
       <TabScreenHeader
         title="Feed"
         showMessages
@@ -608,6 +610,7 @@ export function PinboardFeedScreen() {
           </View>
         </View>
       </Modal>
+      </ResponsiveScreen>
     </SafeAreaView>
   )
 }

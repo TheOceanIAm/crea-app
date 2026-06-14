@@ -14,7 +14,7 @@
       "backgroundColor": "#0a0a0a"
     },
     "ios": {
-      "supportsTablet": false,
+      "supportsTablet": true,
       "bundleIdentifier": "de.creaservices.app",
       "buildNumber": "2",
       "infoPlist": {
@@ -36,6 +36,7 @@
       ]
     },
     "plugins": [
+      "./plugins/withSupportsTablet.js",
       "./plugins/withFmtPodfileFix.js",
       "./plugins/withStripeFabricCodegenFix.js",
       [

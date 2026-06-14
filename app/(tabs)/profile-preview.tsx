@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect } from '@react-navigation/native'
 import { router } from 'expo-router'
-import { ChevronLeft, Eye, Share2 } from 'lucide-react-native'
+import { ChevronLeft, Share2 } from 'lucide-react-native'
 import { CeoPublicProfileView } from '@/components/CeoPublicProfileView'
 import { FreelancerPublicProfileContent } from '@/components/profile/FreelancerPublicProfileContent'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
@@ -132,23 +132,21 @@ export default function ProfilePreviewScreen() {
 
   const topBar = (
     <View style={styles.topBar}>
-      <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
-        <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-        <Text style={styles.backText}>Back</Text>
+      <TouchableOpacity style={styles.topBarSide} onPress={() => router.back()} hitSlop={12}>
+        <ChevronLeft size={22} color="#fff" strokeWidth={ICON_STROKE} />
       </TouchableOpacity>
-      <View style={styles.topBarRight}>
+      <Text style={styles.topBarTitle} numberOfLines={1}>
+        {name}
+      </Text>
+      <View style={[styles.topBarSide, styles.topBarSideRight]}>
         <TouchableOpacity
           style={styles.shareIconBtn}
           onPress={() => setShareOpen(true)}
           hitSlop={12}
           accessibilityLabel="Share profile"
         >
-          <Share2 size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+          <Share2 size={22} color="#fff" strokeWidth={ICON_STROKE} />
         </TouchableOpacity>
-        <View style={styles.previewBadge}>
-          <Eye size={14} color="#FFDC00" strokeWidth={ICON_STROKE} />
-          <Text style={styles.previewBadgeText}>Preview</Text>
-        </View>
       </View>
     </View>
   )
@@ -222,26 +220,20 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingBottom: 8,
   },
-  backRow: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 8 },
-  backText: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },
-  previewBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 100,
-    borderWidth: 1,
-    borderColor: 'rgba(255,220,0,0.35)',
-    backgroundColor: 'rgba(255,220,0,0.08)',
+  topBarSide: { width: 40, alignItems: 'flex-start', justifyContent: 'center' },
+  topBarSideRight: { alignItems: 'flex-end' },
+  topBarTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    paddingHorizontal: 8,
   },
-  previewBadgeText: { color: '#FFDC00', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  topBarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  shareIconBtn: { paddingVertical: 6, paddingHorizontal: 8 },
+  shareIconBtn: { paddingVertical: 6, paddingHorizontal: 4 },
   banner: { marginBottom: 20, paddingHorizontal: 20 },
   bannerTitle: { fontSize: 11, fontWeight: '800', color: '#FFDC00', letterSpacing: 2, marginBottom: 6 },
   bannerSub: { fontSize: 13, color: 'rgba(255,255,255,0.38)', lineHeight: 19 },

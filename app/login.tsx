@@ -12,6 +12,7 @@ import {
   IOS_SIGNUP_ON_WEB_ONLY,
   getCreaWebRegisterUrl,
 } from '@/lib/iosAppStoreCompliance'
+import { ResponsiveScreen } from '@/components/ResponsiveScreen'
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('')
@@ -51,6 +52,7 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      <ResponsiveScreen variant="compact">
       <View style={styles.inner}>
         <Text style={styles.logo}>CREA</Text>
         <Text style={styles.subtitle}>The platform for creative talent</Text>
@@ -134,6 +136,7 @@ export default function LoginScreen() {
           )}
         </Text>
       </View>
+      </ResponsiveScreen>
     </KeyboardAvoidingView>
   )
 }
