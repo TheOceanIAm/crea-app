@@ -57,3 +57,31 @@ export function responsiveScrollContentStyle(
       : {}),
   }
 }
+
+export function isLandscapeWindow(windowWidth: number, windowHeight: number): boolean {
+  return windowWidth > windowHeight
+}
+
+/** Work grid columns on phone — 3 square tiles per row. Tablet uses a horizontal carousel instead. */
+export function resolvePublicProfileWorkColumns(_windowWidth: number, isTablet: boolean): number {
+  return isTablet ? 3 : 3
+}
+
+export function workGridTileWidthPercent(columns: number): `${number}%` {
+  if (columns === 2) return '49%'
+  if (columns <= 3) return '32.5%'
+  if (columns === 4) return '24%'
+  if (columns === 5) return '19%'
+  return '16%'
+}
+
+/** Fixed carousel tile width so exactly three 16:9 previews fit in the viewport. */
+export function publicProfileWorkCarouselTileWidth(viewportWidth: number, gap = 10): number {
+  const safe = Math.max(viewportWidth, 280)
+  return Math.floor((safe - gap * 2) / 3)
+}
+
+/** Thumbnail aspect ratio — square on phone, 16:9 landscape on tablet. */
+export function publicProfileWorkThumbAspectRatio(isTablet: boolean): number {
+  return isTablet ? 16 / 9 : 1
+}

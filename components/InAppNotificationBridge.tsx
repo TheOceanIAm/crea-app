@@ -299,6 +299,43 @@ export function InAppNotificationBridge() {
         )
         .on(
           'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'milestones' },
+          async (payload) => {
+            if (AppState.currentState !== 'active' || !uid) return
+            const row = payload.new as Record<string, unknown>
+            const jobId = typeof row.job_id === 'string' ? row.job_id : ''
+            if (!jobId) return
+            const { data: proj } = await supabase
+              .from('projects')
+              .select('id, title, company_id, freelancer_id')
+              .eq('job_id', jobId)
+              .maybeSingle()
+            if (!proj?.id) return
+            const pid = String(proj.id)
+            const isMember =
+              String(proj.company_id) === uid ||
+              String(proj.freelancer_id) === uid ||
+              (
+                await supabase
+                  .from('project_members')
+                  .select('id')
+                  .eq('project_id', pid)
+                  .eq('profile_id', uid)
+                  .maybeSingle()
+              ).data != null
+            if (!isMember) return
+            invalidateAlertsBadge()
+            const title = String(row.title ?? '').trim() || 'Milestone'
+            showBanner({
+              id: `ms-${String(row.id)}`,
+              title: String(proj.title ?? 'Project'),
+              body: `New milestone: ${title}`,
+              onPress: () => router.push(`/project/${pid}`),
+            })
+          }
+        )
+        .on(
+          'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'project_milestones' },
           async (payload) => {
             if (AppState.currentState !== 'active' || !uid) return

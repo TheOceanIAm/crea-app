@@ -22,6 +22,7 @@ import { isCeoProfile, isFreelancerProfile } from '@/lib/profileRole'
 import { parsePublicProfileWidgets } from '@/lib/publicProfileWidgets'
 import type { PublicProfileWidgets } from '@/lib/publicProfileWidgets'
 import { loadLiveCeoWidgets } from '@/lib/ceoLiveWidgets'
+import { useResponsiveLayout } from '@/hooks/useResponsiveLayout'
 
 function strTrim(v: string | null | undefined): string {
   if (v == null) return ''
@@ -32,6 +33,7 @@ export default function PublicProfileShareScreen() {
   const router = useRouter()
   const params = useLocalSearchParams<{ userId: string | string[] }>()
   const userId = useMemo(() => firstRouteParam(params.userId), [params.userId])
+  const { contentMaxWidth, horizontalPadding, isTablet } = useResponsiveLayout('wide')
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState<FreelancerPublicProfilePayload | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -152,6 +154,11 @@ export default function PublicProfileShareScreen() {
   }
 
   const roleKind = isFreelancerProfile(profile.role) ? 'freelancer' : 'company'
+  const topBarStyle = [
+    styles.topBar,
+    contentMaxWidth != null ? { maxWidth: contentMaxWidth, alignSelf: 'center' as const, width: '100%' as const } : null,
+    isTablet ? { paddingHorizontal: horizontalPadding, paddingBottom: 32 } : null,
+  ]
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -162,7 +169,7 @@ export default function PublicProfileShareScreen() {
         nestedScrollEnabled
         showsVerticalScrollIndicator={Platform.OS !== 'web'}
       >
-        <View style={styles.topBar}>
+        <View style={topBarStyle}>
           <TouchableOpacity style={styles.topBarSide} onPress={() => router.back()} hitSlop={12}>
             <ChevronLeft size={22} color="#fff" strokeWidth={ICON_STROKE} />
           </TouchableOpacity>
@@ -205,8 +212,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 4,
     paddingBottom: 8,
-    maxWidth: 560,
-    alignSelf: 'center',
     width: '100%',
   },
   topBarSide: { width: 40, alignItems: 'flex-start', justifyContent: 'center' },
@@ -219,7 +224,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     paddingHorizontal: 8,
   },
-  scrollPad: { paddingHorizontal: 24, paddingBottom: 40, maxWidth: 560, alignSelf: 'center', width: '100%' },
+  scrollPad: { paddingHorizontal: 24, paddingBottom: 40, width: '100%' },
   ceoScrollPad: {
     paddingHorizontal: 24,
     paddingBottom: 40,

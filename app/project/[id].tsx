@@ -1027,6 +1027,7 @@ export default function ProjectWorkspaceScreen() {
                 {tab === 'milestones' && (
                   <ProjectMilestonesTab
                     projectId={project.id}
+                    jobId={project.job_id}
                     onCountsChanged={refreshProjectCounts}
                     canManage={canManageCrew}
                   />

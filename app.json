@@ -36,7 +36,6 @@
       ]
     },
     "plugins": [
-      "./plugins/withSupportsTablet.js",
       "./plugins/withFmtPodfileFix.js",
       "./plugins/withStripeFabricCodegenFix.js",
       [

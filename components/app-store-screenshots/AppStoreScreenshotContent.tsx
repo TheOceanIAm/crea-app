@@ -1,5 +1,6 @@
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { ChevronLeft, ChevronRight, Globe, Instagram, MapPin, Share2, X } from 'lucide-react-native'
+import { ChevronLeft, ChevronRight, MapPin, Share2, X } from 'lucide-react-native'
+import { SocialLinkButton } from '@/components/SocialLinkButton'
 import type { AppStoreScreenshotId } from '@/lib/appStoreScreenshotCatalog'
 import { ICON_STROKE } from '@/lib/iconTheme'
 
@@ -58,12 +59,8 @@ function ProfileScreen() {
           <Text style={styles.subtle}>Berlin, Germany</Text>
         </View>
         <View style={styles.socialRow}>
-          <View style={styles.socialBtn}>
-            <Globe size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-          </View>
-          <View style={styles.socialBtn}>
-            <Instagram size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-          </View>
+          <SocialLinkButton platform="website" url="https://creaservices.de" accessibilityLabel="Website" />
+          <SocialLinkButton platform="instagram" url="https://instagram.com/chrisnovak" accessibilityLabel="Instagram" />
         </View>
         <View style={styles.rolePill}>
           <Text style={styles.rolePillText}>Freelancer</Text>

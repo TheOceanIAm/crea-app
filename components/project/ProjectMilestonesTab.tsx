@@ -10,24 +10,24 @@ import {
   Alert,
   Platform,
 } from 'react-native'
+import { useFocusEffect } from 'expo-router'
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker'
 import { Check, Plus, Trash2, CalendarClock } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { formatMilestoneSchedule, isoFromDateAndTime } from '@/lib/milestoneSchedule'
-
-type Milestone = {
-  id: string
-  project_id: string
-  title: string
-  sort_order: number
-  completed: boolean
-  scheduled_at: string | null
-}
+import {
+  deleteWorkspaceMilestone,
+  fetchWorkspaceMilestones,
+  insertWorkspaceMilestone,
+  setWorkspaceMilestoneCompleted,
+  type WorkspaceMilestoneUi,
+} from '@/lib/workspaceMilestones'
 
 type Props = {
   projectId: string
+  jobId: string | null
   onCountsChanged?: () => void
   /** Company or lead: add/remove milestones. Crew can still mark items complete when false. */
   canManage: boolean
@@ -40,8 +40,8 @@ function defaultScheduleDate(): Date {
   return d
 }
 
-export function ProjectMilestonesTab({ projectId, onCountsChanged, canManage }: Props) {
-  const [rows, setRows] = useState<Milestone[]>([])
+export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canManage }: Props) {
+  const [rows, setRows] = useState<WorkspaceMilestoneUi[]>([])
   const [loading, setLoading] = useState(true)
   const [newTitle, setNewTitle] = useState('')
   const [scheduleEnabled, setScheduleEnabled] = useState(false)
@@ -51,25 +51,49 @@ export function ProjectMilestonesTab({ projectId, onCountsChanged, canManage }: 
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('project_milestones')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('sort_order', { ascending: true })
-
+    if (!jobId) {
+      setRows([])
+      setLoading(false)
+      return
+    }
+    const { rows: next, error } = await fetchWorkspaceMilestones(supabase, jobId)
     if (error) {
-      Alert.alert('Milestones', error.message)
+      Alert.alert('Milestones', error)
       setRows([])
     } else {
-      setRows((data as Milestone[]) ?? [])
+      setRows(next)
     }
     setLoading(false)
-  }, [projectId])
+  }, [jobId])
 
   useEffect(() => {
     setLoading(true)
-    load()
+    void load()
   }, [load])
+
+  useFocusEffect(
+    useCallback(() => {
+      void load()
+    }, [load])
+  )
+
+  useEffect(() => {
+    if (!jobId) return
+    const channel = supabase
+      .channel(`workspace-milestones-${jobId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'milestones', filter: `job_id=eq.${jobId}` },
+        () => {
+          void load()
+          onCountsChanged?.()
+        }
+      )
+      .subscribe()
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [jobId, load, onCountsChanged])
 
   const onPickerChange = (event: DateTimePickerEvent, value?: Date) => {
     if (event.type === 'dismissed') {
@@ -86,61 +110,55 @@ export function ProjectMilestonesTab({ projectId, onCountsChanged, canManage }: 
 
   const add = async () => {
     const t = newTitle.trim()
-    if (!t || busy) return
+    if (!t || busy || !jobId) return
     setBusy(true)
-    const nextOrder = rows.length ? Math.max(...rows.map((r) => r.sort_order)) + 1 : 0
-    const { data, error } = await supabase
-      .from('project_milestones')
-      .insert({
-        project_id: projectId,
-        title: t,
-        sort_order: nextOrder,
-        scheduled_at: scheduledIso,
-      })
-      .select('*')
-      .single()
+    const nextOrder = rows.length ? Math.max(...rows.map((r) => r.sortOrder)) + 1 : 0
+    const { row, error } = await insertWorkspaceMilestone(supabase, {
+      jobId,
+      title: t,
+      position: nextOrder,
+      scheduledAt: scheduledIso,
+    })
     setBusy(false)
-    if (error) {
-      Alert.alert('Could not add', error.message)
+    if (error || !row) {
+      Alert.alert('Could not add', error ?? 'Unknown error')
       return
     }
     setNewTitle('')
     setScheduleEnabled(false)
     setScheduleDate(defaultScheduleDate())
     setScheduleTime(defaultScheduleDate())
-    setRows((prev) => [...prev, data as Milestone])
+    setRows((prev) => [...prev, row])
     onCountsChanged?.()
     void notifyExpoEvent({
       kind: 'workspace_activity',
+      jobId,
       projectId,
       activity: 'milestone',
       detail: t,
     })
   }
 
-  const toggle = async (m: Milestone) => {
-    const { error } = await supabase
-      .from('project_milestones')
-      .update({ completed: !m.completed })
-      .eq('id', m.id)
+  const toggle = async (m: WorkspaceMilestoneUi) => {
+    const { error } = await setWorkspaceMilestoneCompleted(supabase, m.id, !m.completed)
     if (error) {
-      Alert.alert('Update failed', error.message)
+      Alert.alert('Update failed', error)
       return
     }
     setRows((prev) => prev.map((r) => (r.id === m.id ? { ...r, completed: !r.completed } : r)))
     onCountsChanged?.()
   }
 
-  const remove = (m: Milestone) => {
+  const remove = (m: WorkspaceMilestoneUi) => {
     Alert.alert('Remove milestone', m.title, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',
         style: 'destructive',
         onPress: async () => {
-          const { error } = await supabase.from('project_milestones').delete().eq('id', m.id)
+          const { error } = await deleteWorkspaceMilestone(supabase, m.id)
           if (error) {
-            Alert.alert('Delete failed', error.message)
+            Alert.alert('Delete failed', error)
             return
           }
           setRows((prev) => prev.filter((r) => r.id !== m.id))
@@ -158,12 +176,20 @@ export function ProjectMilestonesTab({ projectId, onCountsChanged, canManage }: 
     )
   }
 
+  if (!jobId) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.empty}>This project is not linked to a job workspace yet.</Text>
+      </View>
+    )
+  }
+
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <Text style={styles.hint}>
         {canManage
-          ? 'Add delivery steps with an optional date and time — helpful for handoffs and reviews.'
-          : 'Check off steps as you go. Only the company or lead can edit the list.'}
+          ? 'Shared with the web workspace — add delivery steps with an optional date and time.'
+          : 'Shared with the web workspace. Check off steps as you go; only the company or lead can edit the list.'}
       </Text>
 
       {canManage ? (
@@ -230,7 +256,7 @@ export function ProjectMilestonesTab({ projectId, onCountsChanged, canManage }: 
         </Text>
       ) : (
         rows.map((m) => {
-          const when = formatMilestoneSchedule(m.scheduled_at)
+          const when = formatMilestoneSchedule(m.scheduledAt)
           return (
             <View key={m.id} style={styles.row}>
               <TouchableOpacity style={styles.checkWrap} onPress={() => toggle(m)} hitSlop={8}>
@@ -264,7 +290,7 @@ export function ProjectMilestonesTab({ projectId, onCountsChanged, canManage }: 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: { paddingBottom: 32 },
-  center: { paddingVertical: 40, alignItems: 'center' },
+  center: { paddingVertical: 40, alignItems: 'center', paddingHorizontal: 20 },
   hint: { fontSize: 13, color: 'rgba(255,255,255,0.45)', lineHeight: 18, marginBottom: 16 },
   addCard: {
     backgroundColor: '#111',
@@ -322,7 +348,7 @@ const styles = StyleSheet.create({
   },
   addBtnWideText: { color: '#0a0a0a', fontSize: 15, fontWeight: '800' },
   dim: { opacity: 0.5 },
-  empty: { fontSize: 14, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic' },
+  empty: { fontSize: 14, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic', textAlign: 'center' },
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',

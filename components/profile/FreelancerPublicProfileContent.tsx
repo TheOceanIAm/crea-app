@@ -10,29 +10,18 @@ import {
   Platform,
 } from 'react-native'
 import { useRouter } from 'expo-router'
-import type { LucideIcon } from 'lucide-react-native'
 import {
-  Camera,
   ChevronRight,
-  Globe,
-  Link2,
-  Palette,
-  Video,
 } from 'lucide-react-native'
 import { AvailabilityMonthPreview } from '@/components/profile/AvailabilityMonthPreview'
 import { BookFreelancerModal } from '@/components/profile/BookFreelancerModal'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
+import { SocialLinkButton } from '@/components/SocialLinkButton'
 import { parseAvailabilityCalendar } from '@/lib/availabilityCalendar'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import type { FreelancerPublicProfilePayload } from '@/lib/freelancerPublicProfileTypes'
 import { money } from '@/lib/invoiceFormatting'
-import {
-  behanceUrl,
-  instagramUrl,
-  linkedinUrl,
-  normalizeExternalUrl,
-  vimeoUrl,
-} from '@/lib/profilePublicLinks'
+import { buildProfileSocialLinks } from '@/lib/profileSocialLinks'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { canFreelancerCreatePrivateProjects, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { enrichPortfolioProjectsThumbnails } from '@/lib/freelancerPortfolioTable'
@@ -42,32 +31,18 @@ import { supabase } from '@/lib/supabase'
 import { normalizePublicProfileRpc } from '@/lib/normalizePublicProfileRpc'
 import { formatProfileLocationEnglish } from '@/lib/formatProfileLocationEnglish'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
+import { useResponsiveLayout } from '@/hooks/useResponsiveLayout'
+import {
+  isLandscapeWindow,
+  publicProfileWorkCarouselTileWidth,
+  publicProfileWorkThumbAspectRatio,
+  resolvePublicProfileWorkColumns,
+  workGridTileWidthPercent,
+} from '@/lib/responsiveLayout'
 
 function strTrim(v: string | null | undefined): string {
   if (v == null) return ''
   return typeof v === 'string' ? v.trim() : ''
-}
-
-function SocialButton({
-  icon: Icon,
-  url,
-  accessibilityLabel,
-}: {
-  icon: LucideIcon
-  url: string | null
-  accessibilityLabel: string
-}) {
-  if (!url) return null
-  return (
-    <TouchableOpacity
-      style={styles.socialBtn}
-      onPress={() => Linking.openURL(url).catch(() => {})}
-      accessibilityRole="link"
-      accessibilityLabel={accessibilityLabel}
-    >
-      <Icon size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
-    </TouchableOpacity>
-  )
 }
 
 function projectSubtitle(p: PortfolioProject): string {
@@ -232,36 +207,7 @@ export function FreelancerPublicProfileContent({
     return next.size > 0 ? next : undefined
   }, [profileNorm.calendar_busy_dates])
 
-  const socials = useMemo(() => {
-    const entries: { icon: LucideIcon; url: string | null; label: string }[] = [
-      {
-        icon: Globe,
-        url: profileNorm.portfolio_website ? normalizeExternalUrl(profileNorm.portfolio_website) : null,
-        label: 'Website',
-      },
-      {
-        icon: Camera,
-        url: instagramUrl(profileNorm.portfolio_instagram ?? ''),
-        label: 'Instagram',
-      },
-      {
-        icon: Link2,
-        url: linkedinUrl(profileNorm.portfolio_linkedin ?? ''),
-        label: 'LinkedIn',
-      },
-      {
-        icon: Video,
-        url: vimeoUrl(profileNorm.portfolio_vimeo ?? ''),
-        label: 'Vimeo',
-      },
-      {
-        icon: Palette,
-        url: behanceUrl(profileNorm.portfolio_behance ?? ''),
-        label: 'Behance',
-      },
-    ]
-    return entries.filter((x): x is { icon: LucideIcon; url: string; label: string } => x.url != null)
-  }, [profileNorm])
+  const socials = useMemo(() => buildProfileSocialLinks(profileNorm), [profileNorm])
 
   const shareUrl = useMemo(() => profileShareUrl(userId), [userId])
 
@@ -294,160 +240,269 @@ export function FreelancerPublicProfileContent({
     !viewingOwn &&
     !isCeoProfile(profileNorm.role)
 
-  const scrollContent = (
+  const { windowWidth, windowHeight, isTablet, contentMaxWidth, horizontalPadding } =
+    useResponsiveLayout('wide')
+  const isTabletLandscape = isTablet && isLandscapeWindow(windowWidth, windowHeight)
+  const isTabletPortrait = isTablet && !isTabletLandscape
+  const workColumns = resolvePublicProfileWorkColumns(windowWidth, isTablet)
+  const workTileWidth = workGridTileWidthPercent(workColumns)
+  const workThumbAspectRatio = publicProfileWorkThumbAspectRatio(isTablet)
+  const workViewportWidth = useMemo(() => {
+    const base = contentMaxWidth ?? windowWidth
+    return base - (isTablet ? horizontalPadding * 2 : 32)
+  }, [contentMaxWidth, windowWidth, isTablet, horizontalPadding])
+  const workCarouselTileWidth = useMemo(
+    () => publicProfileWorkCarouselTileWidth(workViewportWidth),
+    [workViewportWidth]
+  )
+  const avatarSize = isTabletLandscape ? 92 : isTablet ? 104 : 86
+  const avatarRadius = avatarSize / 2
+  const scrollPadStyle = [
+    styles.scrollPad,
+    contentMaxWidth != null ? { maxWidth: contentMaxWidth, alignSelf: 'center' as const, width: '100%' as const } : null,
+    isTablet ? { paddingHorizontal: horizontalPadding, paddingTop: 16 } : null,
+  ]
+  const avatarStyle = { width: avatarSize, height: avatarSize, borderRadius: avatarRadius }
+  const workTileStyle = [styles.workTile, { width: workTileWidth }]
+  const workCarouselTileStyle = { width: workCarouselTileWidth, marginRight: 10 }
+  const workThumbStyle = { aspectRatio: workThumbAspectRatio }
+
+  const renderWorkTile = (proj: PortfolioProject, i: number, tileStyle: object) => {
+    const sub = projectSubtitle(proj)
+    const openProject = () => {
+      const u = strTrim(proj.link)
+      if (u) Linking.openURL(u).catch(() => {})
+    }
+    return (
+      <TouchableOpacity
+        key={`${proj.title}-${i}`}
+        style={[styles.workTile, tileStyle]}
+        activeOpacity={0.85}
+        onPress={openProject}
+        disabled={!strTrim(proj.link)}
+      >
+        {proj.image_url ? (
+          <Image
+            source={{ uri: proj.image_url }}
+            style={[styles.workThumb, workThumbStyle, isTablet && styles.workThumbTablet]}
+          />
+        ) : (
+          <View style={[styles.workThumbPlaceholder, workThumbStyle, isTablet && styles.workThumbTablet]}>
+            <Text style={styles.workThumbLetter}>{proj.title.charAt(0).toUpperCase() || '•'}</Text>
+          </View>
+        )}
+        <Text style={[styles.workTileTitle, isTablet && styles.workTileTitleTablet]} numberOfLines={2}>
+          {proj.title}
+        </Text>
+        {sub ? (
+          <Text style={styles.workTileSub} numberOfLines={1}>
+            {sub}
+          </Text>
+        ) : null}
+      </TouchableOpacity>
+    )
+  }
+
+  const renderWorkGrid = () => (
     <>
-        {previewMode ? (
-          <View style={styles.previewBanner}>
-            <Text style={styles.previewBannerTitle}>Public profile</Text>
-            <Text style={styles.previewBannerSub}>
-              This is how your profile looks to companies and other users — same data as your public link on the web and
-              in the app.
-            </Text>
+      {isTablet ? (
+        <ScrollView
+          horizontal
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.workCarouselContent}
+          style={styles.workCarousel}
+        >
+          {visibleProjects.map((proj, i) => renderWorkTile(proj, i, workCarouselTileStyle))}
+        </ScrollView>
+      ) : (
+        <View style={styles.workGrid}>
+          {visibleProjects.map((proj, i) => renderWorkTile(proj, i, workTileStyle))}
+        </View>
+      )}
+      {hasMoreProjects ? (
+        <TouchableOpacity
+          onPress={() => setVisibleProjectCount((n) => n + 6)}
+          style={styles.moreProjectsBtn}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.moreProjectsBtnText}>
+            Load more ({projects.length - visibleProjects.length} left)
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+    </>
+  )
+
+  const renderWorkSection = (landscapeFooter = false) => {
+    if (isFreelancer) {
+      return (
+        <View style={[styles.block, landscapeFooter && styles.workLandscapeFooter]}>
+          <Text style={styles.blockTitle}>Work</Text>
+          {projects.length > 0 ? renderWorkGrid() : <Text style={styles.emptyHint}>No portfolio items yet.</Text>}
+        </View>
+      )
+    }
+    if (projects.length === 0) return null
+    return (
+      <View style={[styles.block, landscapeFooter && styles.workLandscapeFooter]}>
+        <Text style={styles.blockTitle}>Work</Text>
+        {renderWorkGrid()}
+      </View>
+    )
+  }
+
+  const renderAvailabilityPills = () =>
+    (isFreelancer && availabilityStatus) ||
+    (isFreelancer && profileNorm.open_to_remote) ||
+    (isFreelancer && profileNorm.open_to_travel) ? (
+      <View style={styles.igPillRow}>
+        {isFreelancer && availabilityStatus ? (
+          <View style={[styles.rolePill, styles.availPill]}>
+            <Text style={styles.rolePillText}>{availabilityStatus}</Text>
           </View>
         ) : null}
-
-        <View style={styles.igHeader}>
-          <View style={styles.igTopRow}>
-            {showImage ? (
-              <Image source={{ uri: avatarUri }} style={styles.igAvatar} />
-            ) : (
-              <View style={styles.igAvatarPlaceholder}>
-                <Text style={styles.igAvatarLetter}>{letter}</Text>
-              </View>
-            )}
-            {isFreelancer && canShowPublicRates && dayRate != null ? (
-              <View style={styles.igRateAside}>
-                <Text style={styles.igRateLabel}>Day rate</Text>
-                <Text style={styles.igRateValue}>{money(dayRate, cur)}</Text>
-                {halfDay != null ? (
-                  <Text style={styles.igRateSub}>Half day {money(halfDay, cur)}</Text>
-                ) : null}
-              </View>
-            ) : null}
+        {isFreelancer && profileNorm.open_to_remote ? (
+          <View style={[styles.rolePill, styles.tagPill]}>
+            <Text style={styles.tagPillText}>REMOTE</Text>
           </View>
-
-          <View style={styles.igNameRow}>
-            <Text style={styles.igName} numberOfLines={1}>
-              {name}
-            </Text>
-            {locationDisplay ? (
-              <Text style={styles.igLocation} numberOfLines={1}>
-                {locationDisplay}
-              </Text>
-            ) : null}
+        ) : null}
+        {isFreelancer && profileNorm.open_to_travel ? (
+          <View style={[styles.rolePill, styles.tagPill]}>
+            <Text style={styles.tagPillText}>TRAVEL</Text>
           </View>
+        ) : null}
+      </View>
+    ) : null
 
-          {headlineDisplay ? (
-            <View style={styles.yellowPill}>
-              <Text style={styles.yellowPillText}>{headlineDisplay}</Text>
-            </View>
+  const renderSocialIcons = () =>
+    socials.length > 0 ? (
+      <View style={styles.igSocialIconRow}>
+        {socials.map((s) => (
+          <SocialLinkButton
+            key={s.platform}
+            platform={s.platform}
+            url={s.url}
+            accessibilityLabel={s.label}
+          />
+        ))}
+      </View>
+    ) : null
+
+  const renderAvatarAndRate = () => (
+    <View style={styles.igTopRow}>
+      {showImage ? (
+        <Image source={{ uri: avatarUri }} style={[styles.igAvatar, avatarStyle]} />
+      ) : (
+        <View style={[styles.igAvatarPlaceholder, avatarStyle]}>
+          <Text style={[styles.igAvatarLetter, { fontSize: avatarSize * 0.4 }]}>{letter}</Text>
+        </View>
+      )}
+      {isFreelancer && canShowPublicRates && dayRate != null ? (
+        <View style={styles.igRateAside}>
+          <Text style={styles.igRateLabel}>Day rate</Text>
+          <Text style={[styles.igRateValue, isTablet && styles.igRateValueTablet]}>{money(dayRate, cur)}</Text>
+          {halfDay != null ? <Text style={styles.igRateSub}>Half day {money(halfDay, cur)}</Text> : null}
+        </View>
+      ) : null}
+    </View>
+  )
+
+  const renderProfileHeader = () => {
+    const bioBlock =
+      bioDisplay || (!isFreelancer && !bioDisplay && !headlineDisplay && !locationDisplay) ? (
+        <View style={styles.igBio}>
+          {bioDisplay ? (
+            <Text style={[styles.igBioLine, isTablet && styles.igBioLineTablet]}>{bioDisplay}</Text>
           ) : null}
-
-          {bioDisplay || (!isFreelancer && !bioDisplay && !headlineDisplay && !locationDisplay) ? (
-            <View style={styles.igBio}>
-              {bioDisplay ? <Text style={styles.igBioLine}>{bioDisplay}</Text> : null}
-              {!bioDisplay && !headlineDisplay && !locationDisplay && !isFreelancer ? (
-                <Text style={styles.igBioMuted}>No company description yet.</Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          {(isFreelancer && availabilityStatus) ||
-          (isFreelancer && profileNorm.open_to_remote) ||
-          (isFreelancer && profileNorm.open_to_travel) ? (
-            <View style={styles.igPillRow}>
-              {isFreelancer && availabilityStatus ? (
-                <View style={[styles.rolePill, styles.availPill]}>
-                  <Text style={styles.rolePillText}>{availabilityStatus}</Text>
-                </View>
-              ) : null}
-              {isFreelancer && profileNorm.open_to_remote ? (
-                <View style={[styles.rolePill, styles.tagPill]}>
-                  <Text style={styles.tagPillText}>REMOTE</Text>
-                </View>
-              ) : null}
-              {isFreelancer && profileNorm.open_to_travel ? (
-                <View style={[styles.rolePill, styles.tagPill]}>
-                  <Text style={styles.tagPillText}>TRAVEL</Text>
-                </View>
-              ) : null}
-            </View>
-          ) : null}
-
-          {socials.length > 0 ? (
-            <View style={styles.igSocialIconRow}>
-              {socials.map((s, i) => (
-                <SocialButton key={i} icon={s.icon} url={s.url} accessibilityLabel={s.label} />
-              ))}
-            </View>
+          {!bioDisplay && !headlineDisplay && !locationDisplay && !isFreelancer ? (
+            <Text style={styles.igBioMuted}>No company description yet.</Text>
           ) : null}
         </View>
+      ) : null
 
-        {!isFreelancer ? (
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>Posted jobs</Text>
-            {companyJobsLoading ? (
-              <Text style={styles.emptyHint}>Loading jobs…</Text>
-            ) : companyJobs.length === 0 ? (
-              <Text style={styles.emptyHint}>No open jobs right now.</Text>
-            ) : (
-              companyJobs.map((job) => (
-                <TouchableOpacity
-                  key={job.id}
-                  style={styles.jobRow}
-                  activeOpacity={0.85}
-                  onPress={() => router.push(`/(tabs)/jobs/${job.id}`)}
-                >
-                  <View style={styles.jobRowBody}>
-                    <Text style={styles.jobRowTitle} numberOfLines={2}>
-                      {job.title}
-                    </Text>
-                    <Text style={styles.jobRowMeta} numberOfLines={2}>
-                      {[
-                        strTrim(job.category),
-                        formatBudgetDisplay({
-                          budget_type: job.budget_type,
-                          budget_amount: job.budget_amount,
-                          budget_currency: job.budget_currency,
-                        }),
-                        strTrim(job.location_type),
-                      ]
-                        .filter((x) => x.length > 0)
-                        .join(' · ')}
-                    </Text>
-                  </View>
-                  <ChevronRight size={20} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
-                </TouchableOpacity>
-              ))
-            )}
+    return (
+      <View style={[styles.igHeader, isTablet && styles.igHeaderTablet]}>
+        {renderAvatarAndRate()}
+        <View style={styles.igNameRow}>
+          <Text style={[styles.igName, isTablet && styles.igNameTablet]} numberOfLines={1}>
+            {name}
+          </Text>
+          {locationDisplay ? (
+            <Text style={[styles.igLocation, isTablet && styles.igLocationTablet]} numberOfLines={1}>
+              {locationDisplay}
+            </Text>
+          ) : null}
+        </View>
+        {headlineDisplay ? (
+          <View style={styles.yellowPill}>
+            <Text style={[styles.yellowPillText, isTablet && styles.yellowPillTextTablet]}>{headlineDisplay}</Text>
           </View>
         ) : null}
+        {bioBlock}
+        {renderAvailabilityPills()}
+        {renderSocialIcons()}
+      </View>
+    )
+  }
 
-        {isFreelancer && availabilityDetails ? (
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>Availability note</Text>
-            <Text style={styles.bio}>{availabilityDetails}</Text>
-          </View>
-        ) : null}
+  const showTabletMetaRow =
+    isTabletPortrait && isFreelancer && skills.length > 0 && equipment.length > 0
 
-        {isFreelancer ? (
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>Skills</Text>
-            {skills.length > 0 ? (
-              <View style={styles.chipRow}>
-                {skills.map((s) => (
-                  <View key={s} style={styles.chip}>
-                    <Text style={styles.chipText}>{s}</Text>
-                  </View>
-                ))}
+  const renderCompanyJobs = () =>
+    !isFreelancer ? (
+      <View style={styles.block}>
+        <Text style={styles.blockTitle}>Posted jobs</Text>
+        {companyJobsLoading ? (
+          <Text style={styles.emptyHint}>Loading jobs…</Text>
+        ) : companyJobs.length === 0 ? (
+          <Text style={styles.emptyHint}>No open jobs right now.</Text>
+        ) : (
+          companyJobs.map((job) => (
+            <TouchableOpacity
+              key={job.id}
+              style={styles.jobRow}
+              activeOpacity={0.85}
+              onPress={() => router.push(`/(tabs)/jobs/${job.id}`)}
+            >
+              <View style={styles.jobRowBody}>
+                <Text style={styles.jobRowTitle} numberOfLines={2}>
+                  {job.title}
+                </Text>
+                <Text style={styles.jobRowMeta} numberOfLines={2}>
+                  {[
+                    strTrim(job.category),
+                    formatBudgetDisplay({
+                      budget_type: job.budget_type,
+                      budget_amount: job.budget_amount,
+                      budget_currency: job.budget_currency,
+                    }),
+                    strTrim(job.location_type),
+                  ]
+                    .filter((x) => x.length > 0)
+                    .join(' · ')}
+                </Text>
               </View>
-            ) : (
-              <Text style={styles.emptyHint}>No skills listed yet.</Text>
-            )}
-          </View>
-        ) : skills.length > 0 ? (
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>Skills</Text>
+              <ChevronRight size={20} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
+            </TouchableOpacity>
+          ))
+        )}
+      </View>
+    ) : null
+
+  const renderSkillsBlock = (compact = false, asideFirst = false, landscapeMetaRow = false) => {
+    if (isFreelancer) {
+      return (
+        <View
+          style={[
+            styles.block,
+            compact && styles.blockCompact,
+            asideFirst && styles.blockAsideFirst,
+            landscapeMetaRow && styles.blockLandscapeMeta,
+          ]}
+        >
+          <Text style={styles.blockTitle}>Skills</Text>
+          {skills.length > 0 ? (
             <View style={styles.chipRow}>
               {skills.map((s) => (
                 <View key={s} style={styles.chip}>
@@ -455,168 +510,164 @@ export function FreelancerPublicProfileContent({
                 </View>
               ))}
             </View>
-          </View>
-        ) : null}
-
-        {isFreelancer && equipment.length > 0 ? (
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>Essentials</Text>
-            {equipment.map((item) => (
-              <View key={item} style={styles.essentialRow}>
-                <Text style={styles.essentialMark}>✓</Text>
-                <Text style={styles.essentialText}>{item}</Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {isFreelancer ? (
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>Work</Text>
-            {projects.length > 0 ? (
-              <>
-                <View style={styles.workGrid}>
-                  {visibleProjects.map((proj: PortfolioProject, i: number) => {
-                    const sub = projectSubtitle(proj)
-                    const openProject = () => {
-                      const u = strTrim(proj.link)
-                      if (u) Linking.openURL(u).catch(() => {})
-                    }
-                    return (
-                      <TouchableOpacity
-                        key={`${proj.title}-${i}`}
-                        style={styles.workTile}
-                        activeOpacity={0.85}
-                        onPress={openProject}
-                        disabled={!strTrim(proj.link)}
-                      >
-                        {proj.image_url ? (
-                          <Image source={{ uri: proj.image_url }} style={styles.workThumb} />
-                        ) : (
-                          <View style={styles.workThumbPlaceholder}>
-                            <Text style={styles.workThumbLetter}>{proj.title.charAt(0).toUpperCase() || '•'}</Text>
-                          </View>
-                        )}
-                        <Text style={styles.workTileTitle} numberOfLines={2}>
-                          {proj.title}
-                        </Text>
-                        {sub ? (
-                          <Text style={styles.workTileSub} numberOfLines={1}>
-                            {sub}
-                          </Text>
-                        ) : null}
-                      </TouchableOpacity>
-                    )
-                  })}
-                </View>
-                {hasMoreProjects ? (
-                  <TouchableOpacity
-                    onPress={() => setVisibleProjectCount((n) => n + 6)}
-                    style={styles.moreProjectsBtn}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.moreProjectsBtnText}>
-                      Load more ({projects.length - visibleProjects.length} left)
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-              </>
-            ) : (
-              <Text style={styles.emptyHint}>No portfolio items yet.</Text>
-            )}
-          </View>
-        ) : projects.length > 0 ? (
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>Work</Text>
-            <View style={styles.workGrid}>
-              {visibleProjects.map((proj: PortfolioProject, i: number) => {
-                const sub = projectSubtitle(proj)
-                const openProject = () => {
-                  const u = strTrim(proj.link)
-                  if (u) Linking.openURL(u).catch(() => {})
-                }
-                return (
-                  <TouchableOpacity
-                    key={`${proj.title}-${i}`}
-                    style={styles.workTile}
-                    activeOpacity={0.85}
-                    onPress={openProject}
-                    disabled={!strTrim(proj.link)}
-                  >
-                    {proj.image_url ? (
-                      <Image source={{ uri: proj.image_url }} style={styles.workThumb} />
-                    ) : (
-                      <View style={styles.workThumbPlaceholder}>
-                        <Text style={styles.workThumbLetter}>{proj.title.charAt(0).toUpperCase() || '•'}</Text>
-                      </View>
-                    )}
-                    <Text style={styles.workTileTitle} numberOfLines={2}>
-                      {proj.title}
-                    </Text>
-                    {sub ? (
-                      <Text style={styles.workTileSub} numberOfLines={1}>
-                        {sub}
-                      </Text>
-                    ) : null}
-                  </TouchableOpacity>
-                )
-              })}
+          ) : (
+            <Text style={styles.emptyHint}>No skills listed yet.</Text>
+          )}
+        </View>
+      )
+    }
+    if (skills.length === 0) return null
+    return (
+      <View
+        style={[
+          styles.block,
+          compact && styles.blockCompact,
+          asideFirst && styles.blockAsideFirst,
+          landscapeMetaRow && styles.blockLandscapeMeta,
+        ]}
+      >
+        <Text style={styles.blockTitle}>Skills</Text>
+        <View style={styles.chipRow}>
+          {skills.map((s) => (
+            <View key={s} style={styles.chip}>
+              <Text style={styles.chipText}>{s}</Text>
             </View>
-            {hasMoreProjects ? (
-              <TouchableOpacity
-                onPress={() => setVisibleProjectCount((n) => n + 6)}
-                style={styles.moreProjectsBtn}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.moreProjectsBtnText}>
-                  Load more ({projects.length - visibleProjects.length} left)
-                </Text>
-              </TouchableOpacity>
-            ) : null}
+          ))}
+        </View>
+      </View>
+    )
+  }
+
+  const renderEssentialsBlock = (compact = false, landscapeMetaRow = false) =>
+    isFreelancer && equipment.length > 0 ? (
+      <View
+        style={[
+          styles.block,
+          compact && styles.blockCompact,
+          landscapeMetaRow && styles.blockLandscapeMeta,
+        ]}
+      >
+        <Text style={styles.blockTitle}>Essentials</Text>
+        {equipment.map((item) => (
+          <View key={item} style={styles.essentialRow}>
+            <Text style={styles.essentialMark}>✓</Text>
+            <Text style={styles.essentialText}>{item}</Text>
           </View>
-        ) : null}
+        ))}
+      </View>
+    ) : null
 
-        {isFreelancer ? (
-          <AvailabilityMonthPreview
-            calendar={calendar}
-            anchor={new Date()}
-            interactive={companyAvailabilityInvite}
-            alwaysShow
-            jobBookedIso={jobBookedIso}
-            committedBookingIsos={bookingSelection ?? undefined}
-            onCommitBookingSelection={
-              companyAvailabilityInvite
-                ? (isos) => {
-                    if (isos.size === 0) return
-                    setBookingSelection(new Set(isos))
-                  }
-                : undefined
-            }
-          />
-        ) : null}
+  const renderAvailabilityNote = (asideFirst = false) =>
+    isFreelancer && availabilityDetails ? (
+      <View style={[styles.block, asideFirst && styles.blockAsideFirst]}>
+        <Text style={styles.blockTitle}>Availability note</Text>
+        <Text style={styles.bio}>{availabilityDetails}</Text>
+      </View>
+    ) : null
 
-        {isFreelancer && previewMode && authUserId && authUserId === userId ? (
-          <TouchableOpacity
-            style={styles.availabilityPreviewLink}
-            onPress={() => router.push('/(tabs)/availability')}
-            activeOpacity={0.85}
-            accessibilityRole="link"
-            accessibilityLabel="Manage availability calendar"
-          >
-            <Text style={styles.availabilityPreviewLinkText}>Manage availability</Text>
-            <ChevronRight size={16} color="#FFDC00" strokeWidth={ICON_STROKE} />
-          </TouchableOpacity>
-        ) : null}
+  const renderCalendarSection = (asideFirst = false) =>
+    isFreelancer ? (
+      <View style={asideFirst ? styles.blockAsideFirst : undefined}>
+        <AvailabilityMonthPreview
+        calendar={calendar}
+        anchor={new Date()}
+        interactive={companyAvailabilityInvite}
+        alwaysShow
+        jobBookedIso={jobBookedIso}
+        committedBookingIsos={bookingSelection ?? undefined}
+        onCommitBookingSelection={
+          companyAvailabilityInvite
+            ? (isos) => {
+                if (isos.size === 0) return
+                setBookingSelection(new Set(isos))
+              }
+            : undefined
+        }
+        />
+      </View>
+    ) : null
 
-        {isFreelancer ? (
-          <TouchableOpacity
-            style={styles.browseLink}
-            onPress={() => router.push('/(tabs)/talent-pool')}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.browseLinkText}>Browse more freelancers →</Text>
-          </TouchableOpacity>
-        ) : null}
+  const renderProfileFooter = () => (
+    <>
+      {isFreelancer && previewMode && authUserId && authUserId === userId ? (
+        <TouchableOpacity
+          style={styles.availabilityPreviewLink}
+          onPress={() => router.push('/(tabs)/availability')}
+          activeOpacity={0.85}
+          accessibilityRole="link"
+          accessibilityLabel="Manage availability calendar"
+        >
+          <Text style={styles.availabilityPreviewLinkText}>Manage availability</Text>
+          <ChevronRight size={16} color="#FFDC00" strokeWidth={ICON_STROKE} />
+        </TouchableOpacity>
+      ) : null}
+
+      {isFreelancer ? (
+        <TouchableOpacity
+          style={styles.browseLink}
+          onPress={() => router.push('/(tabs)/talent-pool')}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.browseLinkText}>Browse more freelancers →</Text>
+        </TouchableOpacity>
+      ) : null}
+    </>
+  )
+
+  const scrollContent = (
+    <>
+      {previewMode ? (
+        <View style={styles.previewBanner}>
+          <Text style={styles.previewBannerTitle}>Public profile</Text>
+          <Text style={styles.previewBannerSub}>
+            This is how your profile looks to companies and other users — same data as your public link on the web and
+            in the app.
+          </Text>
+        </View>
+      ) : null}
+
+      {isTabletLandscape ? (
+        <>
+          <View style={styles.tabletSplit}>
+            <View style={styles.tabletPrimary}>
+              {renderProfileHeader()}
+              {renderCompanyJobs()}
+            </View>
+            <View style={styles.tabletAside}>
+              {renderAvailabilityNote(true)}
+              {renderCalendarSection(!availabilityDetails)}
+              {renderProfileFooter()}
+            </View>
+          </View>
+          {(isFreelancer && (skills.length > 0 || equipment.length > 0)) || (!isFreelancer && skills.length > 0) ? (
+            <View style={[styles.tabletSplit, styles.tabletSkillsEssentialsRow]}>
+              <View style={styles.tabletPrimary}>{renderSkillsBlock(false, false, true)}</View>
+              <View style={styles.tabletAside}>{renderEssentialsBlock(false, true)}</View>
+            </View>
+          ) : null}
+          {renderWorkSection(true)}
+        </>
+      ) : (
+        <>
+          {renderProfileHeader()}
+          {renderCompanyJobs()}
+          {renderAvailabilityNote()}
+          {showTabletMetaRow ? (
+            <View style={styles.tabletMetaRow}>
+              <View style={styles.tabletMetaCol}>{renderSkillsBlock(true)}</View>
+              <View style={styles.tabletMetaCol}>{renderEssentialsBlock(true)}</View>
+            </View>
+          ) : (
+            <>
+              {renderSkillsBlock()}
+              {renderEssentialsBlock()}
+            </>
+          )}
+          {renderWorkSection()}
+          {renderCalendarSection()}
+          {renderProfileFooter()}
+        </>
+      )}
     </>
   )
 
@@ -653,7 +704,7 @@ export function FreelancerPublicProfileContent({
       {scrollMode === 'inner' ? (
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.scrollPad, { paddingBottom: contentBottomPad }]}
+          contentContainerStyle={[scrollPadStyle, { paddingBottom: contentBottomPad }]}
           showsVerticalScrollIndicator={Platform.OS !== 'web'}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -661,7 +712,7 @@ export function FreelancerPublicProfileContent({
           {scrollContent}
         </ScrollView>
       ) : (
-        <View style={[styles.scrollPad, { paddingBottom: contentBottomPad }]}>{scrollContent}</View>
+        <View style={[scrollPadStyle, { paddingBottom: contentBottomPad }]}>{scrollContent}</View>
       )}
     </View>
   )
@@ -673,7 +724,7 @@ const styles = StyleSheet.create({
   /** Parent screen provides ScrollView — no nested vertical scroll. */
   embedRoot: { width: '100%' },
   scroll: { flex: 1 },
-  scrollPad: { paddingHorizontal: 16, maxWidth: 560, alignSelf: 'center', width: '100%' },
+  scrollPad: { paddingHorizontal: 16, width: '100%' },
   emptyHint: { fontSize: 14, color: 'rgba(255,255,255,0.38)', lineHeight: 20, fontStyle: 'italic' },
   previewBanner: { marginBottom: 16 },
   previewBannerTitle: {
@@ -689,6 +740,52 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   igHeader: { marginBottom: 16 },
+  igHeaderTablet: { marginBottom: 20 },
+  tabletSplit: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 56,
+    marginTop: 8,
+  },
+  workLandscapeFooter: {
+    marginTop: 28,
+  },
+  tabletPrimary: {
+    flex: 0.58,
+    minWidth: 0,
+  },
+  tabletAside: {
+    flex: 0.42,
+    minWidth: 280,
+    maxWidth: 420,
+  },
+  tabletSkillsEssentialsRow: {
+    alignItems: 'stretch',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    paddingTop: 16,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  blockLandscapeMeta: {
+    marginBottom: 0,
+    borderTopWidth: 0,
+    paddingTop: 0,
+    flex: 1,
+  },
+  tabletMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 20,
+    marginBottom: 22,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    paddingTop: 16,
+  },
+  tabletMetaCol: {
+    flex: 1,
+    minWidth: 0,
+  },
   igTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -713,6 +810,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#FFDC00',
     lineHeight: 26,
+  },
+  igRateValueTablet: {
+    fontSize: 26,
+    lineHeight: 30,
   },
   igRateSub: {
     fontSize: 13,
@@ -742,6 +843,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   igName: { flex: 1, fontSize: 14, fontWeight: '700', color: '#fff' },
+  igNameTablet: { fontSize: 18 },
   igLocation: {
     flexShrink: 1,
     maxWidth: '48%',
@@ -750,8 +852,10 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.55)',
     textAlign: 'right',
   },
+  igLocationTablet: { fontSize: 14 },
   igBio: { gap: 2, marginBottom: 8 },
   igBioLine: { fontSize: 14, color: '#fff', lineHeight: 20 },
+  igBioLineTablet: { fontSize: 16, lineHeight: 24, maxWidth: '100%' },
   igBioMuted: { fontSize: 14, color: 'rgba(255,255,255,0.38)', lineHeight: 20 },
   igPillRow: {
     flexDirection: 'row',
@@ -773,21 +877,12 @@ const styles = StyleSheet.create({
     color: '#0a0a0a',
     letterSpacing: 0.2,
   },
+  yellowPillTextTablet: { fontSize: 13 },
   igSocialIconRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
     marginTop: 4,
-  },
-  socialBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: '#141414',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   rolePill: {
     paddingHorizontal: 12,
@@ -817,6 +912,19 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.08)',
     paddingTop: 16,
+  },
+  blockCompact: {
+    marginBottom: 0,
+    borderTopWidth: 0,
+    paddingTop: 0,
+  },
+  blockFlush: {
+    borderTopWidth: 0,
+    paddingTop: 0,
+  },
+  blockAsideFirst: {
+    borderTopWidth: 0,
+    paddingTop: 0,
   },
   blockTitle: {
     fontSize: 14,
@@ -851,8 +959,14 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 2,
   },
+  workCarousel: {
+    marginHorizontal: -2,
+  },
+  workCarouselContent: {
+    paddingHorizontal: 2,
+    paddingBottom: 4,
+  },
   workTile: {
-    width: '32.5%',
     marginBottom: 2,
   },
   workThumb: {
@@ -861,6 +975,9 @@ const styles = StyleSheet.create({
     borderRadius: 0,
     backgroundColor: '#222',
     marginBottom: 0,
+  },
+  workThumbTablet: {
+    borderRadius: 6,
   },
   workThumbPlaceholder: {
     width: '100%',
@@ -874,6 +991,7 @@ const styles = StyleSheet.create({
   },
   workThumbLetter: { fontSize: 22, fontWeight: '800', color: 'rgba(255,255,255,0.2)' },
   workTileTitle: { fontSize: 11, fontWeight: '600', color: '#fff', marginTop: 4, paddingHorizontal: 2 },
+  workTileTitleTablet: { fontSize: 13 },
   workTileSub: { fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 1, paddingHorizontal: 2, marginBottom: 6 },
   moreProjectsBtn: {
     marginTop: 8,

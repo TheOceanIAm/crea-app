@@ -29,6 +29,7 @@ import { loadLiveCeoWidgets } from '@/lib/ceoLiveWidgets'
 import { profileShareUrl } from '@/lib/shareLinks'
 
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
+import { useResponsiveLayout } from '@/hooks/useResponsiveLayout'
 
 export default function ProfilePreviewScreen() {
   const tabBarInset = useFloatingTabBarBottomInset()
@@ -99,6 +100,12 @@ export default function ProfilePreviewScreen() {
   )
 
   const bottomPad = tabBarInset + 24
+  const { contentMaxWidth, horizontalPadding, isTablet } = useResponsiveLayout('wide')
+  const topBarStyle = [
+    styles.topBar,
+    contentMaxWidth != null ? { maxWidth: contentMaxWidth, alignSelf: 'center' as const, width: '100%' as const } : null,
+    isTablet ? { paddingHorizontal: horizontalPadding, paddingBottom: 32 } : null,
+  ]
 
   if (loading) {
     return (
@@ -131,7 +138,7 @@ export default function ProfilePreviewScreen() {
   const avatarUri = (payload.avatar_url ?? '').trim()
 
   const topBar = (
-    <View style={styles.topBar}>
+    <View style={topBarStyle}>
       <TouchableOpacity style={styles.topBarSide} onPress={() => router.back()} hitSlop={12}>
         <ChevronLeft size={22} color="#fff" strokeWidth={ICON_STROKE} />
       </TouchableOpacity>
