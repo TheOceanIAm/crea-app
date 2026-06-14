@@ -14,30 +14,47 @@ import { RevenueCatProvider } from '@/contexts/RevenueCatContext'
 import {
   consumeInitialSupabaseAuthUrlForBootstrap,
   handleSupabaseAuthCallbackUrl,
+  resetInitialSupabaseAuthBootstrapForDev,
 } from '@/lib/authDeepLink'
 import { isAppStoreScreenshotDeepLink } from '@/lib/appStoreScreenshotDeepLink'
 import { isAppStoreScreenshotModeEnabled } from '@/lib/appStoreScreenshotMode'
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
 
+const AUTH_GATE_FAILSAFE_MS = 4_000
+
 /** Finish cold-start Supabase redirect before any route reads `getSession()` (avoids bouncing to login). */
 function BootstrapAuthGate({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false)
   useEffect(() => {
     let cancelled = false
+    resetInitialSupabaseAuthBootstrapForDev()
+
+    const finish = () => {
+      if (cancelled) return
+      setReady(true)
+      void SplashScreen.hideAsync().catch(() => {})
+    }
+
+    const failsafe = setTimeout(finish, AUTH_GATE_FAILSAFE_MS)
+
     void (async () => {
       if (isAppStoreScreenshotModeEnabled()) {
         const initial = await Linking.getInitialURL()
         if (isAppStoreScreenshotDeepLink(initial)) {
-          if (!cancelled) setReady(true)
+          clearTimeout(failsafe)
+          finish()
           return
         }
       }
       await consumeInitialSupabaseAuthUrlForBootstrap()
-      if (!cancelled) setReady(true)
+      clearTimeout(failsafe)
+      finish()
     })()
+
     return () => {
       cancelled = true
+      clearTimeout(failsafe)
     }
   }, [])
   if (!ready) return <View style={styles.authGate} />

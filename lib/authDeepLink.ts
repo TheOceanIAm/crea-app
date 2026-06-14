@@ -16,16 +16,39 @@ export type InitialSupabaseAuthBootstrap =
 
 let initialBootstrapPromise: Promise<InitialSupabaseAuthBootstrap> | null = null
 
+const INITIAL_URL_TIMEOUT_MS = 3_000
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(fallback), ms)
+    void promise.then(
+      (value) => {
+        clearTimeout(t)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(t)
+        resolve(fallback)
+      },
+    )
+  })
+}
+
 export function consumeInitialSupabaseAuthUrlForBootstrap(): Promise<InitialSupabaseAuthBootstrap> {
   if (!initialBootstrapPromise) {
     initialBootstrapPromise = (async (): Promise<InitialSupabaseAuthBootstrap> => {
-      const url = await Linking.getInitialURL()
+      const url = await withTimeout(Linking.getInitialURL(), INITIAL_URL_TIMEOUT_MS, null)
       if (!url) return { didHandle: false }
       const result = await handleSupabaseAuthCallbackUrl(url)
       return { didHandle: true, result }
     })()
   }
   return initialBootstrapPromise
+}
+
+/** Dev reload: module state can survive a fast refresh — reset so the auth gate does not hang. */
+export function resetInitialSupabaseAuthBootstrapForDev(): void {
+  if (__DEV__) initialBootstrapPromise = null
 }
 
 export function getAuthRedirectUrl(kind: 'callback' | 'reset'): string {

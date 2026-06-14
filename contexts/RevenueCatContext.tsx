@@ -12,6 +12,7 @@ import { Platform } from 'react-native'
 import Purchases, { type CustomerInfo } from 'react-native-purchases'
 import { supabase } from '@/lib/supabase'
 import { revenueCatApiKey } from '@/lib/revenuecat/config'
+import { configureRevenueCatLogging } from '@/lib/revenuecat/configureLogging'
 import { getRevenueCatPreferredLocale } from '@/lib/revenuecat/storeProductPrice'
 import { purchasesUnavailableUserMessage } from '@/lib/revenuecat/purchasesEnvironment'
 import {
@@ -74,10 +75,14 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
         return
       }
       try {
+        configureRevenueCatLogging()
         Purchases.setLogLevel(__DEV__ ? Purchases.LOG_LEVEL.DEBUG : Purchases.LOG_LEVEL.WARN)
         const preferredUILocaleOverride = getRevenueCatPreferredLocale()
-        await Purchases.configure({ apiKey, preferredUILocaleOverride })
-        await Purchases.overridePreferredLocale(preferredUILocaleOverride)
+        const alreadyConfigured = Purchases.isConfigured()
+        if (!alreadyConfigured) {
+          await Purchases.configure({ apiKey, preferredUILocaleOverride })
+          await Purchases.overridePreferredLocale(preferredUILocaleOverride)
+        }
         if (!Purchases.isConfigured()) {
           throw new Error('StoreKit native module not available')
         }

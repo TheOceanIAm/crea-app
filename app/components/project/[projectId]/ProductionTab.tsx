@@ -23,8 +23,10 @@ import {
   MapPin,
   Pencil,
   Plus,
+  Trash2,
   Users,
 } from 'lucide-react-native'
+import { KeyboardFormModal } from '@/components/KeyboardFormModal'
 import { supabase } from '@/lib/supabase'
 import { formatShootDayOptionLabel, listProductionWindowYmd } from '@/lib/projectProductionWindow'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -60,6 +62,15 @@ type ShotDraft = {
   description: string
   lens: string
   audio_notes: string
+}
+
+const EMPTY_SHOT_DRAFT: ShotDraft = {
+  scene_nr: '',
+  location: '',
+  framing: '',
+  description: '',
+  lens: '',
+  audio_notes: '',
 }
 
 type CrewRow = {
@@ -295,6 +306,9 @@ export function ProductionTab({
   const [busyShot, setBusyShot] = useState<string | null>(null)
   const [editingShotId, setEditingShotId] = useState<string | null>(null)
   const [shotDrafts, setShotDrafts] = useState<Record<string, ShotDraft>>({})
+  const [addShotOpen, setAddShotOpen] = useState(false)
+  const [newShotDraft, setNewShotDraft] = useState<ShotDraft>(EMPTY_SHOT_DRAFT)
+  const [savingNewShot, setSavingNewShot] = useState(false)
   const [creatingDay, setCreatingDay] = useState(false)
   const [savingCallSheet, setSavingCallSheet] = useState(false)
   const [callDraft, setCallDraft] = useState<Record<string, CallOverride>>({})
@@ -514,28 +528,74 @@ export function ProductionTab({
     await load()
   }
 
-  const addShot = async () => {
+  const openAddShotModal = () => {
+    setNewShotDraft(EMPTY_SHOT_DRAFT)
+    setAddShotOpen(true)
+  }
+
+  const closeAddShotModal = () => {
+    if (savingNewShot) return
+    setAddShotOpen(false)
+    setNewShotDraft(EMPTY_SHOT_DRAFT)
+  }
+
+  const saveNewShot = async () => {
+    setSavingNewShot(true)
+    const framing = expandFramingAbbreviations(newShotDraft.framing)
     const { data, error } = await supabase
       .from('production_shots')
       .insert({
         project_id: projectId,
         shoot_date: shootDay,
-        scene_nr: '',
-        description: '',
-        lens: '',
-        location: '',
-        framing: '',
-        audio_notes: '',
+        scene_nr: newShotDraft.scene_nr.trim(),
+        description: newShotDraft.description.trim(),
+        lens: newShotDraft.lens.trim(),
+        location: newShotDraft.location.trim(),
+        framing,
+        audio_notes: newShotDraft.audio_notes.trim(),
         brief_ai_synced: false,
         status: 'open',
       })
       .select('*')
       .single()
+    setSavingNewShot(false)
     if (error) {
       Alert.alert('Shot', error.message)
       return
     }
-    setShots((prev) => [...prev, normalizeShotRow(data as Record<string, unknown>)])
+    if (data) {
+      setShots((prev) => [...prev, normalizeShotRow(data as Record<string, unknown>)])
+      setAddShotOpen(false)
+      setNewShotDraft(EMPTY_SHOT_DRAFT)
+    }
+  }
+
+  const deleteShot = (s: ProductionShot) => {
+    const label = s.scene_nr?.trim() ? ` “${s.scene_nr.trim()}”` : ''
+    Alert.alert('Delete shot', `Remove this shot${label}? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => void confirmDeleteShot(s),
+      },
+    ])
+  }
+
+  const confirmDeleteShot = async (s: ProductionShot) => {
+    setBusyShot(s.id)
+    const { error } = await supabase
+      .from('production_shots')
+      .delete()
+      .eq('id', s.id)
+      .eq('project_id', projectId)
+    setBusyShot(null)
+    if (error) {
+      Alert.alert('Shot', error.message)
+      return
+    }
+    setShots((prev) => prev.filter((row) => row.id !== s.id))
+    if (editingShotId === s.id) setEditingShotId(null)
   }
 
   const cycleStatus = (s: ProductionShot) => {
@@ -867,6 +927,13 @@ export function ProductionTab({
                 )}
               </TouchableOpacity>
               <TouchableOpacity
+                style={styles.deleteBtn}
+                onPress={() => deleteShot(s)}
+                disabled={busyShot === s.id}
+              >
+                <Trash2 size={16} color="#f87171" strokeWidth={ICON_STROKE} />
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={[styles.statusBtn, statusStyle(s.status)]}
                 onPress={() => cycleStatus(s)}
                 disabled={busyShot === s.id}
@@ -979,7 +1046,11 @@ export function ProductionTab({
         </View>
       ))}
 
-      <TouchableOpacity style={[styles.addRowBtn, busyShot && styles.dim]} onPress={addShot} disabled={!!busyShot}>
+      <TouchableOpacity
+        style={[styles.addRowBtn, busyShot && styles.dim]}
+        onPress={openAddShotModal}
+        disabled={!!busyShot}
+      >
         <Plus size={20} color="#0a0a0a" strokeWidth={ICON_STROKE} />
         <Text style={styles.addRowBtnText}>Add shot</Text>
       </TouchableOpacity>
@@ -1150,6 +1221,86 @@ export function ProductionTab({
         </>
       ) : null}
       </ScrollView>
+
+      <KeyboardFormModal visible={addShotOpen} onClose={closeAddShotModal}>
+        <Text style={styles.modalTitle}>New shot</Text>
+        <Text style={styles.modalSub}>Shoot day {formatShootDayOptionLabel(shootDay)}</Text>
+
+        <Text style={styles.shotFieldLabel}>Scene / slate</Text>
+        <TextInput
+          style={styles.shotInput}
+          placeholder="e.g. 3A"
+          placeholderTextColor="rgba(255,255,255,0.25)"
+          value={newShotDraft.scene_nr}
+          onChangeText={(v) => setNewShotDraft((prev) => ({ ...prev, scene_nr: v }))}
+        />
+
+        <Text style={styles.shotFieldLabel}>Location</Text>
+        <TextInput
+          style={styles.shotInput}
+          placeholder="Set, room, stage…"
+          placeholderTextColor="rgba(255,255,255,0.25)"
+          value={newShotDraft.location}
+          onChangeText={(v) => setNewShotDraft((prev) => ({ ...prev, location: v }))}
+        />
+
+        <Text style={styles.shotFieldLabel}>Framing</Text>
+        <TextInput
+          style={styles.shotInput}
+          placeholder="e.g. Wide est., MCU, product insert"
+          placeholderTextColor="rgba(255,255,255,0.25)"
+          value={newShotDraft.framing}
+          onChangeText={(v) => setNewShotDraft((prev) => ({ ...prev, framing: v }))}
+        />
+
+        <Text style={styles.shotFieldLabel}>Action / description</Text>
+        <TextInput
+          style={[styles.shotInput, styles.shotInputTall]}
+          placeholder="What happens in the shot, blocking, talent…"
+          placeholderTextColor="rgba(255,255,255,0.25)"
+          value={newShotDraft.description}
+          multiline
+          textAlignVertical="top"
+          onChangeText={(v) => setNewShotDraft((prev) => ({ ...prev, description: v }))}
+        />
+
+        <Text style={styles.shotFieldLabel}>Camera / lens</Text>
+        <TextInput
+          style={styles.shotInput}
+          placeholder="e.g. 35mm, 85mm / FX6"
+          placeholderTextColor="rgba(255,255,255,0.25)"
+          value={newShotDraft.lens}
+          onChangeText={(v) => setNewShotDraft((prev) => ({ ...prev, lens: v }))}
+        />
+
+        <Text style={styles.shotFieldLabel}>Audio</Text>
+        <TextInput
+          style={[styles.shotInput, styles.shotInputTall]}
+          placeholder="Boom, lavs, ambient, music playback…"
+          placeholderTextColor="rgba(255,255,255,0.25)"
+          value={newShotDraft.audio_notes}
+          multiline
+          textAlignVertical="top"
+          onChangeText={(v) => setNewShotDraft((prev) => ({ ...prev, audio_notes: v }))}
+        />
+
+        <View style={styles.modalActions}>
+          <TouchableOpacity
+            style={[styles.modalBtn, styles.modalBtnGhost]}
+            onPress={closeAddShotModal}
+            disabled={savingNewShot}
+          >
+            <Text style={styles.modalBtnGhostText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modalBtn, styles.modalBtnAccent, savingNewShot && styles.dim]}
+            onPress={() => void saveNewShot()}
+            disabled={savingNewShot}
+          >
+            <Text style={styles.modalBtnAccentText}>{savingNewShot ? 'Saving…' : 'Add shot'}</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardFormModal>
     </View>
   )
 }
@@ -1367,6 +1518,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  deleteBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+    backgroundColor: 'rgba(248,113,113,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalTitle: { fontSize: 30, fontWeight: '900', color: '#FFDC00', textTransform: 'uppercase', marginBottom: 6 },
+  modalSub: { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 16, lineHeight: 18 },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  modalBtn: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBtnGhost: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+  modalBtnGhostText: { color: 'rgba(255,255,255,0.8)', fontWeight: '700', fontSize: 14, textAlign: 'center' },
+  modalBtnAccent: { backgroundColor: '#FFDC00' },
+  modalBtnAccentText: { color: '#0a0a0a', fontWeight: '800', fontSize: 14, textAlign: 'center' },
   shotFieldLabel: {
     fontSize: 10,
     color: 'rgba(255,255,255,0.38)',
