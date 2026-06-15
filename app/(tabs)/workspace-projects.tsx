@@ -73,7 +73,8 @@ function mapProjectStatusLabel(project: {
   const js = String(project.job_status ?? '').toLowerCase()
   const jps = String(project.job_project_status ?? '').toLowerCase()
   if (st === 'archived') return 'ARCHIVED'
-  if (st === 'completed' || js === 'closed' || jps === 'completed') return 'COMPLETED'
+  if (st === 'cancelled' || js === 'closed') return 'CLOSED'
+  if (st === 'completed' || jps === 'completed') return 'COMPLETED'
   if (st === 'recruiting' || jps === 'recruiting') return 'RECRUITING'
   return 'ACTIVE'
 }

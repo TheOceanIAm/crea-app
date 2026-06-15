@@ -64,7 +64,8 @@ export function mapProjectStatusLabel(project: {
   const js = String(project.job_status ?? '').toLowerCase()
   const jps = String(project.job_project_status ?? '').toLowerCase()
   if (st === 'archived') return 'ARCHIVED'
-  if (st === 'completed' || js === 'closed' || jps === 'completed') return 'COMPLETED'
+  if (st === 'cancelled' || js === 'closed') return 'CLOSED'
+  if (st === 'completed' || jps === 'completed') return 'COMPLETED'
   if (st === 'recruiting' || jps === 'recruiting') return 'RECRUITING'
   return 'ACTIVE'
 }
@@ -221,8 +222,8 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
       }
     })
     builtCompany.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
-    const coActive = builtCompany.filter((x) => !x.isArchived)
-    const coArch = builtCompany.filter((x) => x.isArchived)
+    const coActive = builtCompany.filter((x) => !x.isArchived && x.statusLabel !== 'CLOSED')
+    const coArch = builtCompany.filter((x) => x.isArchived || x.statusLabel === 'CLOSED')
     return {
       listings: coActive,
       archivedListings: coArch,
