@@ -37,7 +37,7 @@ export default function LoginScreen() {
       Alert.alert('Could not sign in', userFacingErrorMessage(error))
       return
     }
-    if (data.user?.id && Purchases.isConfigured()) {
+    if (data.user?.id && (await Purchases.isConfigured())) {
       try {
         await Purchases.logIn(data.user.id)
       } catch (e) {

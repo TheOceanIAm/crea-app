@@ -69,18 +69,20 @@ export async function getSubscriptionStatus(params: {
 
   if (Platform.OS === 'ios') {
     try {
-      const customerInfo = await Purchases.getCustomerInfo()
-      const rcPlan = resolveSubscriptionPlanFromCustomerInfo(customerInfo)
-      if (isSubscribedFromCustomerInfo(customerInfo)) {
-        const appTier =
-          role === 'company'
-            ? companyPlanFromSubscription(rcPlan)
-            : freelancerPlanFromSubscription(rcPlan)
-        return {
-          currentPlan: rcPlan,
-          isSubscribed: true,
-          source: 'revenuecat',
-          appTier,
+      if (await Purchases.isConfigured()) {
+        const customerInfo = await Purchases.getCustomerInfo()
+        const rcPlan = resolveSubscriptionPlanFromCustomerInfo(customerInfo)
+        if (isSubscribedFromCustomerInfo(customerInfo)) {
+          const appTier =
+            role === 'company'
+              ? companyPlanFromSubscription(rcPlan)
+              : freelancerPlanFromSubscription(rcPlan)
+          return {
+            currentPlan: rcPlan,
+            isSubscribed: true,
+            source: 'revenuecat',
+            appTier,
+          }
         }
       }
     } catch {

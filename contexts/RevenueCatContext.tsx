@@ -78,12 +78,12 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
         configureRevenueCatLogging()
         Purchases.setLogLevel(__DEV__ ? Purchases.LOG_LEVEL.DEBUG : Purchases.LOG_LEVEL.WARN)
         const preferredUILocaleOverride = getRevenueCatPreferredLocale()
-        const alreadyConfigured = Purchases.isConfigured()
+        const alreadyConfigured = await Purchases.isConfigured()
         if (!alreadyConfigured) {
-          await Purchases.configure({ apiKey, preferredUILocaleOverride })
+          Purchases.configure({ apiKey, preferredUILocaleOverride })
           await Purchases.overridePreferredLocale(preferredUILocaleOverride)
         }
-        if (!Purchases.isConfigured()) {
+        if (!(await Purchases.isConfigured())) {
           throw new Error('StoreKit native module not available')
         }
         configuredRef.current = true

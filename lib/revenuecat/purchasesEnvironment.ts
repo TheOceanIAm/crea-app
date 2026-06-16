@@ -47,6 +47,12 @@ export const OFFERINGS_EMPTY_MESSAGE = offeringsEmptyMessage()
 export function offeringsLoadErrorMessage(cause: unknown): string {
   const raw = cause instanceof Error ? cause.message : String(cause ?? '')
   if (
+    raw.includes('singleton instance') ||
+    raw.includes('configure Purchases before')
+  ) {
+    return purchasesUnavailableUserMessage(cause)
+  }
+  if (
     raw.includes('could not be fetched from App Store Connect') ||
     raw.includes('why-are-offerings-empty') ||
     raw.includes('DEVELOPER_ACTION_NEEDED') ||

@@ -83,7 +83,7 @@ function RegisterForm() {
     }
     if (data.session) {
       const userId = data.session.user.id
-      if (Purchases.isConfigured()) {
+      if (await Purchases.isConfigured()) {
         try {
           await Purchases.logIn(userId)
         } catch (e) {

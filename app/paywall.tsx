@@ -180,6 +180,11 @@ export default function PaywallScreen() {
       setLoadingOfferings(false)
       return
     }
+    if (!(await Purchases.isConfigured())) {
+      setLoadError(configError || purchasesUnavailableUserMessage())
+      setLoadingOfferings(false)
+      return
+    }
     setLoadingOfferings(true)
     setLoadError(null)
     try {
