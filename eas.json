@@ -11,7 +11,8 @@
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://trcjalnzuzpgygxtncvp.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyY2phbG56dXpwZ3lneHRuY3ZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NzA4NzksImV4cCI6MjA4OTI0Njg3OX0.-FoFuIqE4_u8sC0TcKqaLFg0V2YDeAk_uAoNnHaCfZs",
-        "EXPO_PUBLIC_CREA_WEB_URL": "https://creaservices.de"
+        "EXPO_PUBLIC_CREA_WEB_URL": "https://creaservices.de",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_BKbFnLWKlDXkxLytdHvPULFQeHI"
       }
     },
     "preview": {
@@ -19,7 +20,8 @@
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://trcjalnzuzpgygxtncvp.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyY2phbG56dXpwZ3lneHRuY3ZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NzA4NzksImV4cCI6MjA4OTI0Njg3OX0.-FoFuIqE4_u8sC0TcKqaLFg0V2YDeAk_uAoNnHaCfZs",
-        "EXPO_PUBLIC_CREA_WEB_URL": "https://creaservices.de"
+        "EXPO_PUBLIC_CREA_WEB_URL": "https://creaservices.de",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_BKbFnLWKlDXkxLytdHvPULFQeHI"
       }
     },
     "production": {
@@ -31,7 +33,8 @@
         "EXPO_PUBLIC_SUPABASE_URL": "https://trcjalnzuzpgygxtncvp.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyY2phbG56dXpwZ3lneHRuY3ZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NzA4NzksImV4cCI6MjA4OTI0Njg3OX0.-FoFuIqE4_u8sC0TcKqaLFg0V2YDeAk_uAoNnHaCfZs",
         "EXPO_PUBLIC_CREA_WEB_URL": "https://creaservices.de",
-        "EXPO_PUBLIC_ENABLE_DEMO_WORKSPACE": "true"
+        "EXPO_PUBLIC_ENABLE_DEMO_WORKSPACE": "true",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_BKbFnLWKlDXkxLytdHvPULFQeHI"
       }
     }
   },
