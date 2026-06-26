@@ -20,12 +20,15 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false)
 
   const handleLogin = async () => {
-    if (!email || !password) return
+    // Normalize like register (and GoTrue) so pasted/autofilled credentials with
+    // stray whitespace or casing don't fail with "invalid login credentials".
+    const normalizedEmail = email.trim().toLowerCase()
+    if (!normalizedEmail || !password) return
     setLoading(true)
     let data: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>['data'] | null = null
     let error: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>['error'] | null = null
     for (let attempt = 0; attempt < 2; attempt++) {
-      const result = await supabase.auth.signInWithPassword({ email, password })
+      const result = await supabase.auth.signInWithPassword({ email: normalizedEmail, password })
       data = result.data
       error = result.error
       if (!error) break
@@ -66,7 +69,7 @@ export default function LoginScreen() {
             onChangeText={setEmail}
             autoCapitalize="none"
             autoCorrect={false}
-            keyboardType="default"
+            keyboardType="email-address"
             textContentType="emailAddress"
             autoComplete="email"
           />
