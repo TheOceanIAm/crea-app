@@ -14,7 +14,9 @@ import { ScrollView, Swipeable } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Trash2 } from 'lucide-react-native'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { queryClient } from '@/lib/queryClient'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { requestNotifyRecipientPush } from '@/lib/notifyMessagePush'
 import { invalidateDmBadge } from '@/lib/invalidateDmBadge'
@@ -60,163 +62,259 @@ async function syncConversationPreviewAfterMessagesChange(conversationId: string
     .eq('id', conversationId)
 }
 
+type ThreadData = {
+  title: string
+  otherUserId: string | null
+  rows: MsgRow[]
+}
+
+let conversationRealtimeTopicSeq = 0
+
+const conversationKey = (conversationId: string) => ['conversation', conversationId] as const
+
 export default function ConversationThreadScreen() {
   const router = useRouter()
-  const { id: conversationId } = useLocalSearchParams<{ id: string }>()
-  const [loading, setLoading] = useState(true)
-  const [sending, setSending] = useState(false)
-  const [me, setMe] = useState<string | null>(null)
-  const [title, setTitle] = useState('Messages')
-  const [rows, setRows] = useState<MsgRow[]>([])
+  const { id: rawId } = useLocalSearchParams<{ id: string }>()
+  const conversationId = typeof rawId === 'string' ? rawId : ''
   const [draft, setDraft] = useState('')
-  const [otherUserId, setOtherUserId] = useState<string | null>(null)
   const [replyingId, setReplyingId] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    if (!conversationId || typeof conversationId !== 'string') {
-      setLoading(false)
-      return
-    }
-    const { data: auth } = await supabase.auth.getUser()
-    const uid = auth.user?.id ?? null
-    setMe(uid)
-    if (!uid) {
-      setLoading(false)
-      return
-    }
+  const authQuery = useQuery({
+    queryKey: ['authUserId'],
+    queryFn: async () => {
+      const { data } = await supabase.auth.getUser()
+      return data.user?.id ?? null
+    },
+    staleTime: 5 * 60_000,
+  })
+  const me = authQuery.data ?? null
+  const enabled = Boolean(conversationId) && Boolean(me)
 
-    const { data: convo } = await supabase
-      .from('conversations')
-      .select('participant_1, participant_2')
-      .eq('id', conversationId)
-      .maybeSingle()
-
-    if (convo) {
-      const other =
-        convo.participant_1 === uid ? convo.participant_2 : convo.participant_1
-      setOtherUserId(typeof other === 'string' ? other : null)
-      const { data: prof } = await supabase.from('profiles').select('name').eq('id', other).maybeSingle()
-      if (prof?.name) setTitle(String(prof.name))
-    }
-
-    // Mark incoming unread messages as read when opening thread.
-    const { error: readErr } = await supabase
-      .from('messages')
-      .update({ read: true })
-      .eq('conversation_id', conversationId)
-      .eq('read', false)
-      .neq('sender_id', uid)
-      .select('id')
-    if (readErr) {
-      console.warn('[conversation] mark read', readErr.message)
-    }
-    // Let PostgREST/RLS settle so tab-bar count query sees read=true.
-    setTimeout(() => invalidateDmBadge(), 60)
-
-    const { data: msgs, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true })
-
-    if (!error && Array.isArray(msgs)) {
-      setRows(msgs as MsgRow[])
-    }
-    setLoading(false)
-  }, [conversationId])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  const send = async () => {
-    const t = draft.trim()
-    if (!t || !conversationId || typeof conversationId !== 'string' || !me || sending) return
-    setSending(true)
-    const payload: Record<string, unknown> = {
-      conversation_id: conversationId,
-      sender_id: me,
-      body: t,
-      read: false,
-    }
-    let { data: inserted, error } = await supabase.from('messages').insert(payload).select('id').single()
-    if (error?.message?.includes('column') && error.message.includes('body')) {
-      const alt = { ...payload }
-      delete alt.body
-      alt.content = t
-      const r2 = await supabase.from('messages').insert(alt).select('id').single()
-      inserted = r2.data
-      error = r2.error
-    }
-    if (!error) {
-      setDraft('')
-      await supabase
+  const threadQuery = useQuery({
+    queryKey: conversationKey(conversationId),
+    enabled,
+    queryFn: async (): Promise<ThreadData> => {
+      const { data: convo } = await supabase
         .from('conversations')
-        .update({ last_message: t, last_message_at: new Date().toISOString() })
+        .select('participant_1, participant_2')
         .eq('id', conversationId)
-      if (inserted?.id) {
-        void requestNotifyRecipientPush(inserted.id)
-        const optimistic: MsgRow = {
-          id: inserted.id,
-          sender_id: me,
-          created_at: new Date().toISOString(),
-          body: t,
+        .maybeSingle()
+
+      let title = 'Messages'
+      let otherUserId: string | null = null
+      if (convo) {
+        const other = convo.participant_1 === me ? convo.participant_2 : convo.participant_1
+        otherUserId = typeof other === 'string' ? other : null
+        if (otherUserId) {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('name')
+            .eq('id', otherUserId)
+            .maybeSingle()
+          if (prof?.name) title = String(prof.name)
         }
-        setRows((prev) => [...prev, optimistic])
       }
-      void load()
-    }
-    setSending(false)
-  }
 
-  const confirmDeleteMessage = (m: MsgRow) => {
-    if (!conversationId || typeof conversationId !== 'string' || !me) return
-    Alert.alert(
-      'Delete message',
-      'Remove this message from the chat for both of you? This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => void deleteMessageById(m),
-        },
-      ]
-    )
-  }
+      const { data: msgs, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true })
+      if (error) throw new Error(error.message)
 
-  const deleteMessageById = async (m: MsgRow) => {
-    if (!conversationId || typeof conversationId !== 'string') return
-    const { error } = await supabase.from('messages').delete().eq('id', m.id)
-    if (error) {
-      Alert.alert('Could not delete', error.message)
-      return
-    }
-    await syncConversationPreviewAfterMessagesChange(conversationId)
-    await load()
-  }
+      return { title, otherUserId, rows: (msgs ?? []) as MsgRow[] }
+    },
+  })
 
-  const submitBookingReply = async (bookingMsg: MsgRow, status: BookingReplyStatus) => {
-    if (!conversationId || typeof conversationId !== 'string' || !me || replyingId) return
-    const bookingPayload = parseBookingDm(messageText(bookingMsg))
-    const projTitle = bookingPayload?.title ?? 'Project'
-    setReplyingId(bookingMsg.id)
-    try {
-      const r = await replyToBookingMessage({
-        conversationId,
-        bookingMessageId: bookingMsg.id,
-        status,
-        projectTitle: projTitle,
-      })
-      if (r.ok === false) {
-        Alert.alert('Could not send', r.error)
+  const rows = threadQuery.data?.rows ?? []
+  const title = threadQuery.data?.title ?? 'Messages'
+  const otherUserId = threadQuery.data?.otherUserId ?? null
+  const loading = authQuery.isLoading || (enabled && threadQuery.isLoading)
+  const rowCount = rows.length
+
+  // Mark incoming unread messages as read (on open + whenever new ones arrive).
+  useEffect(() => {
+    if (!conversationId || !me) return
+    void (async () => {
+      const { error } = await supabase
+        .from('messages')
+        .update({ read: true })
+        .eq('conversation_id', conversationId)
+        .eq('read', false)
+        .neq('sender_id', me)
+        .select('id')
+      if (error) {
+        console.warn('[conversation] mark read', error.message)
         return
       }
-      await load()
-    } finally {
-      setReplyingId(null)
+      // Let PostgREST/RLS settle so the tab-bar count query sees read=true.
+      setTimeout(() => invalidateDmBadge(), 60)
+    })()
+  }, [conversationId, me, rowCount])
+
+  // Live updates: new/changed/deleted messages in this thread refresh the view.
+  useEffect(() => {
+    if (!conversationId || !me) return
+    const topic = `conversation-${conversationId}-${++conversationRealtimeTopicSeq}`
+    const channel = supabase
+      .channel(topic)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          void queryClient.invalidateQueries({ queryKey: conversationKey(conversationId) })
+        },
+      )
+      .subscribe()
+    return () => {
+      void supabase.removeChannel(channel)
     }
-  }
+  }, [conversationId, me])
+
+  const sendMutation = useMutation({
+    mutationFn: async (text: string) => {
+      const payload: Record<string, unknown> = {
+        conversation_id: conversationId,
+        sender_id: me,
+        body: text,
+        read: false,
+      }
+      let { data: inserted, error } = await supabase
+        .from('messages')
+        .insert(payload)
+        .select('id')
+        .single()
+      // Some schemas store the text in `content` instead of `body`.
+      if (error?.message?.includes('column') && error.message.includes('body')) {
+        const alt = { ...payload }
+        delete alt.body
+        alt.content = text
+        const r2 = await supabase.from('messages').insert(alt).select('id').single()
+        inserted = r2.data
+        error = r2.error
+      }
+      if (error) throw new Error(error.message)
+      await supabase
+        .from('conversations')
+        .update({ last_message: text, last_message_at: new Date().toISOString() })
+        .eq('id', conversationId)
+      if (inserted?.id) void requestNotifyRecipientPush(inserted.id)
+    },
+    onMutate: async (text) => {
+      await queryClient.cancelQueries({ queryKey: conversationKey(conversationId) })
+      const prev = queryClient.getQueryData<ThreadData>(conversationKey(conversationId))
+      const optimistic: MsgRow = {
+        id: `temp-${Date.now()}`,
+        sender_id: me as string,
+        created_at: new Date().toISOString(),
+        body: text,
+      }
+      if (prev) {
+        queryClient.setQueryData(conversationKey(conversationId), {
+          ...prev,
+          rows: [...prev.rows, optimistic],
+        })
+      }
+      setDraft('')
+      return { prev, draft: text }
+    },
+    onError: (_err, _text, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(conversationKey(conversationId), ctx.prev)
+      if (ctx?.draft) setDraft(ctx.draft)
+      Alert.alert('Could not send', 'Please try again.')
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: conversationKey(conversationId) })
+      void queryClient.invalidateQueries({ queryKey: ['messages'] })
+      invalidateDmBadge()
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (m: MsgRow) => {
+      const { error } = await supabase.from('messages').delete().eq('id', m.id)
+      if (error) throw new Error(error.message)
+      await syncConversationPreviewAfterMessagesChange(conversationId)
+    },
+    onMutate: async (m) => {
+      await queryClient.cancelQueries({ queryKey: conversationKey(conversationId) })
+      const prev = queryClient.getQueryData<ThreadData>(conversationKey(conversationId))
+      if (prev) {
+        queryClient.setQueryData(conversationKey(conversationId), {
+          ...prev,
+          rows: prev.rows.filter((r) => r.id !== m.id),
+        })
+      }
+      return { prev }
+    },
+    onError: (_err, _m, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(conversationKey(conversationId), ctx.prev)
+      Alert.alert('Could not delete', 'Please try again.')
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: conversationKey(conversationId) })
+      void queryClient.invalidateQueries({ queryKey: ['messages'] })
+      invalidateDmBadge()
+    },
+  })
+
+  const sending = sendMutation.isPending
+
+  const send = useCallback(() => {
+    const t = draft.trim()
+    if (!t || !conversationId || !me || sending) return
+    sendMutation.mutate(t)
+  }, [draft, conversationId, me, sending, sendMutation])
+
+  const confirmDeleteMessage = useCallback(
+    (m: MsgRow) => {
+      if (!conversationId || !me) return
+      Alert.alert(
+        'Delete message',
+        'Remove this message from the chat for both of you? This cannot be undone.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () => deleteMutation.mutate(m),
+          },
+        ],
+      )
+    },
+    [conversationId, me, deleteMutation],
+  )
+
+  const submitBookingReply = useCallback(
+    async (bookingMsg: MsgRow, status: BookingReplyStatus) => {
+      if (!conversationId || !me || replyingId) return
+      const bookingPayload = parseBookingDm(messageText(bookingMsg))
+      const projTitle = bookingPayload?.title ?? 'Project'
+      setReplyingId(bookingMsg.id)
+      try {
+        const r = await replyToBookingMessage({
+          conversationId,
+          bookingMessageId: bookingMsg.id,
+          status,
+          projectTitle: projTitle,
+        })
+        if (r.ok === false) {
+          Alert.alert('Could not send', r.error)
+          return
+        }
+        await queryClient.invalidateQueries({ queryKey: conversationKey(conversationId) })
+        void queryClient.invalidateQueries({ queryKey: ['messages'] })
+      } finally {
+        setReplyingId(null)
+      }
+    },
+    [conversationId, me, replyingId],
+  )
 
   if (loading) {
     return (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -10,16 +10,16 @@ import {
   Modal,
   TextInput,
   Alert,
-  ActivityIndicator,
   Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
+import { useInfiniteQuery, useMutation, type InfiniteData } from '@tanstack/react-query'
 import { ChevronDown, X } from 'lucide-react-native'
 import { getAuthUser } from '@/lib/getAuthUser'
-import { supabase } from '@/lib/supabase'
-import { getCache, setCache, deleteCache } from '@/lib/appCache'
+import { queryClient } from '@/lib/queryClient'
+import { setCache, deleteCache } from '@/lib/appCache'
 import { isCompanyProfile, isFreelancerProfile } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { CreaFeedPostSkeleton, CreaInlineLoader } from '@/components/CreaLoading'
@@ -39,6 +39,7 @@ import {
   deletePinboardPost,
   formatPinboardAttachOptionLabel,
   formatPinboardTimeAgo,
+  hydratePinboardFeedFromDisk,
   loadPinboardAttachOptions,
   loadPinboardFeedPage,
   parsePinboardAttachKey,
@@ -46,19 +47,17 @@ import {
   pinboardPostLinkKindLabel,
   pinboardPostLinkLabel,
   PINBOARD_NO_ATTACH,
+  PINBOARD_PAGE_SIZE,
   PINBOARD_UPDATES_COPY,
   pinboardCacheKey,
   readCachedPinboardFeed,
   validatePinboardUpdateInput,
   type PinboardAttachOption,
-  type PinboardFeedCache,
   type PinboardPost,
 } from '@/lib/pinboardFeed'
 import {
   consumeWarmedPinboard,
-  peekWarmedOverview,
   peekWarmedPinboard,
-  peekWarmedPinboardFetchedAt,
   peekWarmedPinboardUserId,
 } from '@/lib/warmAppCaches'
 import { prefetchSecondaryTabsIdle } from '@/lib/prefetchSecondaryTabs'
@@ -66,168 +65,141 @@ import type { Href } from 'expo-router'
 
 const FEED_STALE_MS = 30_000
 
-function readInitialFeed(): { posts: PinboardPost[]; loading: boolean; fetchedAt: number } {
-  const warmedUid = peekWarmedPinboardUserId()
-  if (warmedUid) {
-    return {
-      posts: peekWarmedPinboard() ?? [],
-      loading: false,
-      fetchedAt: peekWarmedPinboardFetchedAt(),
-    }
-  }
+const feedKey = (userId: string | null) => ['pinboardFeed', userId ?? 'anon'] as const
 
-  const overview = peekWarmedOverview()
-  if (overview) {
-    const cached = readCachedPinboardFeed(overview.userId)
-    if (cached) {
-      return { posts: cached, loading: false, fetchedAt: Date.now() }
-    }
+/** Seed the first page synchronously from the warm handoff / mem cache for instant paint. */
+function readInitialFeedPages(userId: string): InfiniteData<PinboardPost[]> | undefined {
+  if (peekWarmedPinboardUserId() === userId) {
+    const warmed = peekWarmedPinboard()
+    if (warmed) return { pages: [warmed], pageParams: [undefined] }
   }
-
-  return { posts: [], loading: true, fetchedAt: 0 }
+  const cached = readCachedPinboardFeed(userId)
+  if (cached) return { pages: [cached], pageParams: [undefined] }
+  return undefined
 }
 
 export function PinboardFeedScreen() {
   const router = useRouter()
   const tabBarInset = useFloatingTabBarBottomInset()
-  const bootFeed = useRef(readInitialFeed()).current
   const { overview, refresh: refreshOverview } = useDashboardOverview()
   const userId = overview?.userId ?? null
   const role = overview?.role ?? null
   const avatarUrl = overview?.avatarUrl ?? null
   const displayName = overview?.name?.trim() || 'You'
-  const [posts, setPosts] = useState<PinboardPost[]>(bootFeed.posts)
-  const [loading, setLoading] = useState(bootFeed.loading)
+
   const [refreshing, setRefreshing] = useState(false)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [hasMore, setHasMore] = useState(true)
 
   const [composerOpen, setComposerOpen] = useState(false)
   const [composeBody, setComposeBody] = useState('')
   const [composeAttachKey, setComposeAttachKey] = useState(PINBOARD_NO_ATTACH)
-  const [composeSubmitting, setComposeSubmitting] = useState(false)
   const [composeError, setComposeError] = useState<string | null>(null)
   const [attachOptions, setAttachOptions] = useState<PinboardAttachOption[]>([])
   const [attachLoading, setAttachLoading] = useState(false)
   const [attachPickerOpen, setAttachPickerOpen] = useState(false)
 
-  const initialDone = useRef(!bootFeed.loading)
-  const refreshInFlight = useRef<Promise<void> | null>(null)
-  const lastFetchedAt = useRef(bootFeed.fetchedAt)
+  const feedQuery = useInfiniteQuery({
+    queryKey: feedKey(userId),
+    enabled: Boolean(userId),
+    staleTime: FEED_STALE_MS,
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) => {
+      const { posts, error } = await loadPinboardFeedPage({ beforeCreatedAt: pageParam })
+      if (error) throw new Error(error)
+      return posts
+    },
+    getNextPageParam: (lastPage) =>
+      lastPage.length >= PINBOARD_PAGE_SIZE ? lastPage[lastPage.length - 1]?.created_at : undefined,
+    initialData: (): InfiniteData<PinboardPost[]> | undefined =>
+      userId ? readInitialFeedPages(userId) : undefined,
+    initialDataUpdatedAt: 0,
+  })
+
+  // Flatten pages into a deduped list for the FlatList.
+  const posts = useMemo(() => {
+    const pages = feedQuery.data?.pages ?? []
+    const seen = new Set<string>()
+    const out: PinboardPost[] = []
+    for (const page of pages) {
+      for (const p of page) {
+        if (!seen.has(p.id)) {
+          seen.add(p.id)
+          out.push(p)
+        }
+      }
+    }
+    return out
+  }, [feedQuery.data])
+
+  const loading = !userId || feedQuery.isLoading
+  const loadingMore = feedQuery.isFetchingNextPage
+  const loadError = feedQuery.error ? (feedQuery.error as Error).message : null
+
+  // Redirect to login if there is no authenticated user (matches previous behaviour).
+  useEffect(() => {
+    let cancelled = false
+    void getAuthUser().then((u) => {
+      if (!cancelled && !u) router.replace('/login')
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [router])
 
   useEffect(() => {
     if (!userId) return
     prefetchSecondaryTabsIdle(userId, role)
   }, [userId, role])
 
+  // Free the one-shot warm handoff; fall back to disk cache for instant paint.
   useEffect(() => {
-    if (!userId || initialDone.current) return
-
-    const warmed = consumeWarmedPinboard(userId)
-    if (warmed !== null) {
-      setPosts(warmed)
-      setLoading(false)
-      initialDone.current = true
-      return
-    }
-
-    const cached = getCache<PinboardFeedCache>(pinboardCacheKey(userId))
-    if (cached) {
-      setPosts(cached.posts)
-      setLoading(false)
+    if (!userId) return
+    consumeWarmedPinboard(userId)
+    if (queryClient.getQueryData(feedKey(userId))) return
+    let cancelled = false
+    void hydratePinboardFeedFromDisk(userId).then((disk) => {
+      if (!cancelled && disk && !queryClient.getQueryData(feedKey(userId))) {
+        queryClient.setQueryData<InfiniteData<PinboardPost[]>>(feedKey(userId), {
+          pages: [disk],
+          pageParams: [undefined],
+        })
+      }
+    })
+    return () => {
+      cancelled = true
     }
   }, [userId])
 
-  const refreshFeed = useCallback(async (opts?: { silent?: boolean }) => {
-    if (refreshInFlight.current) return refreshInFlight.current
-    refreshInFlight.current = (async () => {
-      try {
-        if (!opts?.silent) setLoadError(null)
-        const user = await getAuthUser()
-        if (!user) {
-          router.replace('/login')
-          return
-        }
-        const cacheKey = pinboardCacheKey(user.id)
-        const cached = getCache<PinboardFeedCache>(cacheKey)
+  // Keep the in-memory cache warm (used by the prefetch pipeline + cold boot).
+  useEffect(() => {
+    if (!userId) return
+    const first = feedQuery.data?.pages[0]
+    if (first) setCache(pinboardCacheKey(userId), { posts: first }, 25_000)
+  }, [userId, feedQuery.data])
 
-        if (!initialDone.current && cached) {
-          setPosts(cached.posts)
-          setLoading(false)
-          initialDone.current = true
-        }
-
-        const { posts: next, error } = await loadPinboardFeedPage()
-        if (error) {
-          if (!cached) {
-            setLoadError(error)
-            if (!initialDone.current) setPosts([])
-          }
-        } else {
-          setLoadError(null)
-          setPosts(next)
-          setHasMore(next.length >= 25)
-          setCache(cacheKey, { posts: next }, 25_000)
-          lastFetchedAt.current = Date.now()
-        }
-      } finally {
-        if (!initialDone.current) {
-          initialDone.current = true
-          setLoading(false)
-        }
-      }
-    })()
-    try {
-      await refreshInFlight.current
-    } finally {
-      refreshInFlight.current = null
-    }
-  }, [router])
-
+  // Revalidate on tab focus only if the feed has gone stale (>30s).
   useFocusEffect(
     useCallback(() => {
-      if (!initialDone.current) {
-        void refreshFeed()
-        return
+      if (userId) {
+        void queryClient.refetchQueries({ queryKey: feedKey(userId), stale: true })
       }
-      if (lastFetchedAt.current > 0 && Date.now() - lastFetchedAt.current < FEED_STALE_MS) {
-        return
-      }
-      void refreshFeed({ silent: true })
-    }, [refreshFeed])
+    }, [userId]),
   )
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     if (userId) deleteCache(pinboardCacheKey(userId))
-    await Promise.all([refreshFeed({ silent: true }), refreshOverview({ bustCache: true })])
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: feedKey(userId) }),
+      refreshOverview({ bustCache: true }),
+    ])
     setRefreshing(false)
-  }, [refreshFeed, refreshOverview, userId])
+  }, [refreshOverview, userId])
 
-  const loadMore = useCallback(async () => {
-    if (loadingMore || !hasMore || posts.length === 0) return
-    const last = posts[posts.length - 1]
-    setLoadingMore(true)
-    const { posts: more, error } = await loadPinboardFeedPage({
-      beforeCreatedAt: last.created_at,
-    })
-    setLoadingMore(false)
-    if (error || more.length === 0) {
-      setHasMore(false)
-      return
+  const loadMore = useCallback(() => {
+    if (feedQuery.hasNextPage && !feedQuery.isFetchingNextPage) {
+      void feedQuery.fetchNextPage()
     }
-    setPosts((prev) => {
-      const seen = new Set(prev.map((p) => p.id))
-      const merged = [...prev]
-      for (const p of more) {
-        if (!seen.has(p.id)) merged.push(p)
-      }
-      if (userId) setCache(pinboardCacheKey(userId), { posts: merged }, 25_000)
-      return merged
-    })
-    setHasMore(more.length >= 25)
-  }, [hasMore, loadingMore, posts, userId])
+  }, [feedQuery])
 
   const freelancerPlan = overview?.freelancerPlan ?? 'free'
   const canCompose = canComposePinboardUpdates({ role, freelancerPlan })
@@ -267,37 +239,109 @@ export function PinboardFeedScreen() {
     setAttachLoading(false)
   }, [canCompose, userId])
 
-  const submitPost = useCallback(async () => {
+  const createMutation = useMutation({
+    mutationFn: async (vars: {
+      body: string
+      jobId: string | null
+      projectId: string | null
+      jobTitle: string | null
+      projectTitle: string | null
+    }) => {
+      const result = await createPinboardPost({
+        userId: userId as string,
+        body: vars.body,
+        jobId: vars.jobId,
+        projectId: vars.projectId,
+      })
+      if (!result.ok) throw new Error(result.error)
+    },
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: feedKey(userId) })
+      const prev = queryClient.getQueryData<InfiniteData<PinboardPost[]>>(feedKey(userId))
+      const optimistic: PinboardPost = {
+        id: `temp-${Date.now()}`,
+        body: vars.body.trim(),
+        created_at: new Date().toISOString(),
+        job_id: vars.jobId,
+        project_id: vars.projectId,
+        job_title: vars.jobTitle,
+        job_company_id: null,
+        job_is_solo_workspace: false,
+        project_title: vars.projectTitle,
+        project_company_id: null,
+        author_id: userId as string,
+        author_name: displayName,
+        author_avatar_url: avatarUrl,
+      }
+      queryClient.setQueryData<InfiniteData<PinboardPost[]>>(feedKey(userId), (old) => {
+        if (!old || old.pages.length === 0) {
+          return { pages: [[optimistic]], pageParams: [undefined] }
+        }
+        return { ...old, pages: old.pages.map((pg, i) => (i === 0 ? [optimistic, ...pg] : pg)) }
+      })
+      // Close the composer immediately — the post is already visible in the feed.
+      setComposerOpen(false)
+      setComposeBody('')
+      return { prev, body: vars.body }
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(feedKey(userId), ctx.prev)
+      if (ctx?.body) setComposeBody(ctx.body)
+      setComposeError(err instanceof Error ? err.message : 'Could not post update.')
+      setComposerOpen(true)
+    },
+    onSettled: () => {
+      if (userId) deleteCache(pinboardCacheKey(userId))
+      void queryClient.invalidateQueries({ queryKey: feedKey(userId) })
+    },
+  })
+
+  const composeSubmitting = createMutation.isPending
+
+  const submitPost = useCallback(() => {
     if (!userId) return
     setComposeError(null)
     const parsed = parsePinboardAttachKey(composeAttachKey)
     const jobId = parsed?.kind === 'job' ? parsed.id : null
     const projectId = parsed?.kind === 'project' ? parsed.id : null
-    const validation = validatePinboardUpdateInput({
-      body: composeBody,
-      jobId,
-      projectId,
-    })
+    const validation = validatePinboardUpdateInput({ body: composeBody, jobId, projectId })
     if (!validation.ok) {
       setComposeError(validation.error)
       return
     }
-    setComposeSubmitting(true)
-    const result = await createPinboardPost({
-      userId,
+    const opt = attachOptions.find((o) => o.key === composeAttachKey)
+    createMutation.mutate({
       body: composeBody,
       jobId,
       projectId,
+      jobTitle: opt?.kind === 'job' ? opt.title : null,
+      projectTitle: opt?.kind === 'project' ? opt.title : null,
     })
-    setComposeSubmitting(false)
-    if (!result.ok) {
-      setComposeError(result.error)
-      return
-    }
-    setComposerOpen(false)
-    deleteCache(pinboardCacheKey(userId))
-    await refreshFeed({ silent: true })
-  }, [composeAttachKey, composeBody, refreshFeed, userId])
+  }, [attachOptions, composeAttachKey, composeBody, createMutation, userId])
+
+  const deleteMutation = useMutation({
+    mutationFn: async (post: PinboardPost) => {
+      const result = await deletePinboardPost(post.id)
+      if (!result.ok) throw new Error(result.error)
+    },
+    onMutate: async (post) => {
+      await queryClient.cancelQueries({ queryKey: feedKey(userId) })
+      const prev = queryClient.getQueryData<InfiniteData<PinboardPost[]>>(feedKey(userId))
+      queryClient.setQueryData<InfiniteData<PinboardPost[]>>(feedKey(userId), (old) => {
+        if (!old) return old
+        return { ...old, pages: old.pages.map((pg) => pg.filter((p) => p.id !== post.id)) }
+      })
+      return { prev }
+    },
+    onError: (_err, _post, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(feedKey(userId), ctx.prev)
+      Alert.alert('Could not remove', 'Please try again.')
+    },
+    onSettled: () => {
+      if (userId) deleteCache(pinboardCacheKey(userId))
+      void queryClient.invalidateQueries({ queryKey: feedKey(userId) })
+    },
+  })
 
   const onDeletePost = useCallback(
     (post: PinboardPost) => {
@@ -306,21 +350,11 @@ export function PinboardFeedScreen() {
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              const result = await deletePinboardPost(post.id)
-              if (!result.ok) {
-                Alert.alert('Could not remove', result.error)
-                return
-              }
-              if (userId) deleteCache(pinboardCacheKey(userId))
-              setPosts((prev) => prev.filter((p) => p.id !== post.id))
-            })()
-          },
+          onPress: () => deleteMutation.mutate(post),
         },
       ])
     },
-    [userId]
+    [deleteMutation],
   )
 
   const avatarLetter = displayName.charAt(0).toUpperCase() || '?'

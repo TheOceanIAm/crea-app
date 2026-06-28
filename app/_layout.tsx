@@ -9,6 +9,8 @@ import * as Notifications from 'expo-notifications'
 import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from '@/lib/queryClient'
 import { AppBootstrapOverlayProvider } from '@/contexts/AppBootstrapOverlayContext'
 import { RevenueCatProvider } from '@/contexts/RevenueCatContext'
 import {
@@ -143,6 +145,7 @@ export default function RootLayout() {
       >
         <AppBootstrapOverlayProvider>
           <RevenueCatProvider>
+            <QueryClientProvider client={queryClient}>
             <BootstrapAuthGate>
             <AuthDeepLinkBridge />
             <SubscriptionPaywallGate />
@@ -190,6 +193,7 @@ export default function RootLayout() {
             />
           </Stack>
           </BootstrapAuthGate>
+            </QueryClientProvider>
           </RevenueCatProvider>
         </AppBootstrapOverlayProvider>
       </StripeProvider>

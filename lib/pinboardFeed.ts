@@ -161,13 +161,13 @@ export function formatPinboardTimeAgo(dateStr: string): string {
   return new Date(then).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-const PAGE_SIZE = 25
+export const PINBOARD_PAGE_SIZE = 25
 
 export async function loadPinboardFeedPage(opts?: {
   limit?: number
   beforeCreatedAt?: string
 }): Promise<{ posts: PinboardPost[]; error: string | null }> {
-  const limit = opts?.limit ?? PAGE_SIZE
+  const limit = opts?.limit ?? PINBOARD_PAGE_SIZE
   let q = supabase
     .from('job_pinboard_posts')
     .select(

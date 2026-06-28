@@ -14,13 +14,19 @@ import { Swipeable } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { queryClient } from '@/lib/queryClient'
 import { loadDirectMessageInbox, type ConvoRow } from '@/lib/messagesInboxLoad'
-import { readCachedMessages, cacheMessages } from '@/lib/messagesCache'
+import {
+  cacheMessages,
+  messagesCacheKey,
+  persistMessagesToDisk,
+  readCachedMessages,
+} from '@/lib/messagesCache'
 import { invalidateDmBadge } from '@/lib/invalidateDmBadge'
 import { deleteCache } from '@/lib/appCache'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
-import { runTimed } from '@/lib/perfMarks'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 const MESSAGES_STALE_MS = 30_000
@@ -28,199 +34,228 @@ const MESSAGES_STALE_MS = 30_000
 /** Unique Supabase Realtime topic — reusing the same name returns an already-subscribed channel. */
 let messagesRealtimeTopicSeq = 0
 
-function readInitialMessages(): { inbox: ConvoRow[]; archived: ConvoRow[]; loading: boolean } {
-  const uid = peekWarmedOverview()?.userId
-  if (!uid) return { inbox: [], archived: [], loading: true }
-  const cached = readCachedMessages(uid)
-  if (!cached) return { inbox: [], archived: [], loading: true }
-  return { inbox: cached.inbox, archived: cached.archived, loading: false }
+type MessagesData = { inbox: ConvoRow[]; archived: ConvoRow[] }
+
+const messagesKey = (userId: string | null) => ['messages', userId ?? 'anon'] as const
+
+/** Move one conversation between inbox/archived lists (optimistic archive/unarchive). */
+function moveConversation(
+  data: MessagesData,
+  conversationId: string,
+  toArchived: boolean,
+): MessagesData {
+  const item = toArchived
+    ? data.inbox.find((c) => c.id === conversationId)
+    : data.archived.find((c) => c.id === conversationId)
+  if (!item) return data
+  if (toArchived) {
+    return {
+      inbox: data.inbox.filter((c) => c.id !== conversationId),
+      archived: [item, ...data.archived],
+    }
+  }
+  return {
+    inbox: [item, ...data.inbox],
+    archived: data.archived.filter((c) => c.id !== conversationId),
+  }
+}
+
+/** Drop a conversation from both lists (optimistic delete). */
+function removeConversation(data: MessagesData, conversationId: string): MessagesData {
+  return {
+    inbox: data.inbox.filter((c) => c.id !== conversationId),
+    archived: data.archived.filter((c) => c.id !== conversationId),
+  }
 }
 
 export default function MessagesScreen() {
   const router = useRouter()
-  const boot = useRef(readInitialMessages()).current
-  const [convos, setConvos] = useState<ConvoRow[]>(boot.inbox)
-  const [loading, setLoading] = useState(boot.loading)
-  const [refreshing, setRefreshing] = useState(false)
-  const [signedIn, setSignedIn] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [archived, setArchived] = useState<ConvoRow[]>(boot.archived)
   const [showArchived, setShowArchived] = useState(false)
-
+  const [refreshing, setRefreshing] = useState(false)
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const refreshInFlight = useRef<Promise<void> | null>(null)
-  const initialLoadingDone = useRef(!boot.loading)
-  const lastFetchedAt = useRef(boot.loading ? 0 : Date.now())
 
-  const refreshList = useCallback(async (opts?: { silent?: boolean }) => {
-    if (refreshInFlight.current) return refreshInFlight.current
-    refreshInFlight.current = (async () => {
-      try {
-        const timed = await runTimed('messages.refreshList', async () => {
-        setLoadError(null)
-        const { data: auth } = await supabase.auth.getUser()
-        const user = auth.user
-        if (!user) {
-          setSignedIn(false)
-          setConvos([])
-          setArchived([])
-          return
-        }
-        setSignedIn(true)
-        const cached = readCachedMessages(user.id)
-        if (!initialLoadingDone.current && cached) {
-          setConvos(cached.inbox)
-          setArchived(cached.archived)
-          setLoading(false)
-          initialLoadingDone.current = true
-        }
+  // Auth user id — seeded synchronously from the warm bootstrap cache for instant paint.
+  const authQuery = useQuery({
+    queryKey: ['authUserId'],
+    queryFn: async () => {
+      const { data } = await supabase.auth.getUser()
+      return data.user?.id ?? null
+    },
+    staleTime: 5 * 60_000,
+    initialData: () => peekWarmedOverview()?.userId ?? undefined,
+  })
+  const userId = authQuery.data ?? null
+  const enabled = Boolean(userId)
 
-        const result = await loadDirectMessageInbox(user.id)
-        if (result.ok === false) {
-          setLoadError(result.error)
-          setConvos([])
-          setArchived([])
-          return
-        }
-        setLoadError(null)
-        setConvos(result.inbox)
-        setArchived(result.archived)
-        cacheMessages(user.id, { inbox: result.inbox, archived: result.archived })
-        lastFetchedAt.current = Date.now()
-        return { inbox: result.inbox.length, archived: result.archived.length }
-        })
-        if (__DEV__ && timed.value) {
-          console.log(
-            `[perf] messages.rows: inbox=${timed.value.inbox} archived=${timed.value.archived}`
-          )
-        }
-      } finally {
-        if (!initialLoadingDone.current) {
-          initialLoadingDone.current = true
-          setLoading(false)
-        }
-      }
-    })()
-    try {
-      await refreshInFlight.current
-    } finally {
-      refreshInFlight.current = null
+  const inboxQuery = useQuery({
+    queryKey: messagesKey(userId),
+    enabled,
+    staleTime: MESSAGES_STALE_MS,
+    placeholderData: (prev) => prev,
+    // Show the cached inbox instantly, but mark it stale (updatedAt: 0) so it
+    // revalidates in the background — same stale-while-revalidate as before.
+    initialData: (): MessagesData | undefined => {
+      if (!userId) return undefined
+      return readCachedMessages(userId) ?? undefined
+    },
+    initialDataUpdatedAt: 0,
+    queryFn: async (): Promise<MessagesData> => {
+      const result = await loadDirectMessageInbox(userId as string)
+      if (result.ok === false) throw new Error(result.error)
+      const data: MessagesData = { inbox: result.inbox, archived: result.archived }
+      // Keep the legacy mem/disk caches warm so the prefetch pipeline stays consistent.
+      cacheMessages(userId as string, data)
+      void persistMessagesToDisk(userId as string, data)
+      return data
+    },
+  })
+
+  const convos = inboxQuery.data?.inbox ?? []
+  const archived = inboxQuery.data?.archived ?? []
+  const loadError = inboxQuery.error ? (inboxQuery.error as Error).message : null
+  const loading = authQuery.isLoading || (enabled && inboxQuery.isLoading)
+  const signedIn = !(authQuery.isSuccess && userId === null)
+
+  // Live updates: a DB change marks the inbox stale and refetches (debounced to avoid storms).
+  useEffect(() => {
+    if (!userId) return
+    const topic = `messages-list-${userId}-${++messagesRealtimeTopicSeq}`
+    const schedule = () => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current)
+      reloadTimer.current = setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: messagesKey(userId) })
+      }, 320)
     }
-  }, [])
+    const channel = supabase
+      .channel(topic)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, schedule)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, schedule)
+      .subscribe()
+    return () => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current)
+      void supabase.removeChannel(channel)
+    }
+  }, [userId])
 
-  const scheduleReload = useCallback(() => {
-    if (reloadTimer.current) clearTimeout(reloadTimer.current)
-    reloadTimer.current = setTimeout(() => void refreshList(), 320)
-  }, [refreshList])
-
-  const scheduleReloadRef = useRef(scheduleReload)
-  scheduleReloadRef.current = scheduleReload
-
+  // Refresh the tab badge on focus, and revalidate the inbox only if it has gone stale.
   useFocusEffect(
     useCallback(() => {
-      if (!initialLoadingDone.current) {
-        void refreshList()
-        invalidateDmBadge()
-        return () => {
-          if (reloadTimer.current) clearTimeout(reloadTimer.current)
-        }
-      }
-      if (lastFetchedAt.current > 0 && Date.now() - lastFetchedAt.current < MESSAGES_STALE_MS) {
-        invalidateDmBadge()
-        return () => {
-          if (reloadTimer.current) clearTimeout(reloadTimer.current)
-        }
-      }
-      void refreshList({ silent: true })
       invalidateDmBadge()
-      return () => {
-        if (reloadTimer.current) clearTimeout(reloadTimer.current)
+      if (userId) {
+        void queryClient.refetchQueries({ queryKey: messagesKey(userId), stale: true })
       }
-    }, [refreshList])
+    }, [userId]),
   )
-
-  useEffect(() => {
-    let cancelled = false
-    let channel: ReturnType<typeof supabase.channel> | null = null
-
-    void (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (cancelled) return
-      const topic = `messages-list-${user?.id ?? 'anon'}-${++messagesRealtimeTopicSeq}`
-      channel = supabase
-        .channel(topic)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'conversations' },
-          () => scheduleReloadRef.current()
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'messages' },
-          () => scheduleReloadRef.current()
-        )
-        .subscribe()
-    })()
-
-    return () => {
-      cancelled = true
-      if (reloadTimer.current) clearTimeout(reloadTimer.current)
-      if (channel) void supabase.removeChannel(channel)
-    }
-  }, [])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
-      await refreshList()
+      await inboxQuery.refetch()
     } finally {
       setRefreshing(false)
     }
-  }, [refreshList])
+  }, [inboxQuery])
 
-  const archiveConversation = useCallback(async (conversationId: string, nextArchived: boolean) => {
-    const { data: auth } = await supabase.auth.getUser()
-    const user = auth.user
-    if (!user) return
-    const payload = {
-      user_id: user.id,
-      conversation_id: conversationId,
-      archived: nextArchived,
-      archived_at: nextArchived ? new Date().toISOString() : null,
-    }
-    const { error } = await supabase.from('conversation_archives').upsert(payload, {
-      onConflict: 'user_id,conversation_id',
-    })
-    if (error) {
-      Alert.alert('Could not update', error.message)
-      return
-    }
-    deleteCache(`messages:${user.id}`)
-    await refreshList()
-  }, [refreshList])
-
-  const deleteConversation = useCallback(async (conversationId: string) => {
-    Alert.alert('Delete conversation', 'Delete all messages in this conversation?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          const { data: auth } = await supabase.auth.getUser()
-          const user = auth.user
-          if (user) deleteCache(`messages:${user.id}`)
-          const { error } = await supabase.from('messages').delete().eq('conversation_id', conversationId)
-          if (error) {
-            Alert.alert('Could not delete', error.message)
-            return
-          }
-          await archiveConversation(conversationId, true)
+  const archiveMutation = useMutation({
+    mutationFn: async ({
+      conversationId,
+      nextArchived,
+    }: {
+      conversationId: string
+      nextArchived: boolean
+    }) => {
+      if (!userId) throw new Error('Not signed in')
+      const { error } = await supabase.from('conversation_archives').upsert(
+        {
+          user_id: userId,
+          conversation_id: conversationId,
+          archived: nextArchived,
+          archived_at: nextArchived ? new Date().toISOString() : null,
         },
-      },
-    ])
-  }, [archiveConversation, refreshList])
+        { onConflict: 'user_id,conversation_id' },
+      )
+      if (error) throw new Error(error.message)
+    },
+    onMutate: async ({ conversationId, nextArchived }) => {
+      await queryClient.cancelQueries({ queryKey: messagesKey(userId) })
+      const prev = queryClient.getQueryData<MessagesData>(messagesKey(userId))
+      if (prev) {
+        queryClient.setQueryData(
+          messagesKey(userId),
+          moveConversation(prev, conversationId, nextArchived),
+        )
+      }
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(messagesKey(userId), ctx.prev)
+      Alert.alert('Could not update', 'Please try again.')
+    },
+    onSettled: () => {
+      if (userId) deleteCache(messagesCacheKey(userId))
+      void queryClient.invalidateQueries({ queryKey: messagesKey(userId) })
+      invalidateDmBadge()
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async ({ conversationId }: { conversationId: string }) => {
+      if (!userId) throw new Error('Not signed in')
+      const { error: delErr } = await supabase
+        .from('messages')
+        .delete()
+        .eq('conversation_id', conversationId)
+      if (delErr) throw new Error(delErr.message)
+      const { error: archErr } = await supabase.from('conversation_archives').upsert(
+        {
+          user_id: userId,
+          conversation_id: conversationId,
+          archived: true,
+          archived_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,conversation_id' },
+      )
+      if (archErr) throw new Error(archErr.message)
+    },
+    onMutate: async ({ conversationId }) => {
+      await queryClient.cancelQueries({ queryKey: messagesKey(userId) })
+      const prev = queryClient.getQueryData<MessagesData>(messagesKey(userId))
+      if (prev) {
+        queryClient.setQueryData(messagesKey(userId), removeConversation(prev, conversationId))
+      }
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(messagesKey(userId), ctx.prev)
+      Alert.alert('Could not delete', 'Please try again.')
+    },
+    onSettled: () => {
+      if (userId) deleteCache(messagesCacheKey(userId))
+      void queryClient.invalidateQueries({ queryKey: messagesKey(userId) })
+      invalidateDmBadge()
+    },
+  })
+
+  const archiveConversation = useCallback(
+    (conversationId: string, nextArchived: boolean) => {
+      archiveMutation.mutate({ conversationId, nextArchived })
+    },
+    [archiveMutation],
+  )
+
+  const deleteConversation = useCallback(
+    (conversationId: string) => {
+      Alert.alert('Delete conversation', 'Delete all messages in this conversation?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => deleteMutation.mutate({ conversationId }),
+        },
+      ])
+    },
+    [deleteMutation],
+  )
 
   if (loading) {
     return (

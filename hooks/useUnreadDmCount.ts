@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { AppState } from 'react-native'
+import { useCallback, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { subscribeDmBadgeInvalidate } from '@/lib/invalidateDmBadge'
+import { queryClient } from '@/lib/queryClient'
 
 let realtimeTopicSeq = 0
+
+/** Query key for the unread-DM badge. Exported so other code can invalidate it. */
+export const unreadDmCountKey = (userId: string | null) =>
+  ['unreadDmCount', userId ?? 'anon'] as const
 
 export async function fetchUnreadDmCount(uid: string): Promise<number> {
   const { data: convs, error: convErr } = await supabase
@@ -35,70 +39,49 @@ export async function fetchUnreadDmCount(uid: string): Promise<number> {
   return count ?? 0
 }
 
-/** Unread direct-message count for header badge + tab shell. */
+/**
+ * Unread direct-message count for header badge + tab shell.
+ *
+ * Backed by TanStack Query: caching, in-flight deduping and stale-while-revalidate
+ * are handled by the QueryClient. App-foreground refetch is wired globally via
+ * focusManager in lib/queryClient.ts. We keep one Supabase Realtime channel here
+ * that invalidates the query so the badge updates live.
+ */
 export function useUnreadDmCount(userId: string | null, enabled = true) {
-  const [count, setCount] = useState(0)
-  const inFlight = useRef<Promise<void> | null>(null)
+  const isEnabled = Boolean(userId) && enabled
 
-  const refresh = useCallback(async (uid: string) => {
-    if (inFlight.current) return inFlight.current
-    inFlight.current = (async () => {
-      try {
-        const n = await fetchUnreadDmCount(uid)
-        setCount(n)
-      } catch {
-        setCount(0)
-      }
-    })()
-    try {
-      await inFlight.current
-    } finally {
-      inFlight.current = null
-    }
-  }, [])
+  const { data, refetch } = useQuery({
+    queryKey: unreadDmCountKey(userId),
+    queryFn: () => fetchUnreadDmCount(userId as string),
+    enabled: isEnabled,
+    // Keep showing the previous count while a refetch is in flight (no flicker to 0).
+    placeholderData: (prev) => prev,
+  })
 
   useEffect(() => {
-    if (!userId || !enabled) {
-      setCount(0)
-      return
-    }
-    void refresh(userId)
-  }, [enabled, refresh, userId])
-
-  useEffect(() => {
-    if (!userId || !enabled) return
-    return subscribeDmBadgeInvalidate(() => {
-      void refresh(userId)
-    })
-  }, [enabled, refresh, userId])
-
-  useEffect(() => {
-    if (!userId || !enabled) return
-    const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') void refresh(userId)
-    })
-    return () => sub.remove()
-  }, [enabled, refresh, userId])
-
-  useEffect(() => {
-    if (!userId || !enabled) return
+    if (!isEnabled || !userId) return
     const topic = `unread-dm-${userId}-${++realtimeTopicSeq}`
+    const invalidate = () => {
+      void queryClient.invalidateQueries({ queryKey: unreadDmCountKey(userId) })
+    }
     const channel = supabase
       .channel(topic)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
-        void refresh(userId)
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
-        void refresh(userId)
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_archives' }, () => {
-        void refresh(userId)
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, invalidate)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'conversation_archives' },
+        invalidate,
+      )
       .subscribe()
     return () => {
       void supabase.removeChannel(channel)
     }
-  }, [enabled, refresh, userId])
+  }, [isEnabled, userId])
 
-  return { unreadDmCount: count, refreshUnreadDm: refresh }
+  const refreshUnreadDm = useCallback(async () => {
+    await refetch()
+  }, [refetch])
+
+  return { unreadDmCount: data ?? 0, refreshUnreadDm }
 }
