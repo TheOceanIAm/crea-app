@@ -12,7 +12,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useGlobalSearchParams, useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft, Share2 } from 'lucide-react-native'
+import { ChevronLeft, Share2, Lock } from 'lucide-react-native'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
@@ -464,6 +464,17 @@ export default function JobDetailScreen() {
           Alert.alert('Could not apply', 'You cannot apply to your own job listing.')
           return
         }
+        if (msg === 'pro_plan_required') {
+          Alert.alert(
+            'Pro required to apply',
+            'Browsing is free. Upgrade to Pro to apply to jobs.',
+            [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Upgrade to Pro', onPress: () => router.push('/paywall') },
+            ]
+          )
+          return
+        }
         if (msg === 'job_not_active' || msg === 'job_not_found') {
           Alert.alert('Could not apply', 'This job is no longer open for applications.')
           return
@@ -755,19 +766,21 @@ export default function JobDetailScreen() {
         ) : null}
 
         {showUpgradeForApply ? (
-          <View style={styles.upgradePanel}>
-            <Text style={styles.upgradePanelTitle}>Pro required to apply</Text>
-            <Text style={styles.upgradePanelText}>
-              Free lets you browse listings. Upgrade to Pro to apply and unlock production tools.
-            </Text>
+          <>
             <TouchableOpacity
-              style={styles.primaryBtn}
+              style={[styles.primaryBtn, styles.lockedApplyBtn]}
               onPress={() => router.push('/paywall')}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Apply now — Pro required"
             >
-              <Text style={styles.primaryBtnText}>Upgrade to Pro</Text>
+              <Lock size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+              <Text style={styles.primaryBtnText}>Apply now</Text>
             </TouchableOpacity>
-          </View>
+            <Text style={styles.lockedApplyHint}>
+              Browsing is free. Upgrade to Pro to apply and unlock production tools.
+            </Text>
+          </>
         ) : null}
 
         {freelancer && !isOwner && applicationStatus === 'pending' ? (
@@ -921,6 +934,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryBtnText: { fontSize: 16, fontWeight: '800', color: '#0a0a0a' },
+  lockedApplyBtn: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  lockedApplyHint: {
+    marginTop: 10,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    lineHeight: 18,
+    textAlign: 'center',
+  },
   upgradePanel: {
     marginTop: 24,
     padding: 16,

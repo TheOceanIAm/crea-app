@@ -17,7 +17,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
-import { PlusCircle } from 'lucide-react-native'
+import { PlusCircle, Lock } from 'lucide-react-native'
 import * as Linking from 'expo-linking'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
@@ -437,6 +437,11 @@ export default function JobsListScreen() {
                     <View style={styles.statusPill}>
                       <Text style={styles.statusPillText}>{jobStatusLabel(item.status)}</Text>
                     </View>
+                  ) : isFreeFreelancer ? (
+                    <View style={styles.lockPill}>
+                      <Lock size={11} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                      <Text style={styles.lockPillText}>Pro</Text>
+                    </View>
                   ) : null}
                 </View>
                 <View style={styles.cardTop}>
@@ -809,6 +814,18 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
   },
   statusPillText: { fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.55)', letterSpacing: 0.5 },
+  lockPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 100,
+    backgroundColor: 'rgba(255,220,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.28)',
+  },
+  lockPillText: { fontSize: 10, fontWeight: '800', color: '#FFDC00', letterSpacing: 0.5 },
   emptyWrap: { paddingVertical: 32, alignItems: 'center' },
   freePlanBanner: {
     marginBottom: 16,
