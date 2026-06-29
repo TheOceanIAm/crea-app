@@ -241,14 +241,27 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
       ? String((p as { avatar_url?: string | null }).avatar_url).trim() || null
       : null
 
-  const [{ error: syncErr }, { data: soloJobRows }, { data: apps }, { data: pmRows }, { data: leadProjRows }] =
-    await Promise.all([
-      supabase.rpc('sync_solo_workspace_projects_for_owner'),
-      supabase.from('jobs').select('id').eq('company_id', user.id).eq('is_solo_workspace', true).limit(100),
-      supabase.from('job_applications').select('job_id').eq('freelancer_id', user.id).eq('status', 'accepted').limit(200),
-      supabase.from('project_members').select('project_id').eq('profile_id', user.id).limit(200),
-      supabase.from('projects').select('job_id').eq('freelancer_id', user.id).not('job_id', 'is', null).limit(200),
-    ])
+  const [
+    { error: syncErr },
+    { data: soloJobRows },
+    { data: apps },
+    { data: pmRows },
+    { data: leadProjRows },
+    { data: projectRows },
+  ] = await Promise.all([
+    supabase.rpc('sync_solo_workspace_projects_for_owner'),
+    supabase.from('jobs').select('id').eq('company_id', user.id).eq('is_solo_workspace', true).limit(100),
+    supabase.from('job_applications').select('job_id').eq('freelancer_id', user.id).eq('status', 'accepted').limit(200),
+    supabase.from('project_members').select('project_id').eq('profile_id', user.id).limit(200),
+    supabase.from('projects').select('job_id').eq('freelancer_id', user.id).not('job_id', 'is', null).limit(200),
+    // Own private workspaces — only needs user.id, so fetch it up front in parallel.
+    supabase
+      .from('projects')
+      .select('id, title, status, updated_at, job_id, budget_amount, budget_type, budget_currency')
+      .eq('company_id', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(150),
+  ])
   if (syncErr && __DEV__) {
     console.warn('[workspace-projects] sync_solo_workspace_projects_for_owner', syncErr.message)
   }
@@ -277,21 +290,20 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
   const visibleJobIds = allJobIds.filter((jid) => !declinedCustomerJobIds.has(jid))
 
   let jobsById: Record<string, JobRow> = {}
-  if (visibleJobIds.length > 0) {
-    const { data: jobRows, error: jobsErr } = await supabase
-      .from('jobs')
-      .select(
-        'id, title, category, budget_type, budget_amount, budget_currency, status, project_status, company_id, is_solo_workspace, solo_workspace_client_label, updated_at, created_at'
-      )
-      .in('id', visibleJobIds)
-    if (jobsErr && __DEV__) console.warn('[workspace-projects] jobs', jobsErr.message)
-    jobsById = Object.fromEntries(((jobRows ?? []) as JobRow[]).map((j) => [j.id, j]))
-  }
-
   const workspaceProjectIdByJobId: Record<string, string> = {}
   if (visibleJobIds.length > 0) {
-    const { data: linkRows } = await supabase.from('projects').select('id, job_id').in('job_id', visibleJobIds)
-    for (const row of linkRows ?? []) {
+    const [jobsRes, linkRes] = await Promise.all([
+      supabase
+        .from('jobs')
+        .select(
+          'id, title, category, budget_type, budget_amount, budget_currency, status, project_status, company_id, is_solo_workspace, solo_workspace_client_label, updated_at, created_at'
+        )
+        .in('id', visibleJobIds),
+      supabase.from('projects').select('id, job_id').in('job_id', visibleJobIds),
+    ])
+    if (jobsRes.error && __DEV__) console.warn('[workspace-projects] jobs', jobsRes.error.message)
+    jobsById = Object.fromEntries(((jobsRes.data ?? []) as JobRow[]).map((j) => [j.id, j]))
+    for (const row of linkRes.data ?? []) {
       const jid = String((row as { job_id?: string | null }).job_id ?? '').trim()
       const pid = String((row as { id?: string | null }).id ?? '').trim()
       if (!jid || !pid) continue
@@ -310,13 +322,6 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
   ])
   const cpMap = Object.fromEntries((companyProfiles ?? []).map((c) => [c.id, c]))
   const nameByCompany = Object.fromEntries((companyNames ?? []).map((r) => [r.id, (r.name || '').trim()]))
-
-  const { data: projectRows } = await supabase
-    .from('projects')
-    .select('id, title, status, updated_at, job_id, budget_amount, budget_type, budget_currency, brief_ai_context, brief_ai_outputs')
-    .eq('company_id', user.id)
-    .order('updated_at', { ascending: false })
-    .limit(150)
 
   const projectById = Object.fromEntries((projectRows ?? []).map((r) => [String(r.id), r]))
 

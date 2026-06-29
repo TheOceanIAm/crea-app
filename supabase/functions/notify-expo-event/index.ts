@@ -519,34 +519,41 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
-    const { data: mem } = await admin
-      .from('project_members')
+    // Crew adds now create a PENDING invite (project_crew_invites). Accept either
+    // a pending invite or an already-active membership (back-compat / direct adds).
+    let hasInvite = false
+    const { data: inviteRow } = await admin
+      .from('project_crew_invites')
       .select('id')
       .eq('project_id', projectId)
       .eq('profile_id', crewProfileId)
-      .eq('member_role', 'crew')
+      .eq('status', 'pending')
       .maybeSingle()
-    if (!mem) {
-      return new Response(JSON.stringify({ error: 'Crew membership not found' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    if (inviteRow) {
+      hasInvite = true
+    } else {
+      const { data: mem } = await admin
+        .from('project_members')
+        .select('id')
+        .eq('project_id', projectId)
+        .eq('profile_id', crewProfileId)
+        .eq('member_role', 'crew')
+        .maybeSingle()
+      if (!mem) {
+        return new Response(JSON.stringify({ error: 'Crew invite not found' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
     }
-    const { data: lead } = await admin
-      .from('profiles')
-      .select('name')
-      .eq('id', proj.freelancer_id as string)
-      .maybeSingle()
-    const leadName = String(lead?.name ?? 'Project lead').trim() || 'Project lead'
     const titleStr = String(proj.title ?? 'Project').trim() || 'Project'
-    const hasPublicJob = proj.job_id != null && String(proj.job_id).length > 0
-    const bodyStr = hasPublicJob
-      ? `You were added to «${titleStr}».`
-      : `${leadName} added you to the private project «${titleStr}».`
+    const bodyStr = hasInvite
+      ? `You've been invited to join «${titleStr}». Open Alerts to accept.`
+      : `You were added to «${titleStr}».`
     const res = await sendExpoPush({
       recipientId: crewProfileId,
       admin,
-      title: 'Project crew',
+      title: hasInvite ? 'Project invitation' : 'Project crew',
       body: bodyStr,
       data: { type: 'project_crew_invite', projectId },
       allow: (s) => Boolean(s.pushProjectChat ?? true),

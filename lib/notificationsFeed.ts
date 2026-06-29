@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { listMyCrewInvites } from '@/lib/crewInvites'
 import {
   filterNotificationRowByAccess,
   loadNotificationAccessContext,
@@ -6,6 +7,7 @@ import {
 
 export type NotificationKind =
   | 'invite'
+  | 'crew_invite'
   | 'project_update'
   | 'project_completed'
   | 'project_message'
@@ -320,7 +322,29 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       })
   }
 
-  return [...inviteRows, ...messageRows, ...updateRows, ...completedRows, ...companyRows, ...freelancerRows]
+  // Pending crew invitations addressed to this user. These reference a project
+  // the user cannot access yet, so they bypass the access filter (see
+  // filterNotificationRowByAccess) and carry the invite id in `targetId`.
+  const myInvites = await listMyCrewInvites()
+  const crewInviteRows: NotificationRow[] = myInvites.map((inv) => ({
+    id: `crew-invite-${inv.id}`,
+    kind: 'crew_invite' as const,
+    projectId: inv.projectId,
+    targetId: inv.id,
+    title: inv.projectTitle,
+    body: `${inv.companyName} invited you to join «${inv.projectTitle}». Accept to get workspace access.`,
+    at: inv.invitedAt,
+  }))
+
+  return [
+    ...crewInviteRows,
+    ...inviteRows,
+    ...messageRows,
+    ...updateRows,
+    ...completedRows,
+    ...companyRows,
+    ...freelancerRows,
+  ]
     .filter((row) => filterNotificationRowByAccess(row, accessCtx, myRole))
     .sort((a, b) => +new Date(b.at) - +new Date(a.at))
     .slice(0, 100)

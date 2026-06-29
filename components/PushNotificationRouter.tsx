@@ -20,6 +20,11 @@ function openFromData(router: ReturnType<typeof useRouter>, data: Record<string,
     router.push('/(tabs)/company-applications')
     return
   }
+  if (type === 'project_crew_invite') {
+    // Invitee accepts/declines in the Alerts tab (no workspace access yet).
+    router.push('/(tabs)/notifications')
+    return
+  }
   if (type === 'workspace_ready' || type === 'project_message' || type === 'workspace_activity') {
     const pid = data.projectId
     if (typeof pid === 'string' && pid.length > 0) {

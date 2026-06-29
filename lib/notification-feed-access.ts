@@ -205,6 +205,10 @@ export function filterNotificationRowByAccess<
     return false
   }
 
+  // Pending crew invitations reference a project the user cannot access yet —
+  // they're scoped to the user by the SECURITY DEFINER RPC, so always show.
+  if (row.kind === 'crew_invite') return true
+
   if (row.projectId && !ctx.accessibleProjectIds.has(row.projectId)) return false
 
   if (row.kind === 'job_application') {

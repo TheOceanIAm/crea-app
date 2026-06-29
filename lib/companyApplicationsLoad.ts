@@ -19,6 +19,8 @@ export type CompanyApplicationRow = {
   freelancerName: string
   avatarUrl: string | null
   status: string
+  appliedRole: string | null
+  projectId: string | null
   createdAt: string
 }
 
@@ -103,7 +105,7 @@ export async function loadCompanyApplicationsCache(user: User): Promise<CompanyA
 
   const { data: apps, error: aerr } = await supabase
     .from('job_applications')
-    .select('id, job_id, freelancer_id, status, created_at')
+    .select('id, job_id, freelancer_id, status, applied_role, created_at')
     .in('job_id', jobIds)
     .order('created_at', { ascending: false })
     .limit(200)
@@ -113,7 +115,10 @@ export async function loadCompanyApplicationsCache(user: User): Promise<CompanyA
   }
 
   const fIds = [...new Set(apps.map((a) => a.freelancer_id as string).filter(Boolean))]
-  const { data: profs } = await supabase.from('profiles').select('id, name, avatar_url').in('id', fIds)
+  const [{ data: profs }, { data: projs }] = await Promise.all([
+    supabase.from('profiles').select('id, name, avatar_url').in('id', fIds),
+    supabase.from('projects').select('id, job_id').in('job_id', jobIds),
+  ])
   const profMap = new Map<string, { name: string; avatar_url: string | null }>()
   for (const pr of profs ?? []) {
     const url = pr.avatar_url?.trim()
@@ -122,11 +127,17 @@ export async function loadCompanyApplicationsCache(user: User): Promise<CompanyA
       avatar_url: url && /^https?:\/\//i.test(url) ? url : null,
     })
   }
+  const projectByJob = new Map<string, string>()
+  for (const pj of projs ?? []) {
+    const jid = pj.job_id as string | null
+    if (jid && !projectByJob.has(jid)) projectByJob.set(jid, String(pj.id))
+  }
 
   const rows: CompanyApplicationRow[] = apps.map((a) => {
     const fid = a.freelancer_id as string
     const pr = profMap.get(fid)
     const jid = a.job_id as string
+    const role = typeof a.applied_role === 'string' ? a.applied_role.trim() : ''
     return {
       id: a.id as string,
       jobId: jid,
@@ -135,6 +146,8 @@ export async function loadCompanyApplicationsCache(user: User): Promise<CompanyA
       freelancerName: pr?.name ?? 'Freelancer',
       avatarUrl: pr?.avatar_url ?? null,
       status: String(a.status ?? 'pending'),
+      appliedRole: role || null,
+      projectId: projectByJob.get(jid) ?? null,
       createdAt: String(a.created_at ?? ''),
     }
   })

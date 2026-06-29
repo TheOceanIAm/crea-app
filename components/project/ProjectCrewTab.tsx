@@ -17,6 +17,7 @@ import { Swipeable } from 'react-native-gesture-handler'
 import { Trash2, ChevronDown } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
+import { cancelCrewInvite, listProjectCrewInvites, type ProjectCrewInvite } from '@/lib/crewInvites'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import {
   clampBookedEntriesToWindow,
@@ -133,6 +134,7 @@ export function ProjectCrewTab({
 }: Props) {
   const { height: windowHeight } = useWindowDimensions()
   const [rows, setRows] = useState<CrewRow[]>([])
+  const [pendingInvites, setPendingInvites] = useState<ProjectCrewInvite[]>([])
   const [loading, setLoading] = useState(true)
   const [crewSearch, setCrewSearch] = useState('')
   const [crewSearchResults, setCrewSearchResults] = useState<
@@ -297,8 +299,13 @@ export function ProjectCrewTab({
     })
 
     setRows([...registered, ...manual])
+    if (canManage) {
+      setPendingInvites(await listProjectCrewInvites(projectId))
+    } else {
+      setPendingInvites([])
+    }
     setLoading(false)
-  }, [projectId])
+  }, [projectId, canManage])
 
   useEffect(() => {
     setLoading(true)
@@ -375,7 +382,27 @@ export function ProjectCrewTab({
     }
     void notifyExpoEvent({ kind: 'project_crew_invite', projectId, crewProfileId: profileId })
     load()
-    Alert.alert('Added', 'They now have access to this project workspace.')
+    Alert.alert('Invitation sent', "They'll get access to this project workspace once they accept the invite.")
+  }
+
+  const cancelInvite = (invite: ProjectCrewInvite) => {
+    Alert.alert('Cancel invitation', `Cancel the invitation to ${invite.name}?`, [
+      { text: 'Keep', style: 'cancel' },
+      {
+        text: 'Cancel invite',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setPendingInvites((prev) => prev.filter((i) => i.id !== invite.id))
+            const res = await cancelCrewInvite(invite.id)
+            if (!res.ok) {
+              Alert.alert('Could not cancel', res.error ?? 'Please try again.')
+            }
+            load()
+          })()
+        },
+      },
+    ])
   }
 
   const addManualCrew = async () => {
@@ -793,6 +820,38 @@ export function ProjectCrewTab({
           )}
         </>
       )}
+
+      {canManage && pendingInvites.length > 0 ? (
+        <>
+          <Text style={styles.label}>Pending invitations</Text>
+          {pendingInvites.map((inv) => {
+            const uri = crewAvatarUri(inv.avatarUrl)
+            return (
+              <View key={inv.id} style={styles.inviteRow}>
+                {uri ? (
+                  <Image source={{ uri }} style={styles.rowAvatar} />
+                ) : (
+                  <View style={[styles.rowAvatar, styles.inviteAvatarPh]}>
+                    <Text style={styles.inviteAvatarLetter}>{crewAvatarInitial(inv.name)}</Text>
+                  </View>
+                )}
+                <View style={styles.rowText}>
+                  <Text style={styles.name}>{inv.name}</Text>
+                  <Text style={styles.invitePending}>Waiting for them to accept…</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.inviteCancelBtn}
+                  onPress={() => cancelInvite(inv)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Cancel invitation to ${inv.name}`}
+                >
+                  <Text style={styles.inviteCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            )
+          })}
+        </>
+      ) : null}
 
       <Text style={styles.label}>People on this project</Text>
       {rows.map((m) => {
@@ -1222,6 +1281,24 @@ const styles = StyleSheet.create({
   },
   dim: { opacity: 0.5 },
   rowAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: '#222' },
+  inviteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  inviteAvatarPh: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,220,0,0.12)' },
+  inviteAvatarLetter: { color: '#FFDC00', fontSize: 16, fontWeight: '800' },
+  invitePending: { fontSize: 12, color: 'rgba(255,220,0,0.7)', marginTop: 2, fontWeight: '600' },
+  inviteCancelBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  inviteCancelText: { color: 'rgba(255,255,255,0.75)', fontWeight: '700', fontSize: 12 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

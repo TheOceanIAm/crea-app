@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -17,6 +19,7 @@ import {
   markAlertRead,
   type NotificationRow,
 } from '@/lib/notificationsFeed'
+import { respondToCrewInvite } from '@/lib/crewInvites'
 import { readCachedNotifications, cacheNotifications } from '@/lib/notificationsCache'
 import { invalidateAlertsBadge } from '@/lib/invalidateAlerts'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
@@ -63,6 +66,7 @@ export default function NotificationsScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [showMessages, setShowMessages] = useState(true)
+  const [busyInviteId, setBusyInviteId] = useState<string | null>(null)
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadInFlight = useRef<Promise<void> | null>(null)
   const lastFetchedAt = useRef(boot.loading ? 0 : Date.now())
@@ -171,6 +175,7 @@ export default function NotificationsScreen() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, onChange)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, onChange)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, onChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'project_crew_invites' }, onChange)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'user_alert_reads' }, onChange)
         .subscribe()
     })()
@@ -193,8 +198,33 @@ export default function NotificationsScreen() {
 
   const emptyText = useMemo(() => 'No alerts yet.', [])
 
+  const respondInvite = useCallback(
+    async (item: NotificationRow, action: 'accept' | 'decline') => {
+      const inviteId = item.targetId
+      if (!inviteId || busyInviteId) return
+      setBusyInviteId(item.id)
+      const res = await respondToCrewInvite(inviteId, action)
+      setBusyInviteId(null)
+      if (!res.ok) {
+        Alert.alert('Could not respond', res.error ?? 'Please try again.')
+        return
+      }
+      // Optimistically drop the invite row, then revalidate the feed.
+      setRows((prev) => prev.filter((r) => r.id !== item.id))
+      void load()
+      invalidateAlertsBadge()
+      if (action === 'accept' && item.projectId) {
+        router.push(`/project/${item.projectId}`)
+      }
+    },
+    [busyInviteId, load, router]
+  )
+
   const onPressRow = useCallback(
     async (item: NotificationRow) => {
+      // Crew invitations are actioned via the inline Accept/Decline buttons and
+      // reference a project the user cannot open yet — don't navigate.
+      if (item.kind === 'crew_invite') return
       if (userId) {
         await markAlertRead(userId, item.id)
         let nextReadKeys: Set<string> = new Set()
@@ -242,15 +272,17 @@ export default function NotificationsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFDC00" />}
         renderItem={({ item }) => {
           const unread = !readKeys.has(item.id)
+          const isInviteAction = item.kind === 'crew_invite'
+          const inviteBusy = busyInviteId === item.id
           return (
             <TouchableOpacity
               style={[styles.card, unread && styles.cardUnread]}
-              activeOpacity={0.85}
+              activeOpacity={isInviteAction ? 1 : 0.85}
               onPress={() => void onPressRow(item)}
             >
               <View style={styles.kickerRow}>
                 <Text style={styles.kicker}>
-                  {item.kind === 'invite'
+                  {item.kind === 'invite' || item.kind === 'crew_invite'
                     ? 'Invitation'
                     : item.kind === 'project_message'
                       ? 'Project chat'
@@ -268,6 +300,30 @@ export default function NotificationsScreen() {
               </View>
               <Text style={styles.cardTitle}>{item.title}</Text>
               <Text style={styles.body}>{item.body}</Text>
+              {isInviteAction ? (
+                <View style={styles.inviteActions}>
+                  <TouchableOpacity
+                    style={[styles.inviteBtn, styles.inviteDecline, inviteBusy && styles.inviteDim]}
+                    onPress={() => void respondInvite(item, 'decline')}
+                    disabled={inviteBusy}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.inviteDeclineText}>Decline</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.inviteBtn, styles.inviteAccept, inviteBusy && styles.inviteDim]}
+                    onPress={() => void respondInvite(item, 'accept')}
+                    disabled={inviteBusy}
+                    activeOpacity={0.85}
+                  >
+                    {inviteBusy ? (
+                      <ActivityIndicator color="#0a0a0a" size="small" />
+                    ) : (
+                      <Text style={styles.inviteAcceptText}>Accept</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : null}
             </TouchableOpacity>
           )
         }}
@@ -305,6 +361,13 @@ const styles = StyleSheet.create({
   time: { color: 'rgba(255,255,255,0.35)', fontSize: 11 },
   cardTitle: { color: '#fff', fontSize: 14, fontWeight: '700', marginBottom: 4 },
   body: { color: 'rgba(255,255,255,0.62)', fontSize: 12, lineHeight: 17 },
+  inviteActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  inviteBtn: { flex: 1, paddingVertical: 10, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  inviteDim: { opacity: 0.6 },
+  inviteAccept: { backgroundColor: '#FFDC00' },
+  inviteAcceptText: { color: '#0a0a0a', fontWeight: '800', fontSize: 13 },
+  inviteDecline: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
+  inviteDeclineText: { color: 'rgba(255,255,255,0.8)', fontWeight: '700', fontSize: 13 },
   center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', padding: 24 },
   empty: { color: 'rgba(255,255,255,0.5)', fontSize: 14, textAlign: 'center' },
 })

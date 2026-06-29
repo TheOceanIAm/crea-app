@@ -97,27 +97,48 @@ export async function loadDirectMessageInbox(userId: string): Promise<LoadInboxR
     return { ok: false, error: error.message, inbox: [], archived: [] }
   }
 
-  const { data: archivedRows } = await supabase
-    .from('conversation_archives')
-    .select('conversation_id')
-    .eq('user_id', userId)
-    .eq('archived', true)
-  const archivedIds = new Set((archivedRows ?? []).map((r) => String(r.conversation_id)))
-
   const listRaw = rows ?? []
-  const convIdsForActivity = listRaw.map((r) => String(r.id))
+  const convIds = listRaw.map((r) => String(r.id))
+  const otherIds = [
+    ...new Set(
+      listRaw.map((r) => (r.participant_1 === userId ? r.participant_2 : r.participant_1)).map(String)
+    ),
+  ]
 
-  let activityAt = new Map<string, string>()
-  if (convIdsForActivity.length > 0) {
-    const { data: actRows, error: actErr } = await supabase.rpc('crea_dm_conversation_activity', {
-      p_ids: convIdsForActivity,
-    })
-    if (actErr && typeof __DEV__ !== 'undefined' && __DEV__) {
-      console.warn('[messagesInboxLoad] crea_dm_conversation_activity', actErr.message)
-    }
-    for (const row of (actRows ?? []) as Array<{ conversation_id: string; last_msg_at: string }>) {
-      activityAt.set(String(row.conversation_id), row.last_msg_at)
-    }
+  // Everything below only needs the raw conversation list (membership), not the final sort order,
+  // so fetch archives, activity, counterpart profiles, and unread flags in parallel.
+  const [archivedRows, activityRows, profs, unreadMap] = await Promise.all([
+    supabase
+      .from('conversation_archives')
+      .select('conversation_id')
+      .eq('user_id', userId)
+      .eq('archived', true)
+      .then((r) => r.data ?? []),
+    convIds.length
+      ? supabase
+          .rpc('crea_dm_conversation_activity', { p_ids: convIds })
+          .then((r) => {
+            if (r.error && typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.warn('[messagesInboxLoad] crea_dm_conversation_activity', r.error.message)
+            }
+            return (r.data ?? []) as Array<{ conversation_id: string; last_msg_at: string }>
+          })
+      : Promise.resolve([] as Array<{ conversation_id: string; last_msg_at: string }>),
+    otherIds.length
+      ? supabase
+          .from('profiles')
+          .select('id, name, avatar_url')
+          .in('id', otherIds)
+          .then((r) => r.data ?? [])
+      : Promise.resolve([] as Array<{ id: string; name: string | null; avatar_url: string | null }>),
+    unreadCountsForConversations(convIds, userId),
+  ])
+
+  const archivedIds = new Set(archivedRows.map((r) => String(r.conversation_id)))
+
+  const activityAt = new Map<string, string>()
+  for (const row of activityRows) {
+    activityAt.set(String(row.conversation_id), row.last_msg_at)
   }
 
   const list = [...listRaw].sort((a, b) => {
@@ -128,15 +149,7 @@ export async function loadDirectMessageInbox(userId: string): Promise<LoadInboxR
     return db - da
   })
 
-  const otherIds = [...new Set(list.map((r) => (r.participant_1 === userId ? r.participant_2 : r.participant_1)).map(String))]
-
-  const { data: profs } = otherIds.length
-    ? await supabase.from('profiles').select('id, name, avatar_url').in('id', otherIds)
-    : { data: [] as Array<{ id: string; name: string | null; avatar_url: string | null }> }
-
   const profMap = new Map((profs ?? []).map((p) => [String(p.id), p]))
-  const convIds = list.map((r) => String(r.id))
-  const unreadMap = await unreadCountsForConversations(convIds, userId)
 
   const inbox: ConvoRow[] = []
   const archived: ConvoRow[] = []

@@ -12,6 +12,7 @@ import {
 } from 'react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -70,6 +71,7 @@ function removeConversation(data: MessagesData, conversationId: string): Message
 
 export default function MessagesScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const [showArchived, setShowArchived] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -257,6 +259,76 @@ export default function MessagesScreen() {
     [deleteMutation],
   )
 
+  const renderRow = useCallback(
+    (item: ConvoRow, isArchived: boolean) => (
+      <Swipeable
+        friction={1.2}
+        rightThreshold={28}
+        overshootRight={false}
+        renderRightActions={(progress) => (
+          <Animated.View
+            style={[
+              styles.swipeActions,
+              {
+                opacity: progress.interpolate({
+                  inputRange: [0, 0.12, 1],
+                  outputRange: [0, 0.5, 1],
+                  extrapolate: 'clamp',
+                }),
+                transform: [
+                  {
+                    translateX: progress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [46, 0],
+                      extrapolate: 'clamp',
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <TouchableOpacity
+              style={styles.archiveAction}
+              onPress={() => void archiveConversation(item.id, !isArchived)}
+            >
+              <Text style={styles.swipeActionText}>{isArchived ? 'Unarchive' : 'Archive'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.deleteAction} onPress={() => deleteConversation(item.id)}>
+              <Text style={styles.swipeActionText}>Delete</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        )}
+      >
+        <TouchableOpacity
+          style={[styles.card, !isArchived && item.unread && styles.cardUnread]}
+          activeOpacity={0.7}
+          onPress={() => router.push(`/conversation/${item.id}`)}
+        >
+          <View style={styles.avatarWrap}>
+            {item.avatar ? (
+              <Image source={{ uri: item.avatar }} style={styles.avatar} />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarLetter}>{item.name.charAt(0).toUpperCase() || '?'}</Text>
+              </View>
+            )}
+            {!isArchived && item.unread ? <View style={styles.dot} /> : null}
+          </View>
+          <View style={styles.cardBody}>
+            <View style={styles.cardTop}>
+              <Text style={[styles.name, !isArchived && item.unread && styles.nameUnread]}>{item.name}</Text>
+              <Text style={styles.time}>{item.time}</Text>
+            </View>
+            <Text style={styles.preview} numberOfLines={1}>
+              {item.lastMessage}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </Swipeable>
+    ),
+    [archiveConversation, deleteConversation, router],
+  )
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -303,156 +375,31 @@ export default function MessagesScreen() {
         maxToRenderPerBatch={8}
         windowSize={8}
         removeClippedSubviews
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: tabBarInset + 24 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFDC00" />}
-        renderItem={({ item }) => (
-          <Swipeable
-            friction={1.2}
-            rightThreshold={28}
-            overshootRight={false}
-            renderRightActions={(progress) => (
-              <Animated.View
-                style={[
-                  styles.swipeActions,
-                  {
-                    opacity: progress.interpolate({
-                      inputRange: [0, 0.12, 1],
-                      outputRange: [0, 0.5, 1],
-                      extrapolate: 'clamp',
-                    }),
-                    transform: [
-                      {
-                        translateX: progress.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [46, 0],
-                          extrapolate: 'clamp',
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                <TouchableOpacity style={styles.archiveAction} onPress={() => void archiveConversation(item.id, true)}>
-                  <Text style={styles.swipeActionText}>Archive</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.deleteAction} onPress={() => deleteConversation(item.id)}>
-                  <Text style={styles.swipeActionText}>Delete</Text>
-                </TouchableOpacity>
-              </Animated.View>
-            )}
-          >
-            <TouchableOpacity
-              style={[styles.card, item.unread && styles.cardUnread]}
-              activeOpacity={0.7}
-              onPress={() => router.push(`/conversation/${item.id}`)}
-            >
-              <View style={styles.avatarWrap}>
-                {item.avatar ? (
-                  <Image source={{ uri: item.avatar }} style={styles.avatar} />
-                ) : (
-                  <View style={styles.avatarFallback}>
-                    <Text style={styles.avatarLetter}>{item.name.charAt(0).toUpperCase() || '?'}</Text>
-                  </View>
-                )}
-                {item.unread ? <View style={styles.dot} /> : null}
-              </View>
-              <View style={styles.cardBody}>
-                <View style={styles.cardTop}>
-                  <Text style={[styles.name, item.unread && styles.nameUnread]}>{item.name}</Text>
-                  <Text style={styles.time}>{item.time}</Text>
-                </View>
-                <Text style={styles.preview} numberOfLines={1}>
-                  {item.lastMessage}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </Swipeable>
-        )}
+        renderItem={({ item }) => renderRow(item, false)}
         ListEmptyComponent={
-          <View style={styles.center}>
+          <View style={showArchived && archived.length > 0 ? styles.emptyInline : styles.center}>
             <Text style={styles.emptyText}>No conversations yet.</Text>
             <Text style={styles.emptySub}>Start a chat from a profile or job.</Text>
           </View>
         }
+        ListFooterComponent={
+          showArchived ? (
+            <View style={styles.archivedSection}>
+              <Text style={styles.archivedTitle}>Archived</Text>
+              {archived.length > 0 ? (
+                archived.map((item) => (
+                  <View key={`arch-${item.id}`}>{renderRow(item, true)}</View>
+                ))
+              ) : (
+                <Text style={styles.emptySub}>No archived conversations.</Text>
+              )}
+            </View>
+          ) : null
+        }
       />
-      {showArchived ? (
-        <View style={styles.archivedSection}>
-          <Text style={styles.archivedTitle}>Archived</Text>
-          <FlatList
-            data={archived}
-            keyExtractor={(c) => `arch-${c.id}`}
-            initialNumToRender={8}
-            maxToRenderPerBatch={6}
-            windowSize={6}
-            removeClippedSubviews
-            contentContainerStyle={styles.list}
-            renderItem={({ item }) => (
-              <Swipeable
-                friction={1.2}
-                rightThreshold={28}
-                overshootRight={false}
-                renderRightActions={(progress) => (
-                  <Animated.View
-                    style={[
-                      styles.swipeActions,
-                      {
-                        opacity: progress.interpolate({
-                          inputRange: [0, 0.12, 1],
-                          outputRange: [0, 0.5, 1],
-                          extrapolate: 'clamp',
-                        }),
-                        transform: [
-                          {
-                            translateX: progress.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [46, 0],
-                              extrapolate: 'clamp',
-                            }),
-                          },
-                        ],
-                      },
-                    ]}
-                  >
-                    <TouchableOpacity style={styles.archiveAction} onPress={() => void archiveConversation(item.id, false)}>
-                      <Text style={styles.swipeActionText}>Unarchive</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.deleteAction} onPress={() => deleteConversation(item.id)}>
-                      <Text style={styles.swipeActionText}>Delete</Text>
-                    </TouchableOpacity>
-                  </Animated.View>
-                )}
-              >
-                <TouchableOpacity
-                  style={styles.card}
-                  activeOpacity={0.7}
-                  onPress={() => router.push(`/conversation/${item.id}`)}
-                >
-                  <View style={styles.avatarWrap}>
-                    {item.avatar ? (
-                      <Image source={{ uri: item.avatar }} style={styles.avatar} />
-                    ) : (
-                      <View style={styles.avatarFallback}>
-                        <Text style={styles.avatarLetter}>{item.name.charAt(0).toUpperCase() || '?'}</Text>
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.cardBody}>
-                    <View style={styles.cardTop}>
-                      <Text style={styles.name}>{item.name}</Text>
-                      <Text style={styles.time}>{item.time}</Text>
-                    </View>
-                    <Text style={styles.preview} numberOfLines={1}>
-                      {item.lastMessage}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              </Swipeable>
-            )}
-            ListEmptyComponent={<Text style={styles.emptySub}>No archived conversations.</Text>}
-          />
-        </View>
-      ) : null}
     </SafeAreaView>
   )
 }
@@ -556,7 +503,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   swipeActionText: { color: '#fff', fontSize: 11, fontWeight: '800' },
-  archivedSection: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 8 },
+  emptyInline: { alignItems: 'center', paddingTop: 48, paddingBottom: 28 },
+  archivedSection: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 12, marginTop: 8 },
   archivedTitle: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '800', paddingHorizontal: 20, marginBottom: 6 },
   emptyText: { color: 'rgba(255,255,255,0.45)', fontSize: 15, textAlign: 'center' },
   emptySub: { color: 'rgba(255,255,255,0.28)', fontSize: 13, marginTop: 8, textAlign: 'center' },
