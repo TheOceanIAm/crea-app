@@ -29,3 +29,6 @@ expo-env.d.ts
 # @end expo-cli
 ios/
 ios/
+
+# Cursor smoke-test artifacts
+.cursor-smoke-screenshot*.png
