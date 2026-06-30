@@ -37,7 +37,6 @@
     },
     "plugins": [
       "./plugins/withFmtPodfileFix.js",
-      "./plugins/withStripeFabricCodegenFix.js",
       [
         "expo-splash-screen",
         {
@@ -62,12 +61,6 @@
           "icon": "./assets/crea-icon.png",
           "color": "#FFDC00",
           "enableBackgroundRemoteNotifications": true
-        }
-      ],
-      [
-        "@stripe/stripe-react-native",
-        {
-          "merchantIdentifier": "merchant.de.creaservices.app"
         }
       ],
       "expo-font"

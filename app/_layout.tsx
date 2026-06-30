@@ -3,7 +3,6 @@ import '@/lib/pushNotifications'
 import { type PropsWithChildren, useEffect, useState } from 'react'
 import { Linking, Alert, Platform, StyleSheet, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
-import { StripeProvider } from '@stripe/stripe-react-native'
 import { SubscriptionPaywallGate } from '@/components/SubscriptionPaywallGate'
 import * as Notifications from 'expo-notifications'
 import { Stack, useRouter } from 'expo-router'
@@ -134,69 +133,61 @@ function PushNotificationRouter() {
 }
 
 export default function RootLayout() {
-  const stripePublishableKey = (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim()
   return (
     <GestureHandlerRootView style={styles.root}>
-      {/* urlScheme matches app.json `scheme` — iOS Payment Sheet / 3DS return to app */}
-      <StripeProvider
-        publishableKey={stripePublishableKey}
-        merchantIdentifier="merchant.de.creaservices.app"
-        urlScheme="crea"
-      >
-        <AppBootstrapOverlayProvider>
-          <RevenueCatProvider>
-            <QueryClientProvider client={queryClient}>
-            <BootstrapAuthGate>
-            <AuthDeepLinkBridge />
-            <SubscriptionPaywallGate />
-            {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
-            <StatusBar style="light" backgroundColor="#0a0a0a" />
-            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
-            {/* Native splash is solid black until JS shows AppBootstrapLoading */}
-            <Stack.Screen name="index" options={{ contentStyle: { backgroundColor: '#0a0a0a' } }} />
-            <Stack.Screen
-              name="login"
-              options={{
-                animation: 'fade',
-                animationDuration: 220,
-              }}
-            />
-            <Stack.Screen name="register" />
-            <Stack.Screen name="auth/callback" />
-            <Stack.Screen name="auth/reset" />
-            <Stack.Screen name="auth/reset-password" />
-            <Stack.Screen name="forgot-password" />
-            <Stack.Screen
-              name="onboarding"
-              options={{
-                animation: 'fade',
-                animationDuration: 220,
-              }}
-            />
-            <Stack.Screen
-              name="(tabs)"
-              options={{
-                animation: 'fade',
-                animationDuration: 220,
-              }}
-            />
-            <Stack.Screen name="jobs/[id]" />
-            <Stack.Screen name="profile/[userId]" />
-            <Stack.Screen name="conversation/[id]" />
-            <Stack.Screen name="project" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="paywall"
-              options={{
-                animation: 'slide_from_bottom',
-                presentation: 'modal',
-              }}
-            />
-          </Stack>
-          </BootstrapAuthGate>
-            </QueryClientProvider>
-          </RevenueCatProvider>
-        </AppBootstrapOverlayProvider>
-      </StripeProvider>
+      <AppBootstrapOverlayProvider>
+        <RevenueCatProvider>
+          <QueryClientProvider client={queryClient}>
+          <BootstrapAuthGate>
+          <AuthDeepLinkBridge />
+          <SubscriptionPaywallGate />
+          {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
+          <StatusBar style="light" backgroundColor="#0a0a0a" />
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
+          {/* Native splash is solid black until JS shows AppBootstrapLoading */}
+          <Stack.Screen name="index" options={{ contentStyle: { backgroundColor: '#0a0a0a' } }} />
+          <Stack.Screen
+            name="login"
+            options={{
+              animation: 'fade',
+              animationDuration: 220,
+            }}
+          />
+          <Stack.Screen name="register" />
+          <Stack.Screen name="auth/callback" />
+          <Stack.Screen name="auth/reset" />
+          <Stack.Screen name="auth/reset-password" />
+          <Stack.Screen name="forgot-password" />
+          <Stack.Screen
+            name="onboarding"
+            options={{
+              animation: 'fade',
+              animationDuration: 220,
+            }}
+          />
+          <Stack.Screen
+            name="(tabs)"
+            options={{
+              animation: 'fade',
+              animationDuration: 220,
+            }}
+          />
+          <Stack.Screen name="jobs/[id]" />
+          <Stack.Screen name="profile/[userId]" />
+          <Stack.Screen name="conversation/[id]" />
+          <Stack.Screen name="project" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="paywall"
+            options={{
+              animation: 'slide_from_bottom',
+              presentation: 'modal',
+            }}
+          />
+        </Stack>
+        </BootstrapAuthGate>
+          </QueryClientProvider>
+        </RevenueCatProvider>
+      </AppBootstrapOverlayProvider>
     </GestureHandlerRootView>
   )
 }
