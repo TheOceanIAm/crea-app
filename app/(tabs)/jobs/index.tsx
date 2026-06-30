@@ -30,6 +30,7 @@ import {
 } from '@/lib/freelancerPlan'
 import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
 import { publishCeoExternalJob } from '@/lib/ceoExternalJobsApi'
+import { instagramUrl, linkedinUrl } from '@/lib/profilePublicLinks'
 import {
   cacheJobsFeed,
   loadJobsFeed,
@@ -54,6 +55,12 @@ function jobStatusLabel(s: string) {
   if (t === 'closed' || t === 'filled') return 'Closed'
   if (t === 'draft') return 'Draft'
   return s ? s : '—'
+}
+
+function openExternalUrl(url: string, label: string) {
+  void Linking.openURL(url).catch(() => {
+    Alert.alert(`${label} did not open`, 'Copy the link from the listing and open it in your browser.')
+  })
 }
 
 function normalizeRateLabel(rate: string | null): string | null {
@@ -507,10 +514,40 @@ export default function JobsListScreen() {
               <Text style={styles.modalContactLabel}>Contact</Text>
               <Text style={styles.modalContactName}>{activeExternalJob?.contact_name || 'n/a'}</Text>
               {activeExternalJob?.contact_email ? (
-                <Text style={styles.modalContactMail}>{activeExternalJob.contact_email}</Text>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => openExternalUrl(`mailto:${activeExternalJob.contact_email!.trim()}`, 'Email')}
+                >
+                  <Text style={styles.modalContactMail}>{activeExternalJob.contact_email}</Text>
+                </TouchableOpacity>
               ) : (
-                <Text style={styles.modalContactMail}>No email available</Text>
+                <Text style={styles.modalContactMuted}>No email available</Text>
               )}
+              {(() => {
+                const linkedIn = linkedinUrl(activeExternalJob?.contact_linkedin ?? '')
+                const instagram = instagramUrl(activeExternalJob?.contact_instagram ?? '')
+                if (!linkedIn && !instagram) return null
+                return (
+                  <View style={styles.modalContactLinksRow}>
+                    {linkedIn ? (
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => openExternalUrl(linkedIn, 'LinkedIn')}
+                      >
+                        <Text style={styles.modalContactLink}>LinkedIn</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {instagram ? (
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => openExternalUrl(instagram, 'Instagram')}
+                      >
+                        <Text style={styles.modalContactLink}>Instagram</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                )
+              })()}
             </View>
             <Text style={styles.modalIntel}>
               {(activeExternalJob?.intel_brief ?? '').trim() || 'No intel brief available yet.'}
@@ -524,14 +561,7 @@ export default function JobsListScreen() {
                 onPress={() => {
                   const email = activeExternalJob?.contact_email?.trim()
                   if (!email) return
-                  void Linking.openURL(`mailto:${email}`).catch(() => {
-                    Alert.alert(
-                      'Mail did not open',
-                      Platform.OS === 'ios'
-                        ? 'The iOS Simulator often cannot open Mail from email links. On a real device with Mail or another mail app configured, this usually works. You can copy the address shown above.'
-                        : 'No app opened this email link. Copy the address above and paste it into your mail app.'
-                    )
-                  })
+                  openExternalUrl(`mailto:${email}`, 'Email')
                 }}
                 activeOpacity={0.85}
                 disabled={!activeExternalJob?.contact_email}
@@ -950,6 +980,22 @@ const styles = StyleSheet.create({
     color: '#FFDC00',
     fontSize: 13,
     fontWeight: '600',
+  },
+  modalContactMuted: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 13,
+  },
+  modalContactLinksRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 14,
+    marginTop: 10,
+  },
+  modalContactLink: {
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 13,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   modalActions: {
     flexDirection: 'row',
