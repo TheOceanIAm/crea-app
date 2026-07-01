@@ -403,16 +403,7 @@ export default function WorkspaceProjectsScreen() {
   }
 
   const renderCard = (item: ProjectListing) => (
-    <View
-      style={[
-        styles.card,
-        viewerRole === 'freelancer'
-          ? item.kind === 'customer'
-            ? styles.cardAccentCustomer
-            : styles.cardAccentPrivate
-          : null,
-      ]}
-    >
+    <View style={styles.card}>
       <TouchableOpacity style={styles.cardMain} onPress={() => openListing(item)} activeOpacity={0.85}>
         <View style={styles.cardTop}>
           <Image
@@ -768,21 +759,13 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#111',
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
     overflow: 'hidden',
-  },
-  cardAccentCustomer: {
-    borderLeftWidth: 3,
-    borderLeftColor: 'rgba(255,220,0,0.65)',
-  },
-  cardAccentPrivate: {
-    borderLeftWidth: 3,
-    borderLeftColor: 'rgba(255,255,255,0.22)',
   },
   cardMain: { padding: 14 },
   cardTop: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
-  logo: { width: 48, height: 48, backgroundColor: '#fff' },
+  logo: { width: 48, height: 48, backgroundColor: '#1a1a1a' },
   logoRound: { borderRadius: 24 },
   logoSquare: { borderRadius: 12 },
   cardHead: { flex: 1, minWidth: 0 },
