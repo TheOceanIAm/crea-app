@@ -16,6 +16,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo
 import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { getAuthUser } from '@/lib/getAuthUser'
+import { createPrivateWorkspaceProject } from '@/lib/createPrivateWorkspaceProject'
 import { supabase } from '@/lib/supabase'
 import {
   canFreelancerCreatePrivateProjects,
@@ -247,34 +248,19 @@ export default function WorkspaceProjectsScreen() {
     }
     setCreating(true)
     setError(null)
-    const user = await getAuthUser()
-    if (!user) {
-      setCreating(false)
-      setError('Please sign in again.')
-      return
-    }
-    const { data: created, error: insErr } = await supabase
-      .from('projects')
-      .insert({
-        company_id: user.id,
-        freelancer_id: user.id,
-        title: t,
-        brief_ai_context: notes.trim() || null,
-        brief_ai_outputs: { workspace_summary: notes.trim() || '' },
-        budget_type: 'negotiable',
-        location: 'Remote',
-      })
-      .select('id')
-      .single()
+    const result = await createPrivateWorkspaceProject(supabase, u.id, {
+      title: t,
+      notes: notes.trim() || undefined,
+    })
     setCreating(false)
-    if (insErr || !created?.id) {
-      setError(insErr?.message ?? 'Could not create workspace.')
+    if (!result.ok) {
+      setError(result.error)
       return
     }
     setCreateOpen(false)
     setTitle('')
     setNotes('')
-    router.push(`/project/${created.id}` as Href)
+    router.push(`/project/${result.projectId}` as Href)
   }
 
   const openListing = (item: ProjectListing) => {
