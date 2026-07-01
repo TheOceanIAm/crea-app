@@ -17,6 +17,7 @@ import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { createPrivateWorkspaceProject } from '@/lib/createPrivateWorkspaceProject'
+import { deletePrivateWorkspaceProject } from '@/lib/deletePrivateWorkspaceProject'
 import { supabase } from '@/lib/supabase'
 import {
   canFreelancerCreatePrivateProjects,
@@ -386,14 +387,10 @@ export default function WorkspaceProjectsScreen() {
               }
               setActingId(item.id)
               setError(null)
-              const { error: delErr } = await supabase
-                .from('projects')
-                .delete()
-                .eq('id', item.id)
-                .eq('company_id', user.id)
+              const result = await deletePrivateWorkspaceProject(supabase, user.id, item.id)
               setActingId(null)
-              if (delErr) {
-                setError(delErr.message)
+              if (!result.ok) {
+                setError(result.error)
                 return
               }
               await load({ force: true })
