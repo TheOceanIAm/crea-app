@@ -17,6 +17,11 @@ import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { createPrivateWorkspaceProject } from '@/lib/createPrivateWorkspaceProject'
+import {
+  JOB_LISTING_BUDGET_TYPES,
+  parseJobListingBudgetInput,
+  type JobListingBudgetType,
+} from '@/lib/jobListingBudget'
 import { deletePrivateWorkspaceProject } from '@/lib/deletePrivateWorkspaceProject'
 import { supabase } from '@/lib/supabase'
 import {
@@ -118,6 +123,9 @@ export default function WorkspaceProjectsScreen() {
   const [createOpen, setCreateOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
+  const [budgetType, setBudgetType] = useState<JobListingBudgetType>('negotiable')
+  const [budgetAmount, setBudgetAmount] = useState('')
+  const [budgetCurrency, setBudgetCurrency] = useState('EUR')
   const [creating, setCreating] = useState(false)
   const [actingId, setActingId] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -231,9 +239,26 @@ export default function WorkspaceProjectsScreen() {
     return sections.length > 0 ? sections : [{ title: '', subtitle: '', data: [] }]
   }, [viewerRole, listings])
 
+  const resetCreateForm = () => {
+    setTitle('')
+    setNotes('')
+    setBudgetType('negotiable')
+    setBudgetAmount('')
+    setBudgetCurrency('EUR')
+  }
+
   const onCreate = async () => {
     const t = title.trim()
     if (!t || creating) return
+    const budgetParsed = parseJobListingBudgetInput({
+      budgetType,
+      budgetAmount,
+      budgetCurrency,
+    })
+    if (!budgetParsed.ok) {
+      Alert.alert('Budget', budgetParsed.error)
+      return
+    }
     const u = await getAuthUser()
     if (!u) {
       Alert.alert('Projects', 'Please sign in again.')
@@ -253,6 +278,9 @@ export default function WorkspaceProjectsScreen() {
     const result = await createPrivateWorkspaceProject(supabase, u.id, {
       title: t,
       notes: notes.trim() || undefined,
+      budget_type: budgetParsed.budget_type,
+      budget_amount: budgetParsed.budget_amount,
+      budget_currency: budgetParsed.budget_currency,
     })
     setCreating(false)
     if (!result.ok) {
@@ -260,8 +288,7 @@ export default function WorkspaceProjectsScreen() {
       return
     }
     setCreateOpen(false)
-    setTitle('')
-    setNotes('')
+    resetCreateForm()
     router.push(`/project/${result.projectId}` as Href)
   }
 
@@ -610,7 +637,7 @@ export default function WorkspaceProjectsScreen() {
         }
       />
 
-      <KeyboardFormModal visible={createOpen} onClose={() => setCreateOpen(false)}>
+      <KeyboardFormModal visible={createOpen} onClose={() => { setCreateOpen(false); resetCreateForm() }}>
             <Text style={styles.modalTitle}>New project</Text>
             <Text style={styles.modalSub}>
               Creates a private workspace only. It will not appear on the Jobs tab for other users.
@@ -626,6 +653,45 @@ export default function WorkspaceProjectsScreen() {
               returnKeyType="next"
             />
 
+            <Text style={styles.fieldLabel}>Budget</Text>
+            <View style={styles.chipRow}>
+              {JOB_LISTING_BUDGET_TYPES.map((b) => {
+                const sel = budgetType === b.id
+                return (
+                  <TouchableOpacity
+                    key={b.id}
+                    style={[styles.chip, sel && styles.chipSelected]}
+                    onPress={() => setBudgetType(b.id)}
+                  >
+                    <Text style={[styles.chipText, sel && styles.chipTextSelected]}>{b.label}</Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+            {budgetType !== 'negotiable' ? (
+              <>
+                <Text style={styles.fieldLabel}>Currency (ISO)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={budgetCurrency}
+                  onChangeText={(x) => setBudgetCurrency(x.toUpperCase().replace(/[^A-Za-z]/g, '').slice(0, 3))}
+                  placeholder="EUR"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  autoCapitalize="characters"
+                  maxLength={3}
+                />
+                <Text style={styles.fieldLabel}>{budgetType === 'day_rate' ? 'Day rate' : 'Fixed budget'}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={budgetAmount}
+                  onChangeText={setBudgetAmount}
+                  placeholder="e.g. 1200"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  keyboardType="decimal-pad"
+                />
+              </>
+            ) : null}
+
             <Text style={styles.fieldLabel}>Notes (optional)</Text>
             <TextInput
               style={[styles.input, styles.inputTall]}
@@ -640,7 +706,7 @@ export default function WorkspaceProjectsScreen() {
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnGhost]}
-                onPress={() => setCreateOpen(false)}
+                onPress={() => { setCreateOpen(false); resetCreateForm() }}
                 disabled={creating}
               >
                 <Text style={styles.modalBtnGhostText}>Cancel</Text>
@@ -906,6 +972,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   inputTall: { minHeight: 110 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: '#1c1c1c',
+  },
+  chipSelected: {
+    borderColor: 'rgba(255,220,0,0.45)',
+    backgroundColor: 'rgba(255,220,0,0.1)',
+  },
+  chipText: { color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: '700' },
+  chipTextSelected: { color: '#FFDC00' },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
   modalBtn: {
     flex: 1,

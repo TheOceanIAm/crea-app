@@ -1,10 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ensureSoloWorkspaceProjectRow } from '@/lib/ensureSoloWorkspaceProject'
+import type { JobListingBudgetType } from '@/lib/jobListingBudget'
 
 export type CreatePrivateWorkspaceProjectInput = {
   title: string
   notes?: string
   clientLabel?: string
+  budget_type?: JobListingBudgetType
+  budget_amount?: number | null
+  budget_currency?: string
 }
 
 export type CreatePrivateWorkspaceProjectResult =
@@ -25,6 +29,9 @@ export async function createPrivateWorkspaceProject(
 
   const notes = (input.notes ?? '').trim()
   const clientLabel = (input.clientLabel ?? '').trim()
+  const budgetType = input.budget_type ?? 'negotiable'
+  const budgetCurrency = (input.budget_currency ?? 'EUR').trim().toUpperCase() || 'EUR'
+  const budgetAmount = budgetType === 'negotiable' ? null : (input.budget_amount ?? null)
   const description =
     notes ||
     'Private workspace — add a brief, milestones, and files in the project workspace.'
@@ -38,8 +45,9 @@ export async function createPrivateWorkspaceProject(
       location: 'Remote',
       location_type: 'Remote',
       location_geo: null,
-      budget_type: 'negotiable',
-      budget_amount: null,
+      budget_type: budgetType,
+      budget_amount: budgetAmount,
+      budget_currency: budgetCurrency,
       budget_max: null,
       description,
       skills: [],

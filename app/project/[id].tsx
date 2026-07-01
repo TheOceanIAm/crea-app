@@ -38,6 +38,7 @@ import { ProductionTab } from '@/app/components/project/[projectId]/ProductionTa
 import { ProjectOverviewAbout } from '@/components/project/ProjectOverviewAbout'
 import { ProjectOverviewProductionWindow } from '@/components/project/ProjectOverviewProductionWindow'
 import { BriefAiFormattedOutput } from '@/components/project/BriefAiFormattedOutput'
+import { countProjectCrewMembers, crewMembersSubLabel } from '@/lib/projectCrewCount'
 import { formatProjectBudgetLine } from '@/lib/budgetFormatting'
 import {
   PROJECT_STATUS_PILL,
@@ -196,7 +197,8 @@ export default function ProjectWorkspaceScreen() {
   const [productionWeatherEnabled, setProductionWeatherEnabled] = useState(false)
   const [sunPlannerLockedHint, setSunPlannerLockedHint] = useState<string | null>(null)
   const [productionWeatherLockedHint, setProductionWeatherLockedHint] = useState<string | null>(null)
-  const [applicants, setApplicants] = useState(0)
+  const [isPrivateWorkspace, setIsPrivateWorkspace] = useState(false)
+  const [pipelineStatCount, setPipelineStatCount] = useState(0)
   const [tab, setTab] = useState<TabId>('overview')
   const [tool, setTool] = useState<string>('tasks')
   const [briefText, setBriefText] = useState('')
@@ -220,19 +222,27 @@ export default function ProjectWorkspaceScreen() {
   const refreshProjectCounts = useCallback(async () => {
     if (!project?.id) return
     const companyOwnsProject = Boolean(userId && project.company_id === userId)
-    const [{ data: next }, applicantsRes] = await Promise.all([
+    const [{ data: next }, jobRow] = await Promise.all([
       supabase
         .from('projects')
         .select('milestones_completed, milestones_total')
         .eq('id', project.id)
         .maybeSingle(),
-      companyOwnsProject && project.job_id
+      project.job_id
         ? supabase
-            .from('job_applications')
-            .select('*', { count: 'exact', head: true })
-            .eq('job_id', project.job_id)
-        : Promise.resolve({ count: 0 }),
+            .from('jobs')
+            .select('is_solo_workspace, company_id')
+            .eq('id', project.job_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
     ])
+    const soloPrivate = Boolean(
+      jobRow.data?.is_solo_workspace &&
+        userId &&
+        String(jobRow.data.company_id ?? '') === userId
+    )
+    setIsPrivateWorkspace(soloPrivate)
+
     if (next) {
       setProject((prev) =>
         prev
@@ -250,7 +260,20 @@ export default function ProjectWorkspaceScreen() {
           : prev
       )
     }
-    setApplicants(companyOwnsProject ? (applicantsRes.count ?? 0) : 0)
+
+    if (!companyOwnsProject || !project.job_id) {
+      setPipelineStatCount(0)
+      return
+    }
+    if (soloPrivate) {
+      setPipelineStatCount(await countProjectCrewMembers(supabase, project.id))
+      return
+    }
+    const { count } = await supabase
+      .from('job_applications')
+      .select('*', { count: 'exact', head: true })
+      .eq('job_id', project.job_id)
+    setPipelineStatCount(count ?? 0)
   }, [project?.id, project?.job_id, project?.company_id, userId])
 
   const load = useCallback(async () => {
@@ -354,17 +377,17 @@ export default function ProjectWorkspaceScreen() {
 
     const viewerIsCompanyOnProject = p.company_id === user.id
 
-    const [{ data: jobPhase }, applicantsRes] = await Promise.all([
-      p.job_id
-        ? supabase.from('jobs').select('project_status, description').eq('id', p.job_id).maybeSingle()
-        : Promise.resolve({ data: null }),
-      viewerIsCompanyOnProject && p.job_id
-        ? supabase
-            .from('job_applications')
-            .select('*', { count: 'exact', head: true })
-            .eq('job_id', p.job_id)
-        : Promise.resolve({ count: 0 }),
-    ])
+    const { data: jobPhase } = p.job_id
+      ? await supabase
+          .from('jobs')
+          .select('project_status, description, is_solo_workspace, company_id')
+          .eq('id', p.job_id)
+          .maybeSingle()
+      : { data: null }
+    const soloPrivate = Boolean(
+      jobPhase?.is_solo_workspace && String(jobPhase.company_id ?? '') === user.id
+    )
+    setIsPrivateWorkspace(soloPrivate)
     let mergedStatus = (p.status || 'active').trim() || 'active'
     const ps =
       jobPhase && typeof (jobPhase as { project_status?: string | null }).project_status === 'string'
@@ -424,7 +447,19 @@ export default function ProjectWorkspaceScreen() {
     setScheduleEnd(typeof p.scheduling_end_date === 'string' ? p.scheduling_end_date.slice(0, 10) : '')
     setForbidden(false)
 
-    setApplicants(viewerIsCompanyOnProject ? (applicantsRes.count ?? 0) : 0)
+    if (viewerIsCompanyOnProject && p.job_id) {
+      if (soloPrivate) {
+        setPipelineStatCount(await countProjectCrewMembers(supabase, p.id))
+      } else {
+        const { count } = await supabase
+          .from('job_applications')
+          .select('*', { count: 'exact', head: true })
+          .eq('job_id', p.job_id)
+        setPipelineStatCount(count ?? 0)
+      }
+    } else {
+      setPipelineStatCount(0)
+    }
 
     setLoading(false)
     return { hasJob: Boolean(p.job_id) }
@@ -437,6 +472,11 @@ export default function ProjectWorkspaceScreen() {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    if (tab === 'overview') void refreshProjectCounts()
+  }, [tab, refreshProjectCounts])
+
 
   useEffect(() => {
     if (!project) return
@@ -944,9 +984,11 @@ export default function ProjectWorkspaceScreen() {
     <View style={styles.statsRow}>
       {viewerIsCompanyOnProject && project.job_id ? (
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Applicants</Text>
-          <Text style={styles.statValue}>{applicants}</Text>
-          <Text style={styles.statSub}>in crew pipeline</Text>
+          <Text style={styles.statLabel}>{isPrivateWorkspace ? 'Crew' : 'Applicants'}</Text>
+          <Text style={styles.statValue}>{pipelineStatCount}</Text>
+          <Text style={styles.statSub}>
+            {isPrivateWorkspace ? crewMembersSubLabel(pipelineStatCount) : 'in crew pipeline'}
+          </Text>
         </View>
       ) : null}
       <View style={styles.statCard}>
