@@ -149,9 +149,9 @@ export function DashboardOverviewSection({
       onPress: () => void
     }[] = [
       {
-        label: 'All users',
+        label: 'Platform users',
         value: String(snap.all_users),
-        sub: 'With login',
+        sub: 'Freelancers + companies',
         Icon: Users,
         onPress: () => router.push('/(tabs)/ceo-users' as Href),
       },

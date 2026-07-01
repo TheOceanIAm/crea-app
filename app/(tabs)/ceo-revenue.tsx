@@ -14,189 +14,51 @@ import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { useCeoAccess } from '@/lib/useCeoAccess'
-import { money } from '@/lib/invoiceFormatting'
+import {
+  COMPANY_PLAN_PRICE_EUR,
+  FREELANCER_PLAN_PRICE_EUR,
+} from '@/lib/planCatalogPrices'
+import {
+  computeCeoMrrTotals,
+  formatCeoMrr,
+  loadCeoMrrCounts,
+  type CeoMrrTotals,
+} from '@/lib/ceoPlatformMetrics'
 
-type TierBreakdown = { gross: number; net: number; count: number }
+type PlanRow = { label: string; count: number; price: number }
 
-type AudienceRevenue = {
-  gross: number
-  net: number
-  count: number
-  by_tier: Record<string, TierBreakdown>
-}
-
-type SubSnap = {
-  ok: boolean
-  has_revenue_table: boolean
-  currency: string
-  gross_total: number
-  net_total: number
-  vat_total: number
-  entry_count: number
-  month_gross: number | null
-  month_net: number | null
-  by_audience: Record<string, AudienceRevenue>
-  plan_distribution: Record<string, Record<string, number>>
-  hint?: string
-  error?: string
-}
-
-function parseTierBreakdown(raw: unknown): TierBreakdown {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { gross: 0, net: 0, count: 0 }
-  }
-  const o = raw as Record<string, unknown>
-  return {
-    gross: Number(o.gross) || 0,
-    net: Number(o.net) || 0,
-    count: Number(o.count) || 0,
-  }
-}
-
-function parseAudienceRevenue(raw: unknown): AudienceRevenue | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const o = raw as Record<string, unknown>
-  const by: Record<string, TierBreakdown> = {}
-  if (o.by_tier && typeof o.by_tier === 'object' && !Array.isArray(o.by_tier)) {
-    for (const [k, v] of Object.entries(o.by_tier as Record<string, unknown>)) {
-      by[k] = parseTierBreakdown(v)
-    }
-  }
-  return {
-    gross: Number(o.gross) || 0,
-    net: Number(o.net) || 0,
-    count: Number(o.count) || 0,
-    by_tier: by,
-  }
-}
-
-function parsePlanDistribution(raw: unknown): Record<string, Record<string, number>> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
-  const out: Record<string, Record<string, number>> = {}
-  for (const [aud, tiers] of Object.entries(raw as Record<string, unknown>)) {
-    if (!tiers || typeof tiers !== 'object' || Array.isArray(tiers)) continue
-    const inner: Record<string, number> = {}
-    for (const [tier, cnt] of Object.entries(tiers as Record<string, unknown>)) {
-      inner[tier] = Number(cnt) || 0
-    }
-    out[aud] = inner
-  }
-  return out
-}
-
-function parseSubSnap(raw: unknown): SubSnap {
-  const empty: SubSnap = {
-    ok: false,
-    has_revenue_table: false,
-    currency: 'EUR',
-    gross_total: 0,
-    net_total: 0,
-    vat_total: 0,
-    entry_count: 0,
-    month_gross: null,
-    month_net: null,
-    by_audience: {},
-    plan_distribution: {},
-  }
-  if (!raw || typeof raw !== 'object') return empty
-  const o = raw as Record<string, unknown>
-  const by: Record<string, AudienceRevenue> = {}
-  if (o.by_audience && typeof o.by_audience === 'object' && !Array.isArray(o.by_audience)) {
-    for (const [k, v] of Object.entries(o.by_audience as Record<string, unknown>)) {
-      const ar = parseAudienceRevenue(v)
-      if (ar) by[k] = ar
-    }
-  }
-  const mg = o.month_gross
-  const mn = o.month_net
-  return {
-    ok: o.ok === true,
-    has_revenue_table: o.has_revenue_table === true,
-    currency: String(o.currency || 'EUR'),
-    gross_total: Number(o.gross_total) || 0,
-    net_total: Number(o.net_total) || 0,
-    vat_total: Number(o.vat_total) || 0,
-    entry_count: Number(o.entry_count) || 0,
-    month_gross: mg === null || mg === undefined ? null : Number(mg),
-    month_net: mn === null || mn === undefined ? null : Number(mn),
-    by_audience: by,
-    plan_distribution: parsePlanDistribution(o.plan_distribution),
-    hint: typeof o.hint === 'string' ? o.hint : undefined,
-    error: typeof o.error === 'string' ? o.error : undefined,
-  }
-}
-
-function tierSortKey(t: string) {
-  const order = ['starter', 'pro', 'premium']
-  const i = order.indexOf(t.toLowerCase())
-  return i >= 0 ? i : 99
-}
-
-function AudienceBlock({
-  label,
-  data,
-  plans,
-  currency,
+function PlanBreakdown({
+  title,
+  rows,
+  subtotal,
 }: {
-  label: string
-  data: AudienceRevenue | undefined
-  plans: Record<string, number> | undefined
-  currency: string
+  title: string
+  rows: PlanRow[]
+  subtotal: number
 }) {
-  const tiers = useMemo(() => {
-    const keys = new Set<string>()
-    if (data?.by_tier) {
-      for (const k of Object.keys(data.by_tier)) keys.add(k)
-    }
-    if (plans) {
-      for (const k of Object.keys(plans)) keys.add(k)
-    }
-    return Array.from(keys).sort((a, b) => tierSortKey(a) - tierSortKey(b) || a.localeCompare(b))
-  }, [data?.by_tier, plans])
-
-  const gross = data?.gross ?? 0
-  const net = data?.net ?? 0
-  const booked = data?.count ?? 0
-
   return (
-    <View style={styles.audienceCard}>
-      <Text style={styles.audienceTitle}>{label}</Text>
-      <View style={styles.audienceTotals}>
-        <View style={styles.audienceMetric}>
-          <Text style={styles.audienceMetricLabel}>Gross</Text>
-          <Text style={styles.audienceMetricValue}>{money(gross, currency)}</Text>
+    <View style={styles.breakdownCard}>
+      <Text style={styles.breakdownTitle}>{title}</Text>
+      {rows.map((row) => (
+        <View key={row.label} style={styles.planRow}>
+          <View style={styles.planLeft}>
+            <Text style={styles.planLabel}>{row.label}</Text>
+            <Text style={styles.planPrice}>
+              {row.price > 0 ? `${formatCeoMrr(row.price)}/mo` : 'Free (€0)'}
+            </Text>
+          </View>
+          <View style={styles.planRight}>
+            <Text style={styles.planUsers}>{row.count} users</Text>
+            <Text style={styles.planRev}>
+              {row.price > 0 ? formatCeoMrr(row.count * row.price) : '—'}
+            </Text>
+          </View>
         </View>
-        <View style={styles.audienceMetric}>
-          <Text style={styles.audienceMetricLabel}>Net</Text>
-          <Text style={styles.audienceMetricValue}>{money(net, currency)}</Text>
-        </View>
+      ))}
+      <View style={styles.subtotalRow}>
+        <Text style={styles.subtotalLabel}>Subtotal (paid tiers)</Text>
+        <Text style={styles.subtotalValue}>{formatCeoMrr(subtotal)}/mo</Text>
       </View>
-      {booked > 0 ? (
-        <Text style={styles.bookedLine}>{booked} booked payment{booked === 1 ? '' : 's'}</Text>
-      ) : null}
-
-      {tiers.length > 0 ? (
-        <>
-          <Text style={styles.tierSectionLabel}>By plan tier</Text>
-          {tiers.map((tier) => {
-            const rev = data?.by_tier?.[tier]
-            const seats = plans?.[tier] ?? 0
-            return (
-              <View key={tier} style={styles.tierRow}>
-                <Text style={styles.tierName}>{tier}</Text>
-                <View style={styles.tierRight}>
-                  <Text style={styles.tierMoney}>
-                    {rev ? `${money(rev.gross, currency)} gross · ${money(rev.net, currency)} net` : '—'}
-                  </Text>
-                  {seats > 0 ? (
-                    <Text style={styles.tierSeats}>{seats} active profile{seats === 1 ? '' : 's'}</Text>
-                  ) : null}
-                </View>
-              </View>
-            )
-          })}
-        </>
-      ) : null}
     </View>
   )
 }
@@ -205,7 +67,7 @@ export default function CeoRevenueScreen() {
   const router = useRouter()
   const { ready, allowed } = useCeoAccess()
   const [loading, setLoading] = useState(true)
-  const [snap, setSnap] = useState<SubSnap | null>(null)
+  const [mrr, setMrr] = useState<CeoMrrTotals | null>(null)
   const [hint, setHint] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -215,21 +77,15 @@ export default function CeoRevenueScreen() {
       if (isRefresh) setRefreshing(true)
       else setLoading(true)
       setHint(null)
-      const { data, error } = await supabase.rpc('ceo_subscription_revenue_snapshot')
+      try {
+        const counts = await loadCeoMrrCounts(supabase)
+        setMrr(computeCeoMrrTotals(counts))
+      } catch (e) {
+        setHint(e instanceof Error ? e.message : 'Could not load subscription data.')
+        setMrr(null)
+      }
       setLoading(false)
       setRefreshing(false)
-      if (error) {
-        setHint(error.message)
-        setSnap(null)
-        return
-      }
-      const s = parseSubSnap(data)
-      setSnap(s)
-      if (s.error === 'forbidden') {
-        setHint('Not allowed.')
-      } else if (s.hint && !s.has_revenue_table) {
-        setHint(s.hint)
-      }
     },
     [allowed]
   )
@@ -238,7 +94,25 @@ export default function CeoRevenueScreen() {
     if (ready && allowed) load()
   }, [ready, allowed, load])
 
-  const cur = snap?.currency ?? 'EUR'
+  const freelancerRows = useMemo<PlanRow[]>(
+    () => [
+      { label: 'Free', count: mrr?.freelancerFree ?? 0, price: 0 },
+      {
+        label: 'Pro',
+        count: mrr?.freelancerPro ?? 0,
+        price: FREELANCER_PLAN_PRICE_EUR.proMonthly,
+      },
+    ],
+    [mrr]
+  )
+
+  const companyRows = useMemo<PlanRow[]>(
+    () => [
+      { label: 'Free trial', count: mrr?.companyFree ?? 0, price: 0 },
+      { label: 'Pro', count: mrr?.companyPro ?? 0, price: COMPANY_PLAN_PRICE_EUR.proMonthly },
+    ],
+    [mrr]
+  )
 
   if (!ready) {
     return (
@@ -271,8 +145,11 @@ export default function CeoRevenueScreen() {
       </TouchableOpacity>
 
       <Text style={styles.kicker}>PLATFORM</Text>
-      <Text style={styles.title}>Subscription revenue</Text>
-      <Text style={styles.subtitle}>Subscription revenue: gross &amp; net, split by freelancer/company and plan.</Text>
+      <Text style={styles.title}>Monthly revenue</Text>
+      <Text style={styles.subtitle}>
+        Recurring revenue from live plan counts — same basis as the web CEO dashboard. Beta testers
+        are excluded.
+      </Text>
 
       {hint ? (
         <View style={styles.hintBox}>
@@ -280,7 +157,7 @@ export default function CeoRevenueScreen() {
         </View>
       ) : null}
 
-      {loading && !snap ? (
+      {loading && !mrr ? (
         <View style={styles.listPad}>
           <ActivityIndicator color="#FFDC00" />
         </View>
@@ -293,57 +170,44 @@ export default function CeoRevenueScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#FFDC00" />
         }
       >
-        {snap?.ok ? (
+        {mrr ? (
           <>
-            <View style={styles.heroCard}>
-              <Text style={styles.heroLabel}>Total gross (subscriptions)</Text>
-              <Text style={styles.heroValue}>{money(snap.gross_total, cur)}</Text>
-              <View style={styles.heroRow}>
-                <View>
-                  <Text style={styles.heroSmallLabel}>Net</Text>
-                  <Text style={styles.heroSmallValue}>{money(snap.net_total, cur)}</Text>
-                </View>
-                <View>
-                  <Text style={styles.heroSmallLabel}>VAT (gross − net)</Text>
-                  <Text style={styles.heroSmallValue}>{money(snap.vat_total, cur)}</Text>
-                </View>
+            <View style={styles.heroGrid}>
+              <View style={[styles.heroCard, styles.heroCardAccent]}>
+                <Text style={styles.heroLabel}>Total MRR</Text>
+                <Text style={styles.heroValue}>{formatCeoMrr(mrr.totalMrr)}</Text>
               </View>
-              {snap.has_revenue_table ? (
-                <Text style={styles.heroSub}>{snap.entry_count} line{snap.entry_count === 1 ? '' : 's'} in ledger</Text>
-              ) : (
-                <Text style={styles.heroSub}>No ledger rows yet — totals are zero.</Text>
-              )}
+              <View style={styles.heroCard}>
+                <Text style={styles.heroLabel}>Freelancer rev.</Text>
+                <Text style={styles.heroValueSm}>{formatCeoMrr(mrr.freelancerMrr)}</Text>
+              </View>
+              <View style={styles.heroCard}>
+                <Text style={styles.heroLabel}>Company rev.</Text>
+                <Text style={styles.heroValueSm}>{formatCeoMrr(mrr.companyMrr)}</Text>
+              </View>
+              <View style={styles.heroCard}>
+                <Text style={styles.heroLabel}>Active subs</Text>
+                <Text style={styles.heroValueSm}>{mrr.totalSubs}</Text>
+              </View>
             </View>
 
-            {snap.month_gross != null && snap.month_net != null && snap.has_revenue_table ? (
-              <View style={styles.monthCard}>
-                <Text style={styles.monthLabel}>This month (booked)</Text>
-                <Text style={styles.monthLine}>
-                  Gross {money(snap.month_gross, cur)} · Net {money(snap.month_net, cur)}
-                </Text>
-              </View>
-            ) : null}
-
-            <Text style={styles.sectionTitle}>By audience</Text>
-            <AudienceBlock
-              label="Freelancer"
-              data={snap.by_audience.freelancer}
-              plans={snap.plan_distribution.freelancer}
-              currency={cur}
+            <PlanBreakdown
+              title="Freelancer subscriptions"
+              rows={freelancerRows}
+              subtotal={mrr.freelancerMrr}
             />
-            <AudienceBlock
-              label="Company"
-              data={snap.by_audience.company}
-              plans={snap.plan_distribution.company}
-              currency={cur}
+            <PlanBreakdown
+              title="Company subscriptions"
+              rows={companyRows}
+              subtotal={mrr.companyMrr}
             />
 
-            <Text style={styles.sectionTitle}>About the numbers</Text>
             <View style={styles.infoCard}>
               <Text style={styles.infoText}>
-                Record each subscription payment in <Text style={styles.infoMono}>subscription_revenue_entries</Text>{' '}
-                (gross including VAT, net after VAT). Stripe webhooks or SQL inserts both work. Active plan counts come
-                from user profiles (<Text style={styles.infoMono}>subscription_tier</Text>).
+                Counts come from freelancer and company plan rows in Supabase. Pro MRR uses list
+                prices ({formatCeoMrr(FREELANCER_PLAN_PRICE_EUR.proMonthly)}/mo freelancer,{' '}
+                {formatCeoMrr(COMPANY_PLAN_PRICE_EUR.proMonthly)}/mo company). Beta invite accounts
+                are omitted from these totals.
               </Text>
             </View>
 
@@ -388,45 +252,27 @@ const styles = StyleSheet.create({
   hintText: { fontSize: 12, color: 'rgba(255,255,255,0.75)', lineHeight: 17 },
   listPad: { paddingVertical: 24 },
   scrollContent: { paddingBottom: 48 },
+  heroGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
   heroCard: {
+    width: '48%',
+    flexGrow: 1,
     backgroundColor: '#111',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 12,
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,220,0,0.22)',
+    borderColor: 'rgba(255,255,255,0.06)',
   },
+  heroCardAccent: { borderColor: 'rgba(255,220,0,0.22)' },
   heroLabel: {
     fontSize: 10,
     color: 'rgba(255,255,255,0.45)',
     textTransform: 'uppercase',
-    letterSpacing: 1.5,
-    marginBottom: 8,
+    letterSpacing: 1.2,
+    marginBottom: 6,
   },
   heroValue: { fontSize: 28, fontWeight: '900', color: '#FFDC00' },
-  heroRow: { flexDirection: 'row', gap: 24, marginTop: 16 },
-  heroSmallLabel: { fontSize: 10, color: 'rgba(255,255,255,0.38)', textTransform: 'uppercase', letterSpacing: 1 },
-  heroSmallValue: { fontSize: 16, fontWeight: '800', color: 'rgba(255,255,255,0.88)', marginTop: 4 },
-  heroSub: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 14 },
-  monthCard: {
-    backgroundColor: 'rgba(255,220,0,0.08)',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,220,0,0.2)',
-  },
-  monthLabel: { fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: '600', marginBottom: 6 },
-  monthLine: { fontSize: 15, fontWeight: '700', color: '#FFDC00' },
-  sectionTitle: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.4)',
-    textTransform: 'uppercase',
-    letterSpacing: 2,
-    marginBottom: 10,
-    marginTop: 8,
-  },
-  audienceCard: {
+  heroValueSm: { fontSize: 22, fontWeight: '800', color: '#ffffff' },
+  breakdownCard: {
     backgroundColor: '#111',
     borderRadius: 14,
     padding: 16,
@@ -434,33 +280,40 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
   },
-  audienceTitle: { fontSize: 16, fontWeight: '800', color: '#ffffff', marginBottom: 12 },
-  audienceTotals: { flexDirection: 'row', gap: 20 },
-  audienceMetric: { flex: 1 },
-  audienceMetricLabel: { fontSize: 10, color: 'rgba(255,255,255,0.38)', textTransform: 'uppercase', letterSpacing: 1 },
-  audienceMetricValue: { fontSize: 18, fontWeight: '800', color: '#FFDC00', marginTop: 4 },
-  bookedLine: { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 10 },
-  tierSectionLabel: {
-    fontSize: 10,
-    color: 'rgba(255,255,255,0.35)',
+  breakdownTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.45)',
     textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    marginTop: 16,
-    marginBottom: 8,
+    letterSpacing: 1.5,
+    marginBottom: 12,
   },
-  tierRow: {
+  planRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: 12,
     paddingVertical: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.06)',
-    gap: 12,
   },
-  tierName: { fontSize: 14, fontWeight: '700', color: 'rgba(255,255,255,0.85)', textTransform: 'capitalize' },
-  tierRight: { flex: 1, alignItems: 'flex-end' },
-  tierMoney: { fontSize: 12, color: 'rgba(255,255,255,0.55)', textAlign: 'right' },
-  tierSeats: { fontSize: 11, color: 'rgba(255,255,255,0.32)', marginTop: 4, textAlign: 'right' },
+  planLeft: { flex: 1, minWidth: 0 },
+  planLabel: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.85)' },
+  planPrice: { fontSize: 11, color: 'rgba(255,255,255,0.32)', marginTop: 3 },
+  planRight: { alignItems: 'flex-end' },
+  planUsers: { fontSize: 12, color: 'rgba(255,255,255,0.35)' },
+  planRev: { fontSize: 14, fontWeight: '800', color: '#ffffff', marginTop: 4 },
+  subtotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  subtotalLabel: { fontSize: 12, color: 'rgba(255,255,255,0.4)' },
+  subtotalValue: { fontSize: 14, fontWeight: '800', color: '#FFDC00' },
   infoCard: {
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: 12,
@@ -470,7 +323,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   infoText: { fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 18 },
-  infoMono: { fontSize: 11, color: 'rgba(255,220,0,0.7)', fontWeight: '600' },
   linkOut: { paddingVertical: 14, marginBottom: 8 },
   linkOutText: { fontSize: 14, fontWeight: '600', color: '#FFDC00' },
   empty: { color: 'rgba(255,255,255,0.35)', fontSize: 14, textAlign: 'center', marginTop: 24 },

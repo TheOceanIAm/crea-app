@@ -34,10 +34,12 @@ begin
             u.created_at as sort_ts
           from public.profiles pr
           inner join auth.users u on u.id = pr.id
-          where
+          where public._ceo_is_platform_profile(pr.id, pr.role::text, pr.beta_invite)
+            and (
             q = ''
             or pr.name ilike '%' || q || '%'
             or u.email::text ilike '%' || q || '%'
+            )
           order by u.created_at desc
           limit lim
         ) x
@@ -82,6 +84,7 @@ begin
           from public.profiles pr
           inner join auth.users u on u.id = pr.id
           where lower(trim(coalesce(pr.role, ''))) = 'company'
+            and coalesce(pr.beta_invite, false) = false
             and (
               q = ''
               or pr.name ilike '%' || q || '%'

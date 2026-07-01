@@ -25,6 +25,92 @@ $$;
 revoke all on function public._ceo_is_caller() from public;
 
 -- ---------------------------------------------------------------------------
+-- Live MRR counts (matches crea-services CEO dashboard — excludes beta testers)
+-- ---------------------------------------------------------------------------
+create or replace function public._ceo_normalize_freelancer_plan(raw text)
+returns text
+language sql
+immutable
+as $$
+  select case
+    when lower(trim(coalesce(raw, ''))) in ('pro', 'premium') then 'pro'
+    else 'free'
+  end;
+$$;
+
+create or replace function public._ceo_normalize_company_plan(raw text)
+returns text
+language sql
+immutable
+as $$
+  select case
+    when lower(trim(coalesce(raw, ''))) in ('pro', 'agency', 'business', 'enterprise', 'professional') then 'pro'
+    else 'free'
+  end;
+$$;
+
+create or replace function public.ceo_mrr_snapshot()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+stable
+as $$
+declare
+  freelancer_free int := 0;
+  freelancer_pro int := 0;
+  company_free int := 0;
+  company_pro int := 0;
+  r record;
+begin
+  if not public._ceo_is_caller() then
+    return jsonb_build_object('ok', false, 'error', 'forbidden');
+  end if;
+
+  for r in
+    select fp.id, public._ceo_normalize_freelancer_plan(fp.plan_tier::text) as tier
+    from public.freelancer_profiles fp
+    left join public.profiles p on p.id = fp.id
+    where coalesce(p.beta_invite, false) = false
+      and fp.id not in (
+        '168f1204-bb53-4aba-95b6-5f94ccb6f197'::uuid,
+        '9be43cb1-0842-491b-8574-fba23079f16c'::uuid
+      )
+  loop
+    if r.tier = 'pro' then
+      freelancer_pro := freelancer_pro + 1;
+    else
+      freelancer_free := freelancer_free + 1;
+    end if;
+  end loop;
+
+  for r in
+    select public._ceo_normalize_company_plan(cp.subscription_plan::text) as tier
+    from public.company_profiles cp
+    left join public.profiles p on p.id = cp.id
+    where coalesce(p.beta_invite, false) = false
+  loop
+    if r.tier = 'pro' then
+      company_pro := company_pro + 1;
+    else
+      company_free := company_free + 1;
+    end if;
+  end loop;
+
+  return jsonb_build_object(
+    'ok', true,
+    'freelancerFree', freelancer_free,
+    'freelancerPro', freelancer_pro,
+    'companyFree', company_free,
+    'companyPro', company_pro
+  );
+end;
+$$;
+
+revoke all on function public.ceo_mrr_snapshot() from public;
+grant execute on function public.ceo_mrr_snapshot() to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- All profiles (search by name or email server-side; login email never returned to clients)
 -- ---------------------------------------------------------------------------
 create or replace function public.ceo_list_users(p_search text default '', p_limit int default 120)
@@ -59,10 +145,12 @@ begin
             u.created_at as sort_ts
           from public.profiles pr
           inner join auth.users u on u.id = pr.id
-          where
+          where public._ceo_is_platform_profile(pr.id, pr.role::text, pr.beta_invite)
+            and (
             q = ''
             or pr.name ilike '%' || q || '%'
             or u.email::text ilike '%' || q || '%'
+            )
           order by u.created_at desc
           limit lim
         ) x
@@ -113,6 +201,7 @@ begin
           from public.profiles pr
           inner join auth.users u on u.id = pr.id
           where lower(trim(coalesce(pr.role, ''))) = 'company'
+            and coalesce(pr.beta_invite, false) = false
             and (
               q = ''
               or pr.name ilike '%' || q || '%'

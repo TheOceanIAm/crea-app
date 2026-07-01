@@ -28,6 +28,7 @@ import {
 import { isCompanyPro } from '@/lib/company-plan'
 import { getCache, setCache } from '@/lib/appCache'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
+import { loadCeoPlatformUserStats } from '@/lib/ceoPlatformMetrics'
 
 const DISK_OVERVIEW_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -247,11 +248,22 @@ export async function loadDashboardOverview(
   }
 
   if (isCeoProfile(resolvedRole)) {
-    const { data: ceoData, error: ceoErr } = await supabase.rpc('ceo_dashboard_snapshot')
-    if (ceoErr) {
-      return { ...base, ceoRpcError: ceoErr.message, ceoSnap: null }
+    const [{ data: ceoData, error: ceoErr }, platformUsers] = await Promise.all([
+      supabase.rpc('ceo_dashboard_snapshot'),
+      loadCeoPlatformUserStats(supabase),
+    ])
+    const rpcSnap = parseCeoSnapshot(ceoData)
+    const ceoSnap: CeoSnapshot = {
+      ok: true,
+      all_users: platformUsers.allUsers,
+      new_users: platformUsers.newUsers,
+      active_jobs: rpcSnap.active_jobs,
+      completed_jobs: rpcSnap.completed_jobs,
     }
-    return { ...base, ceoSnap: parseCeoSnapshot(ceoData), ceoRpcError: null }
+    if (ceoErr && !rpcSnap.ok) {
+      return { ...base, ceoRpcError: ceoErr.message, ceoSnap }
+    }
+    return { ...base, ceoSnap, ceoRpcError: null }
   }
 
   if (isCompanyProfile(resolvedRole)) {
