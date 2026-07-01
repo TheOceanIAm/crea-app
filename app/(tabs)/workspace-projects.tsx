@@ -194,7 +194,8 @@ export default function WorkspaceProjectsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void load()
+      // Always revalidate on focus so web deletes/archives show up without waiting on cache cooldown.
+      void load({ force: true })
     }, [load])
   )
 

@@ -19,6 +19,7 @@ import {
   sumBudgetLineSpent,
   type CrewSpendMemberRow,
 } from '@/lib/projectInternalBudget'
+import { syncProjectListingBudget } from '@/lib/syncProjectListingBudget'
 
 type BudgetPlanRow = {
   project_id: string
@@ -172,6 +173,15 @@ export function ProjectBudgetTab({ projectId }: Props) {
     setSavingPlan(false)
     if (error) {
       Alert.alert('Save failed', error.message)
+      return
+    }
+    const synced = await syncProjectListingBudget(supabase, projectId, {
+      total_budget: payload.total_budget,
+      currency: payload.currency,
+    })
+    if (!synced.ok) {
+      Alert.alert('Saved with warning', `Budget targets saved, but overview sync failed:\n${synced.error}`)
+      void load()
       return
     }
     Alert.alert('Saved', 'Budget targets updated.')

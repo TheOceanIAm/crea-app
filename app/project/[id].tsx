@@ -735,11 +735,28 @@ export default function ProjectWorkspaceScreen() {
         brief_ai_outputs: { ...prevOutputs, workspace_summary: nextSummary },
       })
       .eq('id', project.id)
-    setSavingOverview(false)
     if (error) {
+      setSavingOverview(false)
       Alert.alert('Save failed', error.message)
       return
     }
+    if (project.job_id) {
+      const budgetType = overviewBudgetType.trim() || (parsedBudget != null ? 'fixed' : 'negotiable')
+      const { error: jobBudgetErr } = await supabase
+        .from('jobs')
+        .update({
+          budget_amount: parsedBudget,
+          budget_type: budgetType,
+          budget_currency: project.budget_currency ?? 'EUR',
+        })
+        .eq('id', project.job_id)
+      if (jobBudgetErr) {
+        setSavingOverview(false)
+        Alert.alert('Partial save', `Overview saved, but job budget could not sync:\n${jobBudgetErr.message}`)
+        return
+      }
+    }
+    setSavingOverview(false)
     if (project.job_id && canEditProductionSchedule) {
       const { error: descErr } = await supabase
         .from('jobs')

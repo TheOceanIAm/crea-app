@@ -1,7 +1,7 @@
 import type { User } from '@supabase/supabase-js'
 import { getCache, setCache } from '@/lib/appCache'
 import { freelancerCustomerJobVisibleToFreelancer } from '@/lib/freelancerCustomerJobVisibility'
-import { formatBudgetDisplay } from '@/lib/budgetFormatting'
+import { formatBudgetDisplay, resolveListingBudgetFields } from '@/lib/budgetFormatting'
 import {
   canFreelancerCreatePrivateProjects,
   resolveFreelancerPlanFromUserAndProfileTier,
@@ -195,15 +195,47 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
       )
     }
 
+    const companyProjectIds = (companyProjects ?? []).map((pr) => String(pr.id))
+    let companyPlanByProjectId: Record<string, { total_budget: number | null; currency: string | null }> = {}
+    if (companyProjectIds.length > 0) {
+      const { data: planRows } = await supabase
+        .from('project_budget_plans')
+        .select('project_id, total_budget, currency')
+        .in('project_id', companyProjectIds)
+      companyPlanByProjectId = Object.fromEntries(
+        (planRows ?? []).map((row) => {
+          const projectId = String((row as { project_id: string }).project_id)
+          return [
+            projectId,
+            {
+              total_budget:
+                typeof (row as { total_budget?: number | null }).total_budget === 'number'
+                  ? (row as { total_budget: number }).total_budget
+                  : null,
+              currency:
+                typeof (row as { currency?: string | null }).currency === 'string'
+                  ? (row as { currency: string }).currency
+                  : null,
+            },
+          ]
+        })
+      )
+    }
+
     const builtCompany: ProjectListing[] = (companyProjects ?? []).map((pr) => {
       const archived = String(pr.status ?? '').toLowerCase() === 'archived'
       const jobId = typeof pr.job_id === 'string' ? pr.job_id : null
       const jobStatus = jobId ? jobStatusById[jobId] : null
-      const budgetLine = formatBudgetDisplay({
-        budget_type: String(pr.budget_type ?? 'negotiable'),
-        budget_amount: typeof pr.budget_amount === 'number' ? pr.budget_amount : null,
-        budget_currency: typeof pr.budget_currency === 'string' ? pr.budget_currency : null,
-      })
+      const plan = companyPlanByProjectId[String(pr.id)]
+      const budgetLine = formatBudgetDisplay(
+        resolveListingBudgetFields({
+          budget_type: String(pr.budget_type ?? 'negotiable'),
+          budget_amount: typeof pr.budget_amount === 'number' ? pr.budget_amount : null,
+          budget_currency: typeof pr.budget_currency === 'string' ? pr.budget_currency : null,
+          plan_total_budget: plan?.total_budget ?? null,
+          plan_currency: plan?.currency ?? null,
+        })
+      )
       return {
         id: String(pr.id),
         kind: 'private' as const,
@@ -325,6 +357,39 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
 
   const projectById = Object.fromEntries((projectRows ?? []).map((r) => [String(r.id), r]))
 
+  const budgetPlanProjectIds = [
+    ...new Set([
+      ...soloIds,
+      ...(projectRows ?? []).map((r) => String(r.id)),
+      ...Object.values(workspaceProjectIdByJobId),
+    ]),
+  ].filter(Boolean)
+  let budgetPlanByProjectId: Record<string, { total_budget: number | null; currency: string | null }> = {}
+  if (budgetPlanProjectIds.length > 0) {
+    const { data: planRows } = await supabase
+      .from('project_budget_plans')
+      .select('project_id, total_budget, currency')
+      .in('project_id', budgetPlanProjectIds)
+    budgetPlanByProjectId = Object.fromEntries(
+      (planRows ?? []).map((row) => {
+        const projectId = String((row as { project_id: string }).project_id)
+        return [
+          projectId,
+          {
+            total_budget:
+              typeof (row as { total_budget?: number | null }).total_budget === 'number'
+                ? (row as { total_budget: number }).total_budget
+                : null,
+            currency:
+              typeof (row as { currency?: string | null }).currency === 'string'
+                ? (row as { currency: string }).currency
+                : null,
+          },
+        ]
+      })
+    )
+  }
+
   const built: ProjectListing[] = []
   for (const jid of visibleJobIds) {
     const job = jobsById[jid]
@@ -332,11 +397,17 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
     if (!freelancerCustomerJobVisibleToFreelancer(job, user.id)) continue
 
     const isSolo = Boolean(job.is_solo_workspace) && job.company_id === user.id
-    const budgetLine = formatBudgetDisplay({
-      budget_type: String(job.budget_type ?? 'negotiable'),
-      budget_amount: job.budget_amount,
-      budget_currency: job.budget_currency,
-    })
+    const listingProjectId = workspaceProjectIdByJobId[jid] ?? jid
+    const plan = budgetPlanByProjectId[listingProjectId] ?? budgetPlanByProjectId[jid]
+    const budgetLine = formatBudgetDisplay(
+      resolveListingBudgetFields({
+        budget_type: job.budget_type,
+        budget_amount: job.budget_amount,
+        budget_currency: job.budget_currency,
+        plan_total_budget: plan?.total_budget ?? null,
+        plan_currency: plan?.currency ?? null,
+      })
+    )
 
     const proj = projectById[jid]
     const updatedRaw = proj?.updated_at ?? job.updated_at ?? job.created_at ?? null
@@ -381,14 +452,24 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
   }
 
   const listedJobIds = new Set(built.map((b) => b.id))
+  const soloJobIdSet = new Set(soloIds)
   for (const pr of projectRows ?? []) {
     const pid = String(pr.id)
     if (listedJobIds.has(pid)) continue
-    const budgetLine = formatBudgetDisplay({
-      budget_type: String(pr.budget_type ?? 'negotiable'),
-      budget_amount: typeof pr.budget_amount === 'number' ? pr.budget_amount : null,
-      budget_currency: typeof pr.budget_currency === 'string' ? pr.budget_currency : null,
-    })
+    const linkId =
+      typeof pr.job_id === 'string' && pr.job_id.trim().length > 0 ? pr.job_id.trim() : pid
+    // Drop stale project mirrors after a web-side solo job delete (job gone, project row may linger).
+    if (!soloJobIdSet.has(linkId) && !soloJobIdSet.has(pid)) continue
+    const plan = budgetPlanByProjectId[pid]
+    const budgetLine = formatBudgetDisplay(
+      resolveListingBudgetFields({
+        budget_type: String(pr.budget_type ?? 'negotiable'),
+        budget_amount: typeof pr.budget_amount === 'number' ? pr.budget_amount : null,
+        budget_currency: typeof pr.budget_currency === 'string' ? pr.budget_currency : null,
+        plan_total_budget: plan?.total_budget ?? null,
+        plan_currency: plan?.currency ?? null,
+      })
+    )
     const archived = String(pr.status ?? '').toLowerCase() === 'archived'
     built.push({
       id: pid,

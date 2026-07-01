@@ -1,5 +1,38 @@
 import { money, toMoneyNumber } from '@/lib/invoiceFormatting'
 
+export function resolveListingBudgetFields(opts: {
+  budget_type?: string | null
+  budget_amount?: number | null
+  budget_currency?: string | null
+  plan_total_budget?: number | null
+  plan_currency?: string | null
+}): { budget_type: string; budget_amount: number | null; budget_currency: string } {
+  const listingType = String(opts.budget_type ?? 'negotiable').toLowerCase()
+  const listingAmt = toMoneyNumber(opts.budget_amount)
+  const hasListing =
+    listingAmt != null && listingAmt > 0 && listingType !== 'negotiable'
+  if (hasListing) {
+    return {
+      budget_type: listingType,
+      budget_amount: listingAmt,
+      budget_currency: (opts.budget_currency || 'EUR').toUpperCase(),
+    }
+  }
+  const planAmt = toMoneyNumber(opts.plan_total_budget)
+  if (planAmt != null && planAmt > 0) {
+    return {
+      budget_type: 'fixed',
+      budget_amount: planAmt,
+      budget_currency: (opts.plan_currency || opts.budget_currency || 'EUR').toUpperCase(),
+    }
+  }
+  return {
+    budget_type: listingType,
+    budget_amount: listingAmt,
+    budget_currency: (opts.budget_currency || 'EUR').toUpperCase(),
+  }
+}
+
 /** Job / project budget line for lists and detail — always includes currency via `money()`. */
 export function formatBudgetDisplay(opts: {
   budget_type: string
