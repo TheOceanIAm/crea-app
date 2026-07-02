@@ -71,6 +71,10 @@ function normalizeRateLabel(rate: string | null): string | null {
     .replace(/\btagessatz\b/gi, 'day rate')
 }
 
+function externalJobRateLabel(rate: string | null | undefined): string {
+  return normalizeRateLabel(rate ?? null) || 'Rate TBD'
+}
+
 function isCreaJobItem(item: Job | ExternalJob): item is Job {
   return 'company_name' in item
 }
@@ -507,51 +511,101 @@ export default function JobsListScreen() {
       <Modal visible={!!activeExternalJob} transparent animationType="fade" onRequestClose={() => setActiveExternalJob(null)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalKicker}>View contact</Text>
-            <Text style={styles.modalTitle}>{activeExternalJob?.title}</Text>
-            <Text style={styles.modalSub}>{activeExternalJob?.company}</Text>
-            <View style={styles.modalContactCard}>
-              <Text style={styles.modalContactLabel}>Contact</Text>
-              <Text style={styles.modalContactName}>{activeExternalJob?.contact_name || 'n/a'}</Text>
-              {activeExternalJob?.contact_email ? (
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => openExternalUrl(`mailto:${activeExternalJob.contact_email!.trim()}`, 'Email')}
-                >
-                  <Text style={styles.modalContactMail}>{activeExternalJob.contact_email}</Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={styles.modalContactMuted}>No email available</Text>
-              )}
-              {(() => {
-                const linkedIn = linkedinUrl(activeExternalJob?.contact_linkedin ?? '')
-                const instagram = instagramUrl(activeExternalJob?.contact_instagram ?? '')
-                if (!linkedIn && !instagram) return null
-                return (
-                  <View style={styles.modalContactLinksRow}>
-                    {linkedIn ? (
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => openExternalUrl(linkedIn, 'LinkedIn')}
-                      >
-                        <Text style={styles.modalContactLink}>LinkedIn</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                    {instagram ? (
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => openExternalUrl(instagram, 'Instagram')}
-                      >
-                        <Text style={styles.modalContactLink}>Instagram</Text>
-                      </TouchableOpacity>
-                    ) : null}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.modalScrollContent}
+            >
+              <Text style={styles.modalKicker}>View contact</Text>
+              <Text style={styles.modalTitle}>{activeExternalJob?.title}</Text>
+              <Text style={styles.modalSub}>{activeExternalJob?.company}</Text>
+
+              <View style={styles.modalDetailsCard}>
+                <Text style={styles.modalContactLabel}>Job details</Text>
+                <View style={styles.modalDetailRow}>
+                  <Text style={styles.modalDetailLabel}>Budget</Text>
+                  <Text style={styles.modalDetailValueHighlight}>
+                    {externalJobRateLabel(activeExternalJob?.rate)}
+                  </Text>
+                </View>
+                {activeExternalJob?.role ? (
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalDetailLabel}>Role</Text>
+                    <Text style={styles.modalDetailValue}>{activeExternalJob.role}</Text>
                   </View>
-                )
-              })()}
-            </View>
-            <Text style={styles.modalIntel}>
-              {(activeExternalJob?.intel_brief ?? '').trim() || 'No intel brief available yet.'}
-            </Text>
+                ) : null}
+                {activeExternalJob?.location ? (
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalDetailLabel}>Location</Text>
+                    <Text style={styles.modalDetailValue}>{activeExternalJob.location}</Text>
+                  </View>
+                ) : null}
+                {activeExternalJob?.region ? (
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalDetailLabel}>Region</Text>
+                    <Text style={styles.modalDetailValue}>{activeExternalJob.region}</Text>
+                  </View>
+                ) : null}
+                {activeExternalJob?.needed_when ? (
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalDetailLabel}>Needed when</Text>
+                    <Text style={styles.modalDetailValue}>{activeExternalJob.needed_when}</Text>
+                  </View>
+                ) : null}
+                {activeExternalJob?.source_platform ? (
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalDetailLabel}>Source</Text>
+                    <Text style={styles.modalDetailValue}>{activeExternalJob.source_platform}</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              <View style={styles.modalContactCard}>
+                <Text style={styles.modalContactLabel}>Contact</Text>
+                <Text style={styles.modalContactName}>{activeExternalJob?.contact_name || 'n/a'}</Text>
+                {activeExternalJob?.contact_email ? (
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => openExternalUrl(`mailto:${activeExternalJob.contact_email!.trim()}`, 'Email')}
+                  >
+                    <Text style={styles.modalContactMail}>{activeExternalJob.contact_email}</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.modalContactMuted}>No email available</Text>
+                )}
+                {(() => {
+                  const linkedIn = linkedinUrl(activeExternalJob?.contact_linkedin ?? '')
+                  const instagram = instagramUrl(activeExternalJob?.contact_instagram ?? '')
+                  if (!linkedIn && !instagram) return null
+                  return (
+                    <View style={styles.modalContactLinksRow}>
+                      {linkedIn ? (
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          onPress={() => openExternalUrl(linkedIn, 'LinkedIn')}
+                        >
+                          <Text style={styles.modalContactLink}>LinkedIn</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {instagram ? (
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          onPress={() => openExternalUrl(instagram, 'Instagram')}
+                        >
+                          <Text style={styles.modalContactLink}>Instagram</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  )
+                })()}
+              </View>
+              <View style={styles.modalIntelCard}>
+                <Text style={styles.modalContactLabel}>Intel brief</Text>
+                <Text style={styles.modalIntel}>
+                  {(activeExternalJob?.intel_brief ?? '').trim() || 'No intel brief available yet.'}
+                </Text>
+              </View>
+            </ScrollView>
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.modalGhost} onPress={() => setActiveExternalJob(null)} activeOpacity={0.85}>
                 <Text style={styles.modalGhostText}>Close</Text>
@@ -931,6 +985,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
     padding: 16,
+    maxHeight: '88%',
+  },
+  modalScrollContent: {
+    paddingBottom: 4,
   },
   modalKicker: {
     color: '#FFDC00',
@@ -950,10 +1008,51 @@ const styles = StyleSheet.create({
     marginTop: 2,
     marginBottom: 10,
   },
+  modalDetailsCard: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    gap: 8,
+  },
+  modalDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  modalDetailLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    flexShrink: 0,
+  },
+  modalDetailValue: {
+    fontSize: 13,
+    color: '#fff',
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'right',
+  },
+  modalDetailValueHighlight: {
+    fontSize: 13,
+    color: '#FFDC00',
+    fontWeight: '800',
+    flex: 1,
+    textAlign: 'right',
+  },
+  modalIntelCard: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
   modalIntel: {
     color: 'rgba(255,255,255,0.75)',
     lineHeight: 22,
-    marginBottom: 10,
   },
   modalContactCard: {
     borderWidth: 1,
