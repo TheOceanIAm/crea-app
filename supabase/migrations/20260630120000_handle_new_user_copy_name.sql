@@ -4,6 +4,8 @@
 -- so profiles.name stayed NULL and public freelancer/company profiles showed the
 -- "Freelancer" placeholder even though auth.users.raw_user_meta_data->>'name'
 -- (the Supabase "Display name") was set at signup.
+--
+-- Merges with 20260530140000_platform_trial_30_days: keep 30-day trial on insert.
 
 create or replace function public.handle_new_user_profile()
 returns trigger
@@ -35,8 +37,16 @@ begin
     ''
   )), '');
 
-  insert into public.profiles (id, email, role, beta_invite, name)
-  values (new.id, new.email, r, beta, nm)
+  insert into public.profiles (id, email, role, beta_invite, name, trial_started_at, trial_ends_at)
+  values (
+    new.id,
+    new.email,
+    r,
+    beta,
+    nm,
+    now(),
+    now() + interval '30 days'
+  )
   on conflict (id) do update set
     email = excluded.email,
     role = excluded.role,
@@ -49,7 +59,7 @@ end;
 $$;
 
 comment on function public.handle_new_user_profile() is
-  'Inserts/updates public.profiles on auth.users insert, including the signup display name.';
+  'Inserts/updates public.profiles on auth.users insert: signup display name + 30-day platform trial.';
 
 -- One-time backfill: fill missing profiles.name from auth metadata.
 update public.profiles p

@@ -13,6 +13,8 @@ import {
 } from '@/lib/freelancerPlan'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { supabase } from '@/lib/supabase'
+import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
+import { isFreelancerProPlanTier } from '@/lib/freelancerPlan'
 
 type TalentRow = {
   id: string
@@ -22,6 +24,7 @@ type TalentRow = {
   avatarUrl: string | null
   role: string | null
   skills: string[]
+  isPro: boolean
 }
 
 type Folder = { id: string; name: string; profileIds: string[] }
@@ -73,7 +76,7 @@ async function loadProfilesForTalentIds(ids: string[]) {
   if (!ids.length) return { profiles: [] as Array<Record<string, unknown>>, error: null as string | null }
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, name, headline, location, avatar_url, role, skills')
+    .select('id, name, email, headline, location, avatar_url, role, skills')
     .in('id', ids)
     .neq('role', 'company')
     .neq('role', 'ceo')
@@ -83,7 +86,7 @@ async function loadProfilesForTalentIds(ids: string[]) {
 }
 
 function buildTalentRows(
-  candidates: Array<{ id: string; location: string | null }>,
+  candidates: Array<{ id: string; location: string | null; plan_tier?: string | null }>,
   profilesOut: Array<Record<string, unknown>>
 ): TalentRow[] {
   const fpById = new Map(candidates.map((fp) => [fp.id, fp]))
@@ -99,12 +102,13 @@ function buildTalentRows(
       : []
     return {
       id,
-      name: String(r.name ?? '').trim() || 'Freelancer',
+      name: resolveProfileDisplayName(r.name as string | null, { email: r.email as string | null }),
       headline: String(r.headline ?? '').trim(),
       location: profileLoc || fpLoc,
       avatarUrl: url && /^https?:\/\//i.test(url) ? url : null,
       role: typeof r.role === 'string' ? r.role : null,
       skills,
+      isPro: isFreelancerProPlanTier(fp?.plan_tier),
     }
   })
 }

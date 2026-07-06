@@ -26,6 +26,8 @@ import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } f
 import { isFreelancerTalentPoolPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ResponsiveScreen } from '@/components/ResponsiveScreen'
+import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
+import { isFreelancerProPlanTier } from '@/lib/freelancerPlan'
 
 type TalentRow = {
   id: string
@@ -35,6 +37,7 @@ type TalentRow = {
   avatarUrl: string | null
   role: string | null
   skills: string[]
+  isPro: boolean
 }
 
 type FreelancerDirectoryRow = {
@@ -114,7 +117,7 @@ async function loadProfilesForTalentIds(ids: string[]) {
     chunks.map((chunk) =>
       supabase
         .from('profiles')
-        .select('id, name, headline, location, avatar_url, role, skills')
+        .select('id, name, email, headline, location, avatar_url, role, skills')
         .in('id', chunk)
         .neq('role', 'company')
         .neq('role', 'ceo')
@@ -149,12 +152,13 @@ function buildTalentRows(
       : []
     return {
       id,
-      name: String(r.name ?? '').trim() || 'Freelancer',
+      name: resolveProfileDisplayName(r.name as string | null, { email: r.email as string | null }),
       headline: String(r.headline ?? '').trim(),
       location: profileLoc || fpLoc,
       avatarUrl: url && /^https?:\/\//i.test(url) ? url : null,
       role: typeof r.role === 'string' ? r.role : null,
       skills,
+      isPro: isFreelancerProPlanTier(fp?.plan_tier),
     }
   })
 }
@@ -279,6 +283,7 @@ export default function TalentPoolScreen() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [skillsQuery, setSkillsQuery] = useState('')
   const [listFilter, setListFilter] = useState<'all' | 'favorites'>('all')
+  const [proOnly, setProOnly] = useState(false)
   const [meId, setMeId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const realtimeReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -435,6 +440,7 @@ export default function TalentPoolScreen() {
 
   const displayRows = useMemo(() => {
     let out = rows.filter((r) => rowMatchesSkillsQuery(r, skillsTokens))
+    if (proOnly) out = out.filter((r) => r.isPro)
     if (listFilter === 'favorites' && showFavoriteUi) {
       const set = new Set(favoriteProfileIds)
       out = out.filter((r) => set.has(r.id))
@@ -445,7 +451,7 @@ export default function TalentPoolScreen() {
       }
     }
     return out
-  }, [rows, skillsTokens, listFilter, favoriteProfileIds, showFavoriteUi, activeFolderId, folders])
+  }, [rows, skillsTokens, proOnly, listFilter, favoriteProfileIds, showFavoriteUi, activeFolderId, folders])
 
   const persistFolders = useCallback(
     async (nextFolders: Folder[]) => {
@@ -625,6 +631,12 @@ export default function TalentPoolScreen() {
                 <Text style={[styles.chipText, listFilter === 'favorites' && styles.chipTextOn]}>Favorites</Text>
               </TouchableOpacity>
             ) : null}
+            <TouchableOpacity
+              style={[styles.chip, proOnly && styles.chipOn]}
+              onPress={() => setProOnly((v) => !v)}
+            >
+              <Text style={[styles.chipText, proOnly && styles.chipTextOn]}>Pro</Text>
+            </TouchableOpacity>
           </ScrollView>
           <Text style={[styles.filterLabel, { marginTop: 10 }]}>Skills</Text>
           <TextInput
@@ -758,7 +770,11 @@ export default function TalentPoolScreen() {
                 ? 'No freelancers found yet.'
                 : listFilter === 'favorites'
                   ? 'No favorites match this search.'
-                  : skillsTokens.length > 0
+                  : proOnly && skillsTokens.length > 0
+                    ? 'No Pro freelancers match these skills.'
+                    : proOnly
+                      ? 'No Pro freelancers in the pool right now.'
+                      : skillsTokens.length > 0
                     ? 'No freelancers match these skills.'
                     : 'No freelancers match these filters.'}
             </Text>
@@ -783,9 +799,16 @@ export default function TalentPoolScreen() {
                   )}
                 </View>
                 <View style={styles.meta}>
-                  <Text style={styles.name} numberOfLines={1}>
-                    {item.name}
-                  </Text>
+                  <View style={styles.nameRow}>
+                    <Text style={[styles.name, styles.nameFlex]} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    {item.isPro ? (
+                      <View style={styles.proPill}>
+                        <Text style={styles.proPillText}>PRO</Text>
+                      </View>
+                    ) : null}
+                  </View>
                   {item.headline ? (
                     <Text style={styles.headline} numberOfLines={1}>
                       {item.headline}
@@ -924,6 +947,22 @@ const styles = StyleSheet.create({
   avatarLetter: { fontSize: 20, fontWeight: '800', color: '#FFDC00' },
   meta: { flex: 1, minWidth: 0 },
   name: { fontSize: 16, fontWeight: '700', color: '#fff', marginBottom: 2 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2, minWidth: 0 },
+  nameFlex: { flexShrink: 1, marginBottom: 0 },
+  proPill: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.35)',
+    backgroundColor: 'rgba(255,220,0,0.1)',
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  proPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFDC00',
+    letterSpacing: 0.6,
+  },
   headline: { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 4 },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   location: { fontSize: 12, color: 'rgba(255,255,255,0.3)', flex: 1 },

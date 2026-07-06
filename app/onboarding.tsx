@@ -33,6 +33,7 @@ import type { CompanySubscriptionPlanDb } from '@/lib/companyPlanFromSession'
 import { PLATFORM_TRIAL_DAYS } from '@/lib/platformTrial'
 import { mainTabHref, writeLastMainTab } from '@/lib/appEntryRoute'
 import { writeBootstrapHints } from '@/lib/bootstrapHints'
+import { ensureOwnProfileName } from '@/lib/ensureProfileName'
 
 type RoleChoice = 'freelancer' | 'company'
 
@@ -200,6 +201,8 @@ export default function OnboardingScreen() {
     if (metaErr) {
       console.warn('[onboarding] auth.updateUser metadata:', metaErr.message)
     }
+
+    await ensureOwnProfileName(user)
 
     await writeBootstrapHints(user.id, {
       onboardingCompleted: true,

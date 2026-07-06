@@ -9,6 +9,7 @@ import {
 import { alignHeadlineFieldsOnRow, resolveCanonicalFreelancerHeadline } from '@/lib/freelancerHeadlineSync'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
 import { coerceStringArray } from '@/lib/normalizePublicProfileRpc'
+import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
 
 /** Same columns as `profile_share_public` — used for explicit merge (PostgREST often omits null keys). */
 export const PROFILE_PUBLIC_KEYS = [
@@ -469,6 +470,12 @@ export async function loadPublicProfile(userId: string): Promise<{
   if (!merged.id && trimmed) {
     merged.id = trimmed
   }
+
+  const profileEmail =
+    (mergedRow?.email as string | null | undefined) ??
+    (row?.email as string | null | undefined) ??
+    null
+  merged.name = resolveProfileDisplayName(merged.name as string | null, { email: profileEmail })
 
   const tablePortfolio = await buildPortfolioProjectsFromTableRows(portfolioTableRows)
   const mergedPortfolio = mergeTableAndJsonPortfolio(tablePortfolio, merged.portfolio_projects)

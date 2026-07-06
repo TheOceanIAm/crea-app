@@ -25,6 +25,10 @@ export function isFreelancerPro(plan: NormalizedFreelancerPlan): boolean {
   return plan === 'pro'
 }
 
+export function isFreelancerProPlanTier(planTier: unknown): boolean {
+  return normalizeFreelancerPlanKey(planTier) === 'pro'
+}
+
 export function freelancerCanApplyToJobs(plan: NormalizedFreelancerPlan): boolean {
   return plan === 'pro'
 }

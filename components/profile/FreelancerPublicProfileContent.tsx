@@ -23,7 +23,7 @@ import type { FreelancerPublicProfilePayload } from '@/lib/freelancerPublicProfi
 import { money } from '@/lib/invoiceFormatting'
 import { buildProfileSocialLinks } from '@/lib/profileSocialLinks'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
-import { canFreelancerCreatePrivateProjects, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { canFreelancerCreatePrivateProjects, isFreelancerProPlanTier, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { enrichPortfolioProjectsThumbnails } from '@/lib/freelancerPortfolioTable'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
 import { profileShareUrl } from '@/lib/shareLinks'
@@ -428,6 +428,11 @@ export function FreelancerPublicProfileContent({
           <Text style={[styles.igName, isTablet && styles.igNameTablet]} numberOfLines={1}>
             {name}
           </Text>
+          {isFreelancer && isFreelancerProPlanTier(publicPlanTier) ? (
+            <View style={styles.proPill}>
+              <Text style={styles.proPillText}>PRO</Text>
+            </View>
+          ) : null}
           {locationDisplay ? (
             <Text style={[styles.igLocation, isTablet && styles.igLocationTablet]} numberOfLines={1}>
               {locationDisplay}
@@ -844,6 +849,20 @@ const styles = StyleSheet.create({
   },
   igName: { flex: 1, fontSize: 14, fontWeight: '700', color: '#fff' },
   igNameTablet: { fontSize: 18 },
+  proPill: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.35)',
+    backgroundColor: 'rgba(255,220,0,0.1)',
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  proPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFDC00',
+    letterSpacing: 0.6,
+  },
   igLocation: {
     flexShrink: 1,
     maxWidth: '48%',

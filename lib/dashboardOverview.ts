@@ -29,6 +29,7 @@ import { isCompanyPro } from '@/lib/company-plan'
 import { getCache, setCache } from '@/lib/appCache'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { loadCeoPlatformUserStats } from '@/lib/ceoPlatformMetrics'
+import { ensureOwnProfileName } from '@/lib/ensureProfileName'
 
 const DISK_OVERVIEW_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -218,13 +219,14 @@ export async function loadDashboardOverview(
   ])
   if (!user || user.id !== userId) return null
 
+  const resolvedName = await ensureOwnProfileName(user)
   const resolvedRole = resolveAppRole(profile?.role, user)
   const resolvedFreelancerPlan = isFreelancerProfile(resolvedRole)
     ? resolveFreelancerPlanFromUser(user)
     : 'free'
   const av = (profile?.avatar_url as string | undefined)?.trim()
   const avatarUrl = av && /^https?:\/\//i.test(av) ? av : null
-  const name = profile?.name ?? ''
+  const name = resolvedName || profile?.name?.trim() || ''
 
   const trialEndsAt =
     typeof profile?.trial_ends_at === 'string' ? profile.trial_ends_at.trim() || null : null
