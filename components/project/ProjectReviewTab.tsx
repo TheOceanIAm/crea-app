@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Linking } from 'react-native'
 import { supabase } from '@/lib/supabase'
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 
 type Props = {
   projectId: string
+  jobId?: string | null
   frameIoUrl: string | null
   picdropUrl: string | null
   canEdit: boolean
@@ -20,7 +22,7 @@ function openUrl(raw: string | null | undefined, canEdit: boolean, draft: string
   Linking.openURL(withProto).catch(() => {})
 }
 
-export function ProjectReviewTab({ projectId, frameIoUrl, picdropUrl, canEdit, onSaved }: Props) {
+export function ProjectReviewTab({ projectId, jobId, frameIoUrl, picdropUrl, canEdit, onSaved }: Props) {
   const [frameDraft, setFrameDraft] = useState(frameIoUrl ?? '')
   const [picDraft, setPicDraft] = useState(picdropUrl ?? '')
   const [savingFrame, setSavingFrame] = useState(false)
@@ -45,6 +47,13 @@ export function ProjectReviewTab({ projectId, frameIoUrl, picdropUrl, canEdit, o
       return
     }
     onSaved({ frame_io_url: frameDraft.trim() || null, picdrop_url: picdropUrl ?? null })
+    void notifyExpoEvent({
+      kind: 'workspace_activity',
+      projectId,
+      jobId: jobId ?? undefined,
+      activity: 'review_link',
+      detail: 'Frame.io link updated',
+    })
     Alert.alert('Saved', 'Frame.io link updated for the crew.')
   }
 
@@ -60,6 +69,13 @@ export function ProjectReviewTab({ projectId, frameIoUrl, picdropUrl, canEdit, o
       return
     }
     onSaved({ frame_io_url: frameIoUrl ?? null, picdrop_url: picDraft.trim() || null })
+    void notifyExpoEvent({
+      kind: 'workspace_activity',
+      projectId,
+      jobId: jobId ?? undefined,
+      activity: 'review_link',
+      detail: 'PicDrop link updated',
+    })
     Alert.alert('Saved', 'PicDrop link updated for the crew.')
   }
 

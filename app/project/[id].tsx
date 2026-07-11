@@ -198,6 +198,8 @@ export default function ProjectWorkspaceScreen() {
   const [sunPlannerLockedHint, setSunPlannerLockedHint] = useState<string | null>(null)
   const [productionWeatherLockedHint, setProductionWeatherLockedHint] = useState<string | null>(null)
   const [isPrivateWorkspace, setIsPrivateWorkspace] = useState(false)
+  /** `jobs.company_id` — same owner check as web ManageJobClient (`isOwner`). */
+  const [jobOwnerCompanyId, setJobOwnerCompanyId] = useState<string | null>(null)
   const [pipelineStatCount, setPipelineStatCount] = useState(0)
   const [tab, setTab] = useState<TabId>('overview')
   const [tool, setTool] = useState<string>('tasks')
@@ -377,17 +379,23 @@ export default function ProjectWorkspaceScreen() {
 
     const viewerIsCompanyOnProject = p.company_id === user.id
 
-    const { data: jobPhase } = p.job_id
+    const jobLookupId = p.job_id != null ? String(p.job_id).trim() : p.id
+    const { data: jobPhase } = jobLookupId
       ? await supabase
           .from('jobs')
           .select('project_status, description, is_solo_workspace, company_id')
-          .eq('id', p.job_id)
+          .eq('id', jobLookupId)
           .maybeSingle()
       : { data: null }
     const soloPrivate = Boolean(
       jobPhase?.is_solo_workspace && String(jobPhase.company_id ?? '') === user.id
     )
     setIsPrivateWorkspace(soloPrivate)
+    const jobCompanyId =
+      jobPhase && typeof (jobPhase as { company_id?: string | null }).company_id === 'string'
+        ? String((jobPhase as { company_id: string }).company_id).trim()
+        : ''
+    setJobOwnerCompanyId(jobCompanyId || null)
     let mergedStatus = (p.status || 'active').trim() || 'active'
     const ps =
       jobPhase && typeof (jobPhase as { project_status?: string | null }).project_status === 'string'
@@ -486,6 +494,14 @@ export default function ProjectWorkspaceScreen() {
 
   const viewerIsCompanyOnProject = Boolean(project && userId && project.company_id === userId)
 
+  const linkedJobId = useMemo(() => {
+    if (!project) return null
+    const jid = project.job_id != null ? String(project.job_id).trim() : ''
+    if (jid) return jid
+    if (isPrivateWorkspace) return project.id
+    return null
+  }, [project, isPrivateWorkspace])
+
   const tabs = useMemo(() => {
     let list = [...BASE_TABS]
     if (viewerIsCompanyOnProject) {
@@ -511,13 +527,13 @@ export default function ProjectWorkspaceScreen() {
 
   /**
    * Phase (recruiting / active / completed): same source as web `jobs.project_status`.
-   * - Public jobs: only the client company (`jobs.company_id`) may change — not crew freelancers.
-   * - Private solo workspace: poster is `company_id` on the job (often the freelancer), so they can edit.
+   * Owner = `jobs.company_id` (web `isOwner`), not `projects.freelancer_id`.
    */
   const canEditJobProjectStatus = useMemo(() => {
-    if (!project || !userId || !project.job_id) return false
-    return project.company_id === userId
-  }, [project, userId])
+    if (!project || !userId || !linkedJobId) return false
+    const ownerId = (jobOwnerCompanyId && jobOwnerCompanyId.trim()) || project.company_id
+    return ownerId === userId
+  }, [project, userId, linkedJobId, jobOwnerCompanyId])
 
   const canEditProductionSchedule = useMemo(() => {
     if (!project || !userId) return false
@@ -710,12 +726,12 @@ export default function ProjectWorkspaceScreen() {
   }
 
   const persistJobProjectPhase = async (next: JobProjectPhase) => {
-    if (!project?.job_id || !canEditJobProjectStatus) return
+    if (!project || !linkedJobId || !canEditJobProjectStatus) return
     setSavingJobPhaseStatus(true)
     const { error: jErr } = await supabase
       .from('jobs')
       .update({ project_status: next })
-      .eq('id', project.job_id)
+      .eq('id', linkedJobId)
     if (jErr) {
       Alert.alert('Could not update status', jErr.message)
       setSavingJobPhaseStatus(false)
@@ -729,10 +745,10 @@ export default function ProjectWorkspaceScreen() {
     }
     setProject((prev) => (prev ? { ...prev, status: next } : null))
     setOverviewStatus(next)
-    if (next === 'completed' && project.job_id) {
+    if (next === 'completed' && linkedJobId) {
       void notifyExpoEvent({
         kind: 'workspace_activity',
-        jobId: project.job_id,
+        jobId: linkedJobId,
         activity: 'completed',
         detail: 'Project marked as completed',
       })
@@ -755,11 +771,11 @@ export default function ProjectWorkspaceScreen() {
     const nextSummary = overviewSummary.trim()
     const prevOutputs = (project.brief_ai_outputs ?? {}) as Record<string, string>
     setSavingOverview(true)
-    if (project.job_id && canEditJobProjectStatus) {
+    if (linkedJobId && canEditJobProjectStatus) {
       const { error: jobErr } = await supabase
         .from('jobs')
         .update({ project_status: nextStatus })
-        .eq('id', project.job_id)
+        .eq('id', linkedJobId)
       if (jobErr) {
         setSavingOverview(false)
         Alert.alert('Save failed', jobErr.message)
@@ -1138,7 +1154,7 @@ export default function ProjectWorkspaceScreen() {
             >
               {tab === 'overview' ? statsRow : null}
 
-              {tab === 'overview' && project.job_id ? (
+              {tab === 'overview' && linkedJobId ? (
                 <View style={styles.jobPhaseCard}>
                   <Text style={styles.scheduleTitle}>Project status</Text>
                   <Text style={styles.scheduleSub}>
@@ -1229,13 +1245,22 @@ export default function ProjectWorkspaceScreen() {
                         <View style={styles.statusRow}>
                           {JOB_PROJECT_PHASES.map((s) => {
                             const active = overviewStatus.toLowerCase() === s
+                            const locked = !canEditJobProjectStatus
                             const label =
                               s === 'recruiting' ? 'Recruiting' : s === 'active' ? 'Active' : 'Completed'
                             return (
                               <TouchableOpacity
                                 key={s}
-                                style={[styles.statusChip, active && styles.statusChipActive]}
-                                onPress={() => setOverviewStatus(s)}
+                                style={[
+                                  styles.statusChip,
+                                  active && styles.statusChipActive,
+                                  locked && styles.statusChipLocked,
+                                ]}
+                                onPress={() => {
+                                  if (locked) return
+                                  setOverviewStatus(s)
+                                }}
+                                disabled={locked}
                               >
                                 <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>{label}</Text>
                               </TouchableOpacity>
@@ -1269,6 +1294,7 @@ export default function ProjectWorkspaceScreen() {
             {tab === 'review' && (
               <ProjectReviewTab
                 projectId={project.id}
+                jobId={project.job_id}
                 frameIoUrl={project.frame_io_url}
                 picdropUrl={project.picdrop_url ?? null}
                 canEdit={canManageCrew}

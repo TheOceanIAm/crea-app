@@ -2,7 +2,7 @@
   "expo": {
     "name": "CREA",
     "slug": "crea-app",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/crea-icon.png",
     "scheme": "crea",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "de.creaservices.app",
-      "buildNumber": "3",
+      "buildNumber": "4",
       "infoPlist": {
         "UIPrerenderedIcon": true,
         "ITSAppUsesNonExemptEncryption": false,

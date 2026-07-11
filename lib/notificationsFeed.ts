@@ -4,6 +4,11 @@ import {
   filterNotificationRowByAccess,
   loadNotificationAccessContext,
 } from '@/lib/notification-feed-access'
+import { projectStatusDisplayLabel } from '@/lib/projectStatusDisplay'
+import {
+  loadWorkspaceFileAlertRows,
+  loadWorkspaceReviewLinkAlertRows,
+} from '@/lib/workspaceActivityAlertRows'
 
 export type NotificationKind =
   | 'invite'
@@ -136,18 +141,120 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     })
 
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-  const updateRows: NotificationRow[] = (projects ?? [])
-    .filter((p) => Boolean(p.updated_at))
-    .filter((p) => new Date(String(p.updated_at)).getTime() >= sevenDaysAgo)
-    .map((p) => ({
-      id: `project-update-${p.id}-${p.updated_at}`,
+  const sevenDaysAgoIso = new Date(sevenDaysAgo).toISOString()
+
+  const jobIdToProjectId = new Map<string, string>()
+  for (const p of projects ?? []) {
+    const pid = String(p.id)
+    const jid = p.job_id != null ? String(p.job_id).trim() : ''
+    if (jid) jobIdToProjectId.set(jid, pid)
+  }
+
+  const accessibleJobIds = [
+    ...new Set([
+      ...projectJobId.values(),
+      ...accessCtx.activeCompanyJobIds,
+      ...accessCtx.recentlyCompletedJobIds,
+    ]),
+  ].filter(Boolean)
+
+  const { data: recentJobs } = accessibleJobIds.length
+    ? await supabase
+        .from('jobs')
+        .select('id, title, project_status, updated_at')
+        .in('id', accessibleJobIds)
+        .gte('updated_at', sevenDaysAgoIso)
+        .order('updated_at', { ascending: false })
+        .limit(60)
+    : { data: [] as Array<{ id: string; title: string | null; project_status: string | null; updated_at: string }> }
+
+  const statusChangeRows: NotificationRow[] = (recentJobs ?? [])
+    .filter((j) => String(j.project_status ?? '').toLowerCase() !== 'completed')
+    .map((j) => {
+      const jid = String(j.id)
+      const pid = jobIdToProjectId.get(jid) ?? jid
+      const label = projectStatusDisplayLabel(j.project_status)
+      return {
+        id: `job-status-${jid}-${j.updated_at}`,
+        kind: 'project_update' as const,
+        projectId: pid,
+        jobId: jid,
+        title: String(j.title || projectTitle.get(pid) || 'Project'),
+        body: `Project status changed to ${label}.`,
+        at: String(j.updated_at),
+      }
+    })
+
+  const { data: nativeMilestones } = projectIds.length
+    ? await supabase
+        .from('project_milestones')
+        .select('id, project_id, title, completed, created_at')
+        .in('project_id', projectIds)
+        .gte('created_at', sevenDaysAgoIso)
+        .order('created_at', { ascending: false })
+        .limit(60)
+    : { data: [] as Array<{ id: string; project_id: string; title: string; completed: boolean; created_at: string }> }
+
+  const nativeMilestoneRows: NotificationRow[] = (nativeMilestones ?? []).map((m) => {
+    const pid = String(m.project_id)
+    const title = String(m.title || 'Milestone').trim() || 'Milestone'
+    const completed = Boolean(m.completed)
+    return {
+      id: `milestone-native-${m.id}-${completed ? 'done' : 'new'}`,
       kind: 'project_update' as const,
-      projectId: String(p.id),
-      jobId: projectJobId.get(String(p.id)),
-      title: String(p.title || 'Project'),
-      body: `Project updated${p.status ? ` · ${String(p.status)}` : ''}.`,
-      at: String(p.updated_at),
-    }))
+      projectId: pid,
+      jobId: projectJobId.get(pid),
+      title: projectTitle.get(pid) ?? 'Project',
+      body: completed ? `Milestone completed: ${title}` : `Milestone added: ${title}`,
+      at: String(m.created_at),
+    }
+  })
+
+  let jobMilestoneRows: NotificationRow[] = []
+  const jobIdsForMilestones = [...new Set(projectJobId.values())]
+  if (jobIdsForMilestones.length > 0) {
+    const { data: jobMilestones, error: jobMsErr } = await supabase
+      .from('milestones')
+      .select('id, job_id, title, status, created_at')
+      .in('job_id', jobIdsForMilestones)
+      .gte('created_at', sevenDaysAgoIso)
+      .order('created_at', { ascending: false })
+      .limit(60)
+    if (!jobMsErr) {
+      jobMilestoneRows = (jobMilestones ?? []).map((m) => {
+        const jid = String(m.job_id)
+        const pid = jobIdToProjectId.get(jid) ?? jid
+        const title = String(m.title || 'Milestone').trim() || 'Milestone'
+        const completed = String(m.status ?? '').toLowerCase() === 'completed'
+        return {
+          id: `milestone-job-${m.id}-${completed ? 'done' : 'new'}`,
+          kind: 'project_update' as const,
+          projectId: pid,
+          jobId: jid,
+          title: projectTitle.get(pid) ?? 'Project',
+          body: completed ? `Milestone completed: ${title}` : `Milestone added: ${title}`,
+          at: String(m.created_at),
+        }
+      })
+    }
+  }
+
+  const milestoneRows = [...nativeMilestoneRows, ...jobMilestoneRows]
+
+  const activityCtx = {
+    supabase,
+    userId,
+    projectIds,
+    projectTitle,
+    projectJobId,
+    jobIdToProjectId,
+    accessibleJobIds,
+    sevenDaysAgoIso,
+  }
+  const [fileRows, reviewLinkRows] = await Promise.all([
+    loadWorkspaceFileAlertRows(activityCtx),
+    loadWorkspaceReviewLinkAlertRows(activityCtx),
+  ])
 
   const { data: projectMessages } = projectIds.length
     ? await supabase
@@ -167,7 +274,7 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       projectId: pid,
       jobId: projectJobId.get(pid),
       title: projectTitle.get(pid) ?? 'Project',
-      body: 'New message in project chat.',
+      body: 'New message.',
       at: String(m.created_at),
     }
   })
@@ -340,7 +447,10 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     ...crewInviteRows,
     ...inviteRows,
     ...messageRows,
-    ...updateRows,
+    ...milestoneRows,
+    ...fileRows,
+    ...reviewLinkRows,
+    ...statusChangeRows,
     ...completedRows,
     ...companyRows,
     ...freelancerRows,
