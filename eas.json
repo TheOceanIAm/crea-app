@@ -8,6 +8,7 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "channel": "development",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://trcjalnzuzpgygxtncvp.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyY2phbG56dXpwZ3lneHRuY3ZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NzA4NzksImV4cCI6MjA4OTI0Njg3OX0.-FoFuIqE4_u8sC0TcKqaLFg0V2YDeAk_uAoNnHaCfZs",
@@ -17,6 +18,7 @@
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://trcjalnzuzpgygxtncvp.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyY2phbG56dXpwZ3lneHRuY3ZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NzA4NzksImV4cCI6MjA4OTI0Njg3OX0.-FoFuIqE4_u8sC0TcKqaLFg0V2YDeAk_uAoNnHaCfZs",
@@ -26,6 +28,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "channel": "production",
       "ios": {
         "image": "macos-sequoia-15.6-xcode-26.2"
       },

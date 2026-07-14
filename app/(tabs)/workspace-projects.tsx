@@ -22,6 +22,7 @@ import {
   parseJobListingBudgetInput,
   type JobListingBudgetType,
 } from '@/lib/jobListingBudget'
+import { deleteCompanyJob } from '@/lib/deleteCompanyJob'
 import { deletePrivateWorkspaceProject } from '@/lib/deletePrivateWorkspaceProject'
 import { supabase } from '@/lib/supabase'
 import {
@@ -398,9 +399,12 @@ export default function WorkspaceProjectsScreen() {
 
   const deleteProject = async (item: ProjectListing) => {
     if (actingId || item.kind !== 'private') return
+    const isCompany = viewerRole === 'company'
     Alert.alert(
-      'Delete project',
-      'This removes the project permanently. Continue?',
+      isCompany ? 'Delete job' : 'Delete project',
+      isCompany
+        ? 'This permanently deletes the job and everything linked to it (applications, workspace, crew, milestones, files, messages). Continue?'
+        : 'This removes the project permanently. Continue?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -415,7 +419,9 @@ export default function WorkspaceProjectsScreen() {
               }
               setActingId(item.id)
               setError(null)
-              const result = await deletePrivateWorkspaceProject(supabase, user.id, item.id)
+              const result = isCompany
+                ? await deleteCompanyJob(supabase, user.id, item.id)
+                : await deletePrivateWorkspaceProject(supabase, user.id, item.id)
               setActingId(null)
               if (!result.ok) {
                 setError(result.error)
