@@ -4,6 +4,7 @@ import { type PropsWithChildren, useEffect, useState } from 'react'
 import { Linking, Alert, Platform, StyleSheet, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SubscriptionPaywallGate } from '@/components/SubscriptionPaywallGate'
+import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
 import * as Notifications from 'expo-notifications'
 import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
@@ -142,6 +143,7 @@ export default function RootLayout() {
           <AuthDeepLinkBridge />
           <SubscriptionPaywallGate />
           {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
+          {Platform.OS !== 'web' ? <InAppNotificationBridge /> : null}
           <StatusBar style="light" backgroundColor="#0a0a0a" />
           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
           {/* Native splash is solid black until JS shows AppBootstrapLoading */}

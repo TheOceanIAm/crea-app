@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
   Animated,
@@ -7,23 +7,37 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  View,
 } from 'react-native'
+import * as Notifications from 'expo-notifications'
 import { useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { supabase } from '@/lib/supabase'
-import { invalidateAlertsBadge } from '@/lib/invalidateAlerts'
+import { invalidateAlertsBadge, subscribeAlertsLivePatch } from '@/lib/invalidateAlerts'
+
+function bannerDedupeKey(id: string): string {
+  const m = id.match(/(?:live-)?(?:project-msg-|push-msg-|pm-)([0-9a-f-]{8}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{4}-[0-9a-f-]{12})/i)
+  if (m?.[1]) return `pm:${m[1].toLowerCase()}`
+  return id
+}
 
 type Banner = { id: string; title: string; body: string; onPress?: () => void }
+
+/** Unique Realtime topic — reusing a fixed name returns an already-subscribed channel. */
+let bannerRealtimeTopicSeq = 0
 
 function dmText(row: Record<string, unknown>): string {
   const raw = row.body ?? row.content ?? row.message
   return typeof raw === 'string' ? raw : ''
 }
 
+function pushDataRecord(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== 'object') return null
+  return data as Record<string, unknown>
+}
+
 /**
- * Top-of-screen banners for realtime events while the app is open + DM previews.
- * Remote pushes stay quieter in the foreground via pushNotifications handler.
+ * Top-of-screen banners while the app is open.
+ * Prefer foreground Expo push receipts (reliable), with Realtime as backup.
  */
 export function InAppNotificationBridge() {
   const router = useRouter()
@@ -31,31 +45,139 @@ export function InAppNotificationBridge() {
   const opacity = useRef(new Animated.Value(0)).current
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const receiptConfirmedDedupeRef = useRef(new Set<string>())
+  const recentBannerIds = useRef(new Set<string>())
+  const routerRef = useRef(router)
+  routerRef.current = router
 
-  const showBanner = (b: Banner, ms = 5200) => {
-    if (hideTimer.current) clearTimeout(hideTimer.current)
-    setBanner(b)
-    Animated.timing(opacity, { toValue: 1, duration: 220, useNativeDriver: true }).start()
-    hideTimer.current = setTimeout(() => {
-      Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() =>
-        setBanner(null)
-      )
-    }, ms)
-  }
+  const showBanner = useCallback(
+    (b: Banner, ms = 5200) => {
+      const key = bannerDedupeKey(b.id)
+      if (recentBannerIds.current.has(key)) return
+      recentBannerIds.current.add(key)
+      // Keep dedupe set bounded.
+      if (recentBannerIds.current.size > 80) {
+        recentBannerIds.current = new Set(Array.from(recentBannerIds.current).slice(-40))
+      }
+      if (hideTimer.current) clearTimeout(hideTimer.current)
+      opacity.setValue(0)
+      setBanner(b)
+      Animated.timing(opacity, { toValue: 1, duration: 220, useNativeDriver: true }).start()
+      hideTimer.current = setTimeout(() => {
+        Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() =>
+          setBanner(null)
+        )
+      }, ms)
+    },
+    [opacity]
+  )
+  const showBannerRef = useRef(showBanner)
+  showBannerRef.current = showBanner
+
+  // Foreground Expo pushes → in-app banner (OS alert is suppressed while active).
+  useEffect(() => {
+    if (Platform.OS === 'web') return
+
+    const openFromPush = (data: Record<string, unknown> | null) => {
+      if (!data) return
+      const type = typeof data.type === 'string' ? data.type : ''
+      if (type === 'message') {
+        const cid = data.conversationId
+        if (typeof cid === 'string' && cid.length > 0) routerRef.current.push(`/conversation/${cid}`)
+        return
+      }
+      if (type === 'invoice') {
+        const id = data.invoiceId
+        if (typeof id === 'string' && id.length > 0) {
+          routerRef.current.push(`/(tabs)/invoices/${id}`)
+        }
+        return
+      }
+      if (type === 'job_application') {
+        routerRef.current.push('/(tabs)/company-applications')
+        return
+      }
+      if (type === 'workspace_ready' || type === 'project_message' || type === 'workspace_activity') {
+        const pid = data.projectId
+        if (typeof pid === 'string' && pid.length > 0) routerRef.current.push(`/project/${pid}`)
+        return
+      }
+      if (type === 'profile_completion') {
+        routerRef.current.push('/(tabs)/profile')
+      }
+    }
+
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      if (AppState.currentState !== 'active') return
+      const content = notification.request.content
+      const data = pushDataRecord(content.data)
+      const type = typeof data?.type === 'string' ? data.type : ''
+      const title = typeof content.title === 'string' && content.title.trim() ? content.title.trim() : 'Crea'
+      const body =
+        typeof content.body === 'string' && content.body.trim()
+          ? content.body.trim()
+          : 'New update'
+      const id =
+        typeof data?.messageId === 'string'
+          ? `push-msg-${data.messageId}`
+          : typeof data?.invoiceId === 'string'
+            ? `push-inv-${data.invoiceId}`
+            : `push-${notification.request.identifier || `${type}-${title}-${body}`}`
+
+      if (
+        type === 'project_message' ||
+        type === 'workspace_activity' ||
+        type === 'workspace_ready' ||
+        type === 'message' ||
+        type === 'invoice' ||
+        type === 'job_application' ||
+        type === 'project_crew_invite'
+      ) {
+        invalidateAlertsBadge()
+        showBannerRef.current({
+          id,
+          title,
+          body,
+          onPress: () => openFromPush(data),
+        })
+      }
+    })
+
+    return () => sub.remove()
+  }, [])
+
+  // Optimistic Alerts live-patch → banner (works even if push is slow/skipped).
+  useEffect(() => {
+    return subscribeAlertsLivePatch((patch) => {
+      if (AppState.currentState !== 'active') return
+      if (patch.row.kind !== 'project_message') return
+      showBannerRef.current({
+        id: `live-${patch.row.id}`,
+        title: patch.row.title || 'Project',
+        body: patch.row.body || 'New message.',
+        onPress: () => {
+          if (patch.row.projectId) routerRef.current.push(`/project/${patch.row.projectId}`)
+        },
+      })
+    })
+  }, [])
 
   useEffect(() => {
+    if (Platform.OS === 'web') return
+
     let cancelled = false
+    let channel: ReturnType<typeof supabase.channel> | null = null
     let uid: string | null = null
 
-    const setup = async (): Promise<(() => void) | undefined> => {
+    const setup = async () => {
       const {
         data: { user },
       } = await supabase.auth.getUser()
-      if (!user || cancelled) return undefined
+      if (!user || cancelled) return
       uid = user.id
 
-      const channel = supabase
-        .channel('in-app-banner-events')
+      const topic = `in-app-banner-events-${uid}-${++bannerRealtimeTopicSeq}`
+      channel = supabase
+        .channel(topic)
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages' },
@@ -65,12 +187,12 @@ export function InAppNotificationBridge() {
             if (String(row.sender_id) === uid) return
             const cid = typeof row.conversation_id === 'string' ? row.conversation_id : ''
             const preview = dmText(row)
-            showBanner({
+            showBannerRef.current({
               id: `dm-${String(row.id)}`,
               title: 'New message',
               body: preview.length > 140 ? `${preview.slice(0, 137)}…` : preview || 'Open to read',
               onPress: () => {
-                if (cid) router.push(`/conversation/${cid}`)
+                if (cid) routerRef.current.push(`/conversation/${cid}`)
               },
             })
           }
@@ -86,11 +208,11 @@ export function InAppNotificationBridge() {
             const { data: job } = await supabase.from('jobs').select('company_id, title').eq('id', jobId).maybeSingle()
             if (job?.company_id !== uid) return
             invalidateAlertsBadge()
-            showBanner({
+            showBannerRef.current({
               id: `app-${String(row.id)}`,
               title: 'New application',
               body: `Someone applied to «${String(job.title ?? 'Your project')}».`,
-              onPress: () => router.push('/(tabs)/company-applications'),
+              onPress: () => routerRef.current.push('/(tabs)/company-applications'),
             })
           }
         )
@@ -102,11 +224,11 @@ export function InAppNotificationBridge() {
             const row = payload.new as Record<string, unknown>
             if (String(row.company_id) === uid) {
               invalidateAlertsBadge()
-              showBanner({
+              showBannerRef.current({
                 id: `inv-${String(row.id)}`,
                 title: 'Incoming invoice',
                 body: String(row.title ?? row.invoice_number ?? 'New invoice'),
-                onPress: () => router.push(`/(tabs)/invoices/${String(row.id)}`),
+                onPress: () => routerRef.current.push(`/(tabs)/invoices/${String(row.id)}`),
               })
             }
           }
@@ -128,11 +250,11 @@ export function InAppNotificationBridge() {
             const st = String(row.status ?? '').toLowerCase()
             if (st === 'paid') {
               invalidateAlertsBadge()
-              showBanner({
+              showBannerRef.current({
                 id: `inv-paid-${invId}`,
                 title: 'Invoice paid',
                 body: String(row.title ?? row.invoice_number ?? 'Payment received'),
-                onPress: () => router.push(`/(tabs)/invoices/${invId}`),
+                onPress: () => routerRef.current.push(`/(tabs)/invoices/${invId}`),
               })
               return
             }
@@ -163,7 +285,10 @@ export function InAppNotificationBridge() {
                 ? `Your client confirmed receipt of «${lab}». They can pay on creaservices.de.`
                 : 'Your client confirmed receipt of your invoice.',
               [
-                { text: 'View invoice', onPress: () => router.push(`/(tabs)/invoices/${invId}`) },
+                {
+                  text: 'View invoice',
+                  onPress: () => routerRef.current.push(`/(tabs)/invoices/${invId}`),
+                },
                 { text: 'OK', style: 'cancel' },
               ]
             )
@@ -195,11 +320,11 @@ export function InAppNotificationBridge() {
               ? `You were added to «${pt}».`
               : `${leadName} added you to «${pt}».`
             invalidateAlertsBadge()
-            showBanner({
+            showBannerRef.current({
               id: `crew-inv-${String(row.id)}`,
               title: 'Added to project',
               body: bannerBody,
-              onPress: () => router.push(`/project/${projectId}`),
+              onPress: () => routerRef.current.push(`/project/${projectId}`),
             })
           }
         )
@@ -212,24 +337,14 @@ export function InAppNotificationBridge() {
             if (String(row.sender_id) === uid) return
             const pid = typeof row.project_id === 'string' ? row.project_id : ''
             if (!pid) return
+            // Prefer RPC-style access: if we can read the project, show the banner.
+            // Avoid brittle multi-query membership gates that miss accepted crew.
             const { data: proj } = await supabase
               .from('projects')
-              .select('title, company_id, freelancer_id')
+              .select('title')
               .eq('id', pid)
               .maybeSingle()
             if (!proj) return
-            const isMember =
-              String(proj.company_id) === uid ||
-              String(proj.freelancer_id) === uid ||
-              (
-                await supabase
-                  .from('project_members')
-                  .select('id')
-                  .eq('project_id', pid)
-                  .eq('profile_id', uid)
-                  .maybeSingle()
-              ).data != null
-            if (!isMember) return
             invalidateAlertsBadge()
             const b =
               typeof row.body === 'string' && row.body.trim()
@@ -237,11 +352,11 @@ export function InAppNotificationBridge() {
                   ? `${row.body.trim().slice(0, 117)}…`
                   : row.body.trim()
                 : 'New message in project chat'
-            showBanner({
+            showBannerRef.current({
               id: `pm-${String(row.id)}`,
-              title: String(proj?.title ?? 'Project'),
+              title: String(proj.title ?? 'Project'),
               body: b,
-              onPress: () => router.push(`/project/${pid}`),
+              onPress: () => routerRef.current.push(`/project/${pid}`),
             })
           }
         )
@@ -256,44 +371,26 @@ export function InAppNotificationBridge() {
             if (!jobId) return
             const { data: job } = await supabase.from('jobs').select('company_id, title').eq('id', jobId).maybeSingle()
             if (!job) return
-            let allowed = String(job.company_id) === uid
-            if (!allowed) {
-              const { data: app } = await supabase
-                .from('job_applications')
-                .select('id')
-                .eq('job_id', jobId)
-                .eq('freelancer_id', uid)
-                .eq('status', 'accepted')
-                .maybeSingle()
-              allowed = Boolean(app)
-            }
             const { data: proj } = await supabase
               .from('projects')
-              .select('id, title, freelancer_id')
+              .select('id, title')
               .eq('job_id', jobId)
               .maybeSingle()
-            if (!allowed && proj) {
-              if (String(proj.freelancer_id) === uid) allowed = true
-              if (!allowed) {
-                const { data: pm } = await supabase
-                  .from('project_members')
-                  .select('id')
-                  .eq('project_id', proj.id)
-                  .eq('profile_id', uid)
-                  .maybeSingle()
-                allowed = Boolean(pm)
-              }
-            }
-            if (!allowed || !proj?.id) return
+            // If linked project is readable under RLS, recipient is a workspace member.
+            if (!proj?.id && String(job.company_id) !== uid) return
+            const projectId = proj?.id ? String(proj.id) : ''
+            if (!projectId && String(job.company_id) !== uid) return
             invalidateAlertsBadge()
             const raw = typeof row.content === 'string' ? row.content.trim() : ''
             const b =
               raw.length > 120 ? `${raw.slice(0, 117)}…` : raw || 'New message in project workspace'
-            showBanner({
+            showBannerRef.current({
               id: `jm-${String(row.id)}`,
-              title: String(proj.title ?? job.title ?? 'Project'),
+              title: String(proj?.title ?? job.title ?? 'Project'),
               body: b,
-              onPress: () => router.push(`/project/${proj.id}`),
+              onPress: () => {
+                if (projectId) routerRef.current.push(`/project/${projectId}`)
+              },
             })
           }
         )
@@ -307,30 +404,17 @@ export function InAppNotificationBridge() {
             if (!jobId) return
             const { data: proj } = await supabase
               .from('projects')
-              .select('id, title, company_id, freelancer_id')
+              .select('id, title')
               .eq('job_id', jobId)
               .maybeSingle()
             if (!proj?.id) return
-            const pid = String(proj.id)
-            const isMember =
-              String(proj.company_id) === uid ||
-              String(proj.freelancer_id) === uid ||
-              (
-                await supabase
-                  .from('project_members')
-                  .select('id')
-                  .eq('project_id', pid)
-                  .eq('profile_id', uid)
-                  .maybeSingle()
-              ).data != null
-            if (!isMember) return
             invalidateAlertsBadge()
             const title = String(row.title ?? '').trim() || 'Milestone'
-            showBanner({
+            showBannerRef.current({
               id: `ms-${String(row.id)}`,
               title: String(proj.title ?? 'Project'),
               body: `New milestone: ${title}`,
-              onPress: () => router.push(`/project/${pid}`),
+              onPress: () => routerRef.current.push(`/project/${proj.id}`),
             })
           }
         )
@@ -342,31 +426,15 @@ export function InAppNotificationBridge() {
             const row = payload.new as Record<string, unknown>
             const pid = typeof row.project_id === 'string' ? row.project_id : ''
             if (!pid) return
-            const { data: proj } = await supabase
-              .from('projects')
-              .select('title, company_id, freelancer_id')
-              .eq('id', pid)
-              .maybeSingle()
+            const { data: proj } = await supabase.from('projects').select('title').eq('id', pid).maybeSingle()
             if (!proj) return
-            const isMember =
-              String(proj.company_id) === uid ||
-              String(proj.freelancer_id) === uid ||
-              (
-                await supabase
-                  .from('project_members')
-                  .select('id')
-                  .eq('project_id', pid)
-                  .eq('profile_id', uid)
-                  .maybeSingle()
-              ).data != null
-            if (!isMember) return
             invalidateAlertsBadge()
             const title = String(row.title ?? '').trim() || 'Milestone'
-            showBanner({
+            showBannerRef.current({
               id: `pms-${String(row.id)}`,
               title: String(proj.title ?? 'Project'),
               body: `New milestone: ${title}`,
-              onPress: () => router.push(`/project/${pid}`),
+              onPress: () => routerRef.current.push(`/project/${pid}`),
             })
           }
         )
@@ -390,61 +458,32 @@ export function InAppNotificationBridge() {
 
             const { data: proj } = await supabase
               .from('projects')
-              .select('id, title, freelancer_id')
+              .select('id, title')
               .eq('job_id', jobId)
               .maybeSingle()
             if (!proj?.id) return
 
-            let allowed = String(proj.freelancer_id) === uid
-            if (!allowed) {
-              const { data: app } = await supabase
-                .from('job_applications')
-                .select('id')
-                .eq('job_id', jobId)
-                .eq('freelancer_id', uid)
-                .eq('status', 'accepted')
-                .maybeSingle()
-              allowed = Boolean(app)
-            }
-            if (!allowed) {
-              const { data: pm } = await supabase
-                .from('project_members')
-                .select('id')
-                .eq('project_id', proj.id)
-                .eq('profile_id', uid)
-                .maybeSingle()
-              allowed = Boolean(pm)
-            }
-            if (!allowed) return
-
             invalidateAlertsBadge()
             const pt = String(proj.title ?? row.title ?? 'Project').trim() || 'Project'
-            showBanner({
+            showBannerRef.current({
               id: `job-completed-${jobId}`,
               title: pt,
               body: 'Project marked as completed.',
-              onPress: () => router.push(`/project/${proj.id}`),
+              onPress: () => routerRef.current.push(`/project/${proj.id}`),
             })
           }
         )
         .subscribe()
-
-      return () => {
-        void supabase.removeChannel(channel)
-      }
     }
 
-    let unsubscribe: (() => void) | undefined
-    void setup().then((fn) => {
-      unsubscribe = fn
-    })
+    void setup()
 
     return () => {
       cancelled = true
       if (hideTimer.current) clearTimeout(hideTimer.current)
-      unsubscribe?.()
+      if (channel) void supabase.removeChannel(channel)
     }
-  }, [opacity, router])
+  }, [])
 
   if (Platform.OS === 'web' || !banner) return null
 
@@ -474,8 +513,8 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 9999,
-    elevation: 9999,
+    zIndex: 99999,
+    elevation: 99999,
   },
   safe: { backgroundColor: 'transparent' },
   banner: {

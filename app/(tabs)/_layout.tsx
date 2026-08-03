@@ -25,7 +25,6 @@ import {
 } from '@/lib/alertsLivePatch'
 import { subscribeAlertsInvalidate } from '@/lib/invalidateAlerts'
 import { registerPushTokenSilently } from '@/lib/registerPushOnLaunch'
-import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
 import { GoodNewsDailyModal } from '@/components/GoodNewsDailyModal'
 import { fetchGoodNewsOfTheDayHeadline } from '@/lib/ceoLiveWidgets'
 
@@ -253,7 +252,6 @@ export default function TabLayout() {
 
   return (
     <View style={styles.tabsShell}>
-      {Platform.OS !== 'web' ? <InAppNotificationBridge /> : null}
       <GoodNewsDailyModal
         visible={goodNewsPopup !== null}
         body={goodNewsPopup?.body ?? ''}
