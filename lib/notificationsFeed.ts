@@ -9,6 +9,7 @@ import {
   loadWorkspaceFileAlertRows,
   loadWorkspaceReviewLinkAlertRows,
 } from '@/lib/workspaceActivityAlertRows'
+import { supabaseTimestampMs } from '@/lib/supabaseTimestamp'
 
 export type NotificationKind =
   | 'invite'
@@ -374,8 +375,8 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     const workspaceRows: NotificationRow[] = (crewProjects ?? [])
       .filter((p) => p.job_id)
       .filter((p) => {
-        const created = new Date(String(p.created_at ?? '')).getTime()
-        return Number.isFinite(created) && created >= sevenDaysAgo
+        const created = supabaseTimestampMs(p.created_at)
+        return created > 0 && created >= sevenDaysAgo
       })
       .map((p) => ({
         id: `workspace-${p.id}`,
@@ -456,6 +457,6 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     ...freelancerRows,
   ]
     .filter((row) => filterNotificationRowByAccess(row, accessCtx, myRole))
-    .sort((a, b) => +new Date(b.at) - +new Date(a.at))
+    .sort((a, b) => supabaseTimestampMs(b.at) - supabaseTimestampMs(a.at))
     .slice(0, 100)
 }

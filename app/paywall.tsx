@@ -30,9 +30,9 @@ import {
   subscriptionProductTitle,
 } from '@/lib/subscriptionDisclosure'
 import {
-  RC_DEFAULT_OFFERING_ID,
   RC_PACKAGE_AGENCY,
   RC_PACKAGE_PRO,
+  storeProductMatchesRole,
   type SubscriptionPlanKey,
 } from '@/lib/revenuecat/config'
 import { resolveAppRole } from '@/lib/profileRole'
@@ -42,7 +42,7 @@ import {
   FREELANCER_PLAN_PRICE_EUR,
   formatCatalogPrice,
 } from '@/lib/planCatalogPrices'
-import { filterPackagesForRole } from '@/lib/revenuecat/offeringsPackages'
+import { fetchRoleOfferingPackages, filterPackagesForRole } from '@/lib/revenuecat/offeringsPackages'
 import {
   offeringsEmptyMessage,
   offeringsLoadErrorMessage,
@@ -185,21 +185,25 @@ export default function PaywallScreen() {
       setLoadingOfferings(false)
       return
     }
+    // Wait for account role — otherwise we cannot filter Freelancer vs Company packages.
+    if (!role) return
     setLoadingOfferings(true)
     setLoadError(null)
     try {
-      const offerings = await Purchases.getOfferings()
-      const offering = offerings.all[RC_DEFAULT_OFFERING_ID] ?? offerings.current ?? null
-      setPackages(offering?.availablePackages ?? [])
-      if (!offering?.availablePackages?.length) {
-        setLoadError(offeringsEmptyMessage())
+      const { packages: rolePackages, error } = await fetchRoleOfferingPackages(storeRole, {
+        retries: 5,
+        retryDelayMs: 2000,
+      })
+      setPackages(rolePackages)
+      if (error || !rolePackages.length) {
+        setLoadError(error || offeringsEmptyMessage())
       }
     } catch (e) {
       setLoadError(offeringsLoadErrorMessage(e))
     } finally {
       setLoadingOfferings(false)
     }
-  }, [configured, configError])
+  }, [configured, configError, role, storeRole])
 
   useEffect(() => {
     void (async () => {
@@ -208,12 +212,15 @@ export default function PaywallScreen() {
       } = await supabase.auth.getUser()
       if (!user) {
         setIsLoggedIn(false)
+        // Logged-out paywall defaults to Freelancer products.
         setRole('freelancer')
         return
       }
       setIsLoggedIn(true)
+      // Set role immediately from JWT so we never briefly expose Company packages
+      // (Offering lists Company Yearly first — that became the Freelancer Apple sheet bug).
       const roleHint = resolveAppRole(user.user_metadata?.role, user)
-      if (roleHint === 'company') setRole('company')
+      setRole(roleHint === 'company' ? 'company' : 'freelancer')
       const { data: pr } = await supabase
         .from('profiles')
         .select('role')
@@ -230,9 +237,13 @@ export default function PaywallScreen() {
   }, [ready, loadOfferings])
 
   const availableOptions = useMemo(() => {
-    if (!role) return packages
+    if (!role) return []
+    // `packages` is already role-filtered from fetchRoleOfferingPackages; keep a safety pass.
     return filterPackagesForRole(packages, storeRole)
   }, [packages, role, storeRole])
+
+  const displayError = loadError
+  const sheetLoading = loadingOfferings || !role
 
   const yearlyPackage = useMemo(
     () => availableOptions.find((p) => packageCadence(p) === 'yearly') ?? null,
@@ -273,6 +284,15 @@ export default function PaywallScreen() {
   const purchase = async (pkg: PurchasesPackage, planKey: SubscriptionPlanKey) => {
     if (!configured) {
       Alert.alert('Unavailable', configError || 'Subscriptions are not available in this build.')
+      return
+    }
+    if (!storeProductMatchesRole(pkg.product.identifier, storeRole)) {
+      Alert.alert(
+        'Unavailable',
+        storeRole === 'company'
+          ? 'Company Pro plans are not available from the App Store for this build. Try again later or contact support.'
+          : 'Freelancer Pro plans are not available from the App Store for this build. Try again later or contact support.'
+      )
       return
     }
     setBusyPackageId(pkg.identifier)
@@ -418,14 +438,14 @@ export default function PaywallScreen() {
       </ImageBackground>
 
       <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
-        {loadingOfferings ? (
+        {sheetLoading ? (
           <View style={styles.sheetCentered}>
             <ActivityIndicator color="#0a0a0a" />
             <Text style={styles.sheetMuted}>Loading plans from the App Store…</Text>
           </View>
-        ) : loadError ? (
+        ) : displayError ? (
           <View style={styles.sheetCentered}>
-            <Text style={styles.sheetError}>{loadError}</Text>
+            <Text style={styles.sheetError}>{displayError}</Text>
             <TouchableOpacity style={styles.retryBtn} onPress={() => void loadOfferings()}>
               <Text style={styles.retryBtnText}>Retry</Text>
             </TouchableOpacity>

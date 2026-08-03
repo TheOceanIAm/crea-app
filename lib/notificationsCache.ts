@@ -48,20 +48,33 @@ export async function persistNotificationsToDisk(userId: string, data: Notificat
 }
 
 let inflight: Promise<void> | null = null
+let needsPrefetchAfter = false
+
+/** Full feed refresh + cache write; returns unread count (for Alerts badge). */
+export async function refreshNotificationsAndCount(userId: string): Promise<number> {
+  const [feed, reads] = await Promise.all([
+    loadNotificationFeed(userId),
+    fetchAlertReadKeys(userId),
+  ])
+  const data: NotificationsCache = { rows: feed, reads: Array.from(reads) }
+  cacheNotifications(userId, data)
+  void persistNotificationsToDisk(userId, data)
+  return feed.filter((r) => !reads.has(r.id)).length
+}
 
 export async function prefetchNotifications(userId: string): Promise<void> {
-  if (inflight) return inflight
+  if (inflight) {
+    needsPrefetchAfter = true
+    return inflight
+  }
   inflight = (async () => {
-    if (!readCachedNotifications(userId)) {
-      await hydrateNotificationsFromDisk(userId)
-    }
-    const [feed, reads] = await Promise.all([
-      loadNotificationFeed(userId),
-      fetchAlertReadKeys(userId),
-    ])
-    const data: NotificationsCache = { rows: feed, reads: Array.from(reads) }
-    cacheNotifications(userId, data)
-    void persistNotificationsToDisk(userId, data)
+    do {
+      needsPrefetchAfter = false
+      if (!readCachedNotifications(userId)) {
+        await hydrateNotificationsFromDisk(userId)
+      }
+      await refreshNotificationsAndCount(userId)
+    } while (needsPrefetchAfter)
   })().finally(() => {
     inflight = null
   })

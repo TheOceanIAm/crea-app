@@ -94,6 +94,9 @@ export function userFacingErrorMessage(
   if (lower.includes('invalid refresh token') || lower.includes('refresh token not found')) {
     return 'Your session expired. Please sign in again.'
   }
+  if (lower.includes('connection pool') || lower.includes('timed out acquiring connection')) {
+    return 'Database is busy right now. Please try again in a moment.'
+  }
 
   if (raw.length > 160 || raw.includes('"headers"') || raw.includes('"url"')) {
     return fallback

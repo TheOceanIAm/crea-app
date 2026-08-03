@@ -21,26 +21,15 @@ import {
 } from '@/lib/notificationsFeed'
 import { respondToCrewInvite } from '@/lib/crewInvites'
 import { readCachedNotifications, cacheNotifications } from '@/lib/notificationsCache'
-import { invalidateAlertsBadge } from '@/lib/invalidateAlerts'
+import { invalidateAlertsBadge, subscribeAlertsLivePatch } from '@/lib/invalidateAlerts'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { runTimed } from '@/lib/perfMarks'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 import { TabScreenHeader } from '@/components/TabScreenHeader'
 import { resolveAppRole } from '@/lib/profileRole'
+import { formatTimeAgo } from '@/lib/formatTimeAgo'
 
-function timeAgo(str: string) {
-  const t = new Date(str).getTime()
-  if (Number.isNaN(t)) return 'now'
-  const diff = Date.now() - t
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'now'
-  if (mins < 60) return `${mins}m`
-  const h = Math.floor(mins / 60)
-  if (h < 24) return `${h}h`
-  return `${Math.floor(h / 24)}d`
-}
-
-const ALERTS_STALE_MS = 30_000
+const TIME_AGO_TICK_MS = 30_000
 
 /** Unique Supabase Realtime topic — reusing the same name returns an already-subscribed channel. */
 let alertsRealtimeTopicSeq = 0
@@ -67,13 +56,19 @@ export default function NotificationsScreen() {
   const [userId, setUserId] = useState<string | null>(null)
   const [showMessages, setShowMessages] = useState(true)
   const [busyInviteId, setBusyInviteId] = useState<string | null>(null)
+  const [nowTick, setNowTick] = useState(() => Date.now())
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadInFlight = useRef<Promise<void> | null>(null)
-  const lastFetchedAt = useRef(boot.loading ? 0 : Date.now())
+  const needsReloadAfter = useRef(false)
   const initialDone = useRef(!boot.loading)
+  const userIdRef = useRef<string | null>(null)
+  userIdRef.current = userId
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
-    if (loadInFlight.current) return loadInFlight.current
+  const load = useCallback(async (_opts?: { silent?: boolean }) => {
+    if (loadInFlight.current) {
+      needsReloadAfter.current = true
+      return loadInFlight.current
+    }
     loadInFlight.current = (async () => {
       try {
         const timed = await runTimed('notifications.load', async () => {
@@ -108,7 +103,6 @@ export default function NotificationsScreen() {
           setRows(feed)
           setReadKeys(reads)
           cacheNotifications(user.id, { rows: feed, reads: Array.from(reads) })
-          lastFetchedAt.current = Date.now()
           return { feed: feed.length, reads: reads.size }
         })
         if (__DEV__ && timed.value) {
@@ -123,13 +117,17 @@ export default function NotificationsScreen() {
       await loadInFlight.current
     } finally {
       loadInFlight.current = null
+      if (needsReloadAfter.current) {
+        needsReloadAfter.current = false
+        void load()
+      }
     }
   }, [])
 
   const scheduleReload = useCallback(() => {
     if (reloadTimer.current) clearTimeout(reloadTimer.current)
     reloadTimer.current = setTimeout(() => {
-      void load()
+      void load({ silent: true })
       reloadTimer.current = null
     }, 280)
   }, [load])
@@ -142,17 +140,29 @@ export default function NotificationsScreen() {
     return () => sub.data.subscription.unsubscribe()
   }, [load])
 
+  useEffect(() => {
+    return subscribeAlertsLivePatch((patch) => {
+      const uid = userIdRef.current
+      if (uid && patch.userId !== uid) return
+      if (!uid) setUserId(patch.userId)
+      setRows((prev) => {
+        const idx = prev.findIndex((r) => r.id === patch.row.id)
+        if (idx === -1) return [patch.row, ...prev]
+        if (prev[idx] === patch.row) return prev
+        const next = prev.slice()
+        next[idx] = patch.row
+        return next
+      })
+    })
+  }, [])
+
   useFocusEffect(
     useCallback(() => {
-      if (!initialDone.current) {
-        void load().finally(() => invalidateAlertsBadge())
-        return
-      }
-      if (lastFetchedAt.current > 0 && Date.now() - lastFetchedAt.current < ALERTS_STALE_MS) {
-        invalidateAlertsBadge()
-        return
-      }
+      setNowTick(Date.now())
+      const tickId = setInterval(() => setNowTick(Date.now()), TIME_AGO_TICK_MS)
+      // Always silent-refresh on focus so Alerts stay live (no 30s stale skip).
       void load({ silent: true }).finally(() => invalidateAlertsBadge())
+      return () => clearInterval(tickId)
     }, [load])
   )
 
@@ -176,6 +186,8 @@ export default function NotificationsScreen() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, onChange)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, onChange)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'project_crew_invites' }, onChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'project_milestones' }, onChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'milestones' }, onChange)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'user_alert_reads' }, onChange)
         .subscribe()
     })()
@@ -253,7 +265,7 @@ export default function NotificationsScreen() {
       }
       if (item.projectId) router.push(`/project/${item.projectId}`)
     },
-    [router, userId]
+    [router, userId, rows]
   )
 
   const showInitialSkeleton = loading && rows.length === 0
@@ -296,7 +308,7 @@ export default function NotificationsScreen() {
                               ? 'Workspace'
                               : 'Project'}
                 </Text>
-                <Text style={styles.time}>{timeAgo(item.at)}</Text>
+                <Text style={styles.time}>{formatTimeAgo(item.at, nowTick)}</Text>
               </View>
               <Text style={styles.cardTitle}>{item.title}</Text>
               <Text style={styles.body}>{item.body}</Text>

@@ -30,6 +30,10 @@ import { getCache, setCache } from '@/lib/appCache'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { loadCeoPlatformUserStats } from '@/lib/ceoPlatformMetrics'
 import { ensureOwnProfileName } from '@/lib/ensureProfileName'
+import { CREA_API_TAB_TIMEOUT_MS, fetchCreaApi } from '@/lib/creaApiFetch'
+import { companySubscriptionPlanForDb } from '@/lib/companyPlanFromSession'
+import { normalizeFreelancerPlanKey } from '@/lib/billingDisplay'
+import { isCeoUserId } from '@/lib/ceo'
 
 const DISK_OVERVIEW_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -137,6 +141,13 @@ export function parseCeoSnapshot(raw: unknown): CeoSnapshot {
   }
 }
 
+/** Transient RN/Supabase blips — never show these as a CEO error banner. */
+export function sanitizeCeoRpcError(msg: string | null | undefined): string | null {
+  if (!msg || !String(msg).trim()) return null
+  const soft = /network request failed|failed to fetch|timeout|aborted|timed out/i.test(String(msg))
+  return soft ? null : String(msg)
+}
+
 export function quickActionsForRole(
   role: string | null,
   opts?: { freelancerPlan?: FreelancerPlan; companyPlan?: CompanySubscriptionPlanDb }
@@ -206,9 +217,44 @@ export function quickActionsForRole(
 
 const INVOICE_STATS_LIMIT = 500
 
-export async function loadDashboardOverview(
+async function fetchDashboardOverviewFromApi(
   userId: string
 ): Promise<DashboardOverviewData | null> {
+  try {
+    type ApiPayload = Omit<DashboardOverviewData, 'userId'> & {
+      companyPlan?: string
+      freelancerPlan?: string
+    }
+    const { data, error } = await fetchCreaApi<ApiPayload>('/api/app/dashboard-overview', {
+      method: 'GET',
+      timeoutMs: CREA_API_TAB_TIMEOUT_MS,
+    })
+    if (error || !data || typeof data.name !== 'string') {
+      if (__DEV__ && error) console.warn('[dashboard] API', error)
+      return null
+    }
+    return {
+      userId,
+      name: data.name,
+      role: data.role ?? null,
+      avatarUrl: data.avatarUrl ?? null,
+      stats: Array.isArray(data.stats) ? data.stats : [],
+      income: data.income ?? null,
+      ceoSnap: data.ceoSnap ?? null,
+      ceoRpcError: sanitizeCeoRpcError(data.ceoRpcError),
+      freelancerPlan: normalizeFreelancerPlanKey(data.freelancerPlan),
+      companyPlan: companySubscriptionPlanForDb(data.companyPlan),
+      trialEndsAt: data.trialEndsAt ?? null,
+      accountCreatedAt: data.accountCreatedAt ?? null,
+      hasStripeCustomer: Boolean(data.hasStripeCustomer),
+    }
+  } catch (e) {
+    if (__DEV__) console.warn('[dashboard] API exception', e)
+    return null
+  }
+}
+
+async function loadDashboardOverviewLocal(userId: string): Promise<DashboardOverviewData | null> {
   const [{ data: profile }, { data: { user } }] = await Promise.all([
     supabase
       .from('profiles')
@@ -249,23 +295,49 @@ export async function loadDashboardOverview(
     hasStripeCustomer: userHasStripeCustomer(user),
   }
 
-  if (isCeoProfile(resolvedRole)) {
-    const [{ data: ceoData, error: ceoErr }, platformUsers] = await Promise.all([
-      supabase.rpc('ceo_dashboard_snapshot'),
-      loadCeoPlatformUserStats(supabase),
-    ])
-    const rpcSnap = parseCeoSnapshot(ceoData)
-    const ceoSnap: CeoSnapshot = {
-      ok: true,
-      all_users: platformUsers.allUsers,
-      new_users: platformUsers.newUsers,
-      active_jobs: rpcSnap.active_jobs,
-      completed_jobs: rpcSnap.completed_jobs,
+  if (isCeoProfile(resolvedRole) || isCeoUserId(userId)) {
+    try {
+      const [{ data: ceoData, error: ceoErr }, platformUsersResult] = await Promise.all([
+        supabase.rpc('ceo_dashboard_snapshot'),
+        loadCeoPlatformUserStats(supabase).catch((e) => {
+          if (__DEV__) console.warn('[dashboard] ceo platform stats', e)
+          return null
+        }),
+      ])
+      const rpcSnap = parseCeoSnapshot(ceoData)
+      const platformUsers = platformUsersResult
+      const ceoSnap: CeoSnapshot = {
+        ok: true,
+        all_users: platformUsers?.allUsers || rpcSnap.all_users,
+        new_users: platformUsers?.newUsers || rpcSnap.new_users,
+        active_jobs: rpcSnap.active_jobs,
+        completed_jobs: rpcSnap.completed_jobs,
+      }
+      // Prefer live numbers over a scary banner when either path succeeded.
+      const hasAnyMetric =
+        ceoSnap.all_users > 0 ||
+        ceoSnap.new_users > 0 ||
+        ceoSnap.active_jobs > 0 ||
+        ceoSnap.completed_jobs > 0
+      if (ceoErr && !rpcSnap.ok && !hasAnyMetric) {
+        return {
+          ...base,
+          role: 'ceo',
+          ceoSnap,
+          ceoRpcError: sanitizeCeoRpcError(ceoErr.message || 'Could not load metrics'),
+        }
+      }
+      return { ...base, role: 'ceo', ceoSnap, ceoRpcError: null }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not load metrics'
+      if (__DEV__) console.warn('[dashboard] ceo load', e)
+      return {
+        ...base,
+        role: 'ceo',
+        ceoSnap: parseCeoSnapshot(null),
+        ceoRpcError: sanitizeCeoRpcError(msg),
+      }
     }
-    if (ceoErr && !rpcSnap.ok) {
-      return { ...base, ceoRpcError: ceoErr.message, ceoSnap }
-    }
-    return { ...base, ceoSnap, ceoRpcError: null }
   }
 
   if (isCompanyProfile(resolvedRole)) {
@@ -278,12 +350,12 @@ export async function loadDashboardOverview(
     ] = await Promise.all([
       supabase
         .from('jobs')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('company_id', userId)
         .eq('status', 'active'),
       supabase
         .from('invoices')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('company_id', userId)
         .eq('status', 'pending'),
       supabase
@@ -332,12 +404,12 @@ export async function loadDashboardOverview(
   const [{ count: appCount }, { count: viewCount }, { data: invs }] = await Promise.all([
     supabase
       .from('job_applications')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true })
       .eq('freelancer_id', userId)
       .eq('status', 'pending'),
     supabase
       .from('profile_views')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true })
       .eq('viewed_freelancer_id', userId),
     supabase
       .from('invoices')
@@ -358,6 +430,25 @@ export async function loadDashboardOverview(
   }
 }
 
+export async function loadDashboardOverview(
+  userId: string
+): Promise<DashboardOverviewData | null> {
+  // CEO metrics are Supabase-native — skip web API (avoids RN "Network request failed" to creaservices).
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  const metaRole = String(session?.user?.user_metadata?.role ?? '').toLowerCase()
+  if (metaRole === 'ceo' || isCeoUserId(userId)) {
+    return loadDashboardOverviewLocal(userId)
+  }
+
+  // Start local path immediately so a cold/hung API doesn't block the tab.
+  const localPromise = loadDashboardOverviewLocal(userId)
+  const fromApi = await fetchDashboardOverviewFromApi(userId)
+  if (fromApi) return fromApi
+  return localPromise
+}
+
 export function cacheDashboardOverview(data: DashboardOverviewData) {
   const { userId, ...rest } = data
   setCache(dashboardOverviewCacheKey(userId), rest, 120_000)
@@ -366,7 +457,7 @@ export function cacheDashboardOverview(data: DashboardOverviewData) {
 export function readCachedDashboardOverview(userId: string): DashboardOverviewData | null {
   const hit = getCache<DashboardOverviewCache>(dashboardOverviewCacheKey(userId))
   if (!hit) return null
-  return { userId, ...hit }
+  return { userId, ...hit, ceoRpcError: sanitizeCeoRpcError(hit.ceoRpcError) }
 }
 
 export async function hydrateDashboardOverviewFromDisk(
@@ -374,7 +465,7 @@ export async function hydrateDashboardOverviewFromDisk(
 ): Promise<DashboardOverviewData | null> {
   const hit = await readPersistedCache<DashboardOverviewCache>(dashboardOverviewDiskKey(userId))
   if (!hit) return null
-  const data = { userId, ...hit }
+  const data = { userId, ...hit, ceoRpcError: sanitizeCeoRpcError(hit.ceoRpcError) }
   cacheDashboardOverview(data)
   return data
 }

@@ -39,6 +39,7 @@ import {
   type JobFeedRow,
 } from '@/lib/jobsFeedLoad'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
+import { readCachedDashboardOverview } from '@/lib/dashboardOverview'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 type Job = JobFeedRow
@@ -166,7 +167,10 @@ export default function JobsListScreen() {
         return
       }
 
-      const loaded = await loadJobsFeed(user, { feedTab })
+      const loaded = await loadJobsFeed(user, {
+        feedTab,
+        knownRole: peekWarmedOverview()?.role ?? readCachedDashboardOverview(user.id)?.role ?? null,
+      })
       if (!loaded) {
         setLoading(false)
         return

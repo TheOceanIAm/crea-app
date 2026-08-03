@@ -24,7 +24,11 @@ export function useAppStorePlanPrices(role: 'freelancer' | 'company' | '') {
     }
     setLoading(true)
     try {
-      const { packages, error } = await fetchRoleOfferingPackages(role)
+      // Newly approved IAPs can take a bit to appear in StoreKit — retry briefly.
+      const { packages, error } = await fetchRoleOfferingPackages(role, {
+        retries: 5,
+        retryDelayMs: 2000,
+      })
       if (error || !packages.length) {
         setPriceLine(null)
         return

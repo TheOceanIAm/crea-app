@@ -1,4 +1,5 @@
 import type { User } from '@supabase/supabase-js'
+import { isCeoUserId } from '@/lib/ceo'
 
 function norm(r: string | null | undefined): string {
   return String(r ?? '').trim().toLowerCase()
@@ -6,12 +7,14 @@ function norm(r: string | null | undefined): string {
 
 /**
  * Single place for “which role does this session have?”.
- * 1) `profiles.role` from the database
- * 2) Fallback: `user.user_metadata.role` / `user_role`, then `user.app_metadata.role`
+ * 1) Canonical CEO user ids
+ * 2) `profiles.role` from the database
+ * 3) Fallback: `user.user_metadata.role` / `user_role`, then `user.app_metadata.role`
  *    (some web apps set CEO only in auth metadata — without this, Expo shows Freelancer).
  * Prefer keeping `profiles.role` in sync in Supabase for RLS and RPCs.
  */
 export function resolveAppRole(profileRole: string | null | undefined, authUser: User | null | undefined): string {
+  if (isCeoUserId(authUser?.id)) return 'ceo'
   const prof = norm(profileRole)
   const meta = readAuthMetaRole(authUser)
 

@@ -41,6 +41,9 @@ import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { SubscriptionLegalLinks } from '@/components/SubscriptionLegalLinks'
 import { LocationAutocompleteInput } from '@/components/LocationAutocompleteInput'
 import { supabase } from '@/lib/supabase'
+import { getAuthUser } from '@/lib/getAuthUser'
+import { userFacingErrorMessage } from '@/lib/userFacingError'
+import { readCachedDashboardOverview } from '@/lib/dashboardOverview'
 import { deleteAccountViaApi } from '@/lib/deleteAccountApi'
 import {
   openCreaWebsiteInBrowser,
@@ -537,7 +540,7 @@ export default function ProfileScreen() {
       return
     }
     setLoadError(null)
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getAuthUser()
     if (!user) {
       setAuthUserId(null)
       setStripeCustomerId(null)
@@ -552,6 +555,16 @@ export default function ProfileScreen() {
     setAccountCreatedAt(typeof user.created_at === 'string' ? user.created_at : null)
     const cid = user.user_metadata?.stripe_customer_id
     setStripeCustomerId(typeof cid === 'string' && cid.trim() ? cid.trim() : null)
+
+    // Instant paint from dashboard cache while full settings load.
+    const dash = readCachedDashboardOverview(user.id)
+    if (dash && !opts?.force) {
+      if (dash.name) setEditName(dash.name)
+      if (dash.role) setRole(dash.role)
+      if (dash.avatarUrl) setAvatarUrl(dash.avatarUrl)
+      if (dash.trialEndsAt) setTrialEndsAt(dash.trialEndsAt)
+      setLoading(false)
+    }
 
     const [{ data, error }, { data: freelancerRates, data: freelancerMirror }] = await Promise.all([
       supabase
@@ -571,7 +584,7 @@ export default function ProfileScreen() {
     ])
 
     if (error) {
-      setLoadError(error.message)
+      setLoadError(userFacingErrorMessage(error, error.message))
       setEditName('')
       setRole('')
       setHeadline('')
@@ -1384,14 +1397,33 @@ export default function ProfileScreen() {
             <View style={styles.errorBanner}>
               <Text style={styles.errorTitle}>Couldn’t load profile</Text>
               <Text style={styles.errorText}>{loadError}</Text>
-              <Text style={styles.errorHint}>
-                In Supabase → SQL Editor, run scripts from{' '}
-                <Text style={styles.errorMono}>supabase/sql</Text>:{' '}
-                <Text style={styles.errorMono}>extend_profile_identity.sql</Text>,{' '}
-                <Text style={styles.errorMono}>extend_profile_settings_pages.sql</Text>, and{' '}
-                <Text style={styles.errorMono}>extend_profile_rates.sql</Text> (adds day rates). For jobs,
-                applications, and projects, also run <Text style={styles.errorMono}>crea_app_features.sql</Text>.
-              </Text>
+              {/connection pool|timed out|timeout|temporarily unavailable|database is busy/i.test(
+                loadError
+              ) ? (
+                <Text style={styles.errorHint}>
+                  The database is busy right now (connection pool). Wait a few seconds, leave this tab and
+                  come back — or tap Retry. No SQL migrations needed for this error.
+                </Text>
+              ) : /column|schema|does not exist|PGRST/i.test(loadError) ? (
+                <Text style={styles.errorHint}>
+                  In Supabase → SQL Editor, run scripts from{' '}
+                  <Text style={styles.errorMono}>supabase/sql</Text>:{' '}
+                  <Text style={styles.errorMono}>extend_profile_identity.sql</Text>,{' '}
+                  <Text style={styles.errorMono}>extend_profile_settings_pages.sql</Text>, and{' '}
+                  <Text style={styles.errorMono}>extend_profile_rates.sql</Text> (adds day rates). For jobs,
+                  applications, and projects, also run{' '}
+                  <Text style={styles.errorMono}>crea_app_features.sql</Text>.
+                </Text>
+              ) : (
+                <Text style={styles.errorHint}>Try again in a moment. If it keeps failing, sign out and back in.</Text>
+              )}
+              <TouchableOpacity
+                style={styles.retryBtn}
+                onPress={() => void load({ force: true })}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.retryBtnText}>Retry</Text>
+              </TouchableOpacity>
             </View>
           ) : null}
 
@@ -2789,6 +2821,15 @@ const styles = StyleSheet.create({
   errorText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, marginBottom: 8 },
   errorHint: { color: 'rgba(255,255,255,0.35)', fontSize: 11, lineHeight: 16 },
   errorMono: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 10 },
+  retryBtn: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFDC00',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  retryBtnText: { color: '#0a0a0a', fontWeight: '700', fontSize: 13 },
   profileStrengthCard: {
     backgroundColor: 'rgba(255,255,255,0.03)',
     borderRadius: 14,

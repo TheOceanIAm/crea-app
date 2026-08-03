@@ -92,15 +92,18 @@ export async function persistJobsFeedToDisk(
 
 export async function loadJobsFeed(
   user: User,
-  opts?: { feedTab?: 'crea' | 'external' }
+  opts?: { feedTab?: 'crea' | 'external'; knownRole?: string | null }
 ): Promise<{ cacheKey: string; data: JobsFeedCache; companyOnly: boolean; feedTab: 'crea' | 'external' } | null> {
   const feedTab = opts?.feedTab ?? 'crea'
-  const { data: prof } = await supabase
-    .from('profiles')
-    .select('role, subscription_tier')
-    .eq('id', user.id)
-    .maybeSingle()
-  const role = resolveAppRole(prof?.role, user)
+  let role = opts?.knownRole ? resolveAppRole(opts.knownRole, user) : null
+  if (!role) {
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('role, subscription_tier')
+      .eq('id', user.id)
+      .maybeSingle()
+    role = resolveAppRole(prof?.role, user)
+  }
   const companyOnly = isCompanyProfile(role)
   const cacheKey = jobsFeedCacheKey(user.id, feedTab, companyOnly)
 
@@ -134,6 +137,7 @@ export async function loadJobsFeed(
   }
   q = q.eq('is_solo_workspace', false)
 
+  // Fire jobs query; company branding for freelancer feed can overlap once we have rows.
   const { data: jobRows, error } = await q
   if (error || !jobRows?.length) {
     return { cacheKey, data: { jobs: [], externalJobs: [] }, companyOnly, feedTab }
@@ -147,9 +151,16 @@ export async function loadJobsFeed(
 
   const companyById: Record<string, { name: string; avatar_url: string | null }> = {}
   if (ids.length > 0) {
-    const { data: profiles } = await supabase.from('profiles').select('id, name, avatar_url').in('id', ids)
+    const [{ data: profiles }, { data: cps }] = await Promise.all([
+      supabase.from('profiles').select('id, name, avatar_url').in('id', ids),
+      supabase.from('company_profiles').select('id, logo_url').in('id', ids),
+    ])
+    const logoById = Object.fromEntries(
+      (cps ?? []).map((c) => [c.id, typeof c.logo_url === 'string' ? c.logo_url.trim() : ''])
+    )
     for (const p of profiles ?? []) {
-      const url = p.avatar_url?.trim()
+      const logo = logoById[p.id]
+      const url = (logo && /^https?:\/\//i.test(logo) ? logo : p.avatar_url?.trim()) || null
       companyById[p.id] = {
         name: (p.name || 'Company').trim() || 'Company',
         avatar_url: url && /^https?:\/\//i.test(url) ? url : null,

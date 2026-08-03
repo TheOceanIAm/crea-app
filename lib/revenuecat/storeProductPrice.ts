@@ -6,6 +6,7 @@ import {
   FREELANCER_PLAN_PRICE_EUR,
   formatCatalogPrice,
 } from '@/lib/planCatalogPrices'
+import { isCompanyStoreProductId } from '@/lib/revenuecat/config'
 
 export type StorePriceProduct = {
   price: number
@@ -183,7 +184,12 @@ function catalogAmountForPackage(
   role: 'freelancer' | 'company'
 ): number | null {
   const cadence = packageCadence(pkg)
-  if (role === 'company') {
+  // Prefer Store product ID over UI role so a mis-filtered Company SKU never
+  // displays Freelancer catalog amounts (€8.99 / €59.99).
+  const catalogRole: 'freelancer' | 'company' = isCompanyStoreProductId(pkg.product.identifier)
+    ? 'company'
+    : role
+  if (catalogRole === 'company') {
     return cadence === 'yearly' ? COMPANY_PLAN_PRICE_EUR.proYearly : COMPANY_PLAN_PRICE_EUR.proMonthly
   }
   return cadence === 'yearly' ? FREELANCER_PLAN_PRICE_EUR.proYearly : FREELANCER_PLAN_PRICE_EUR.proMonthly

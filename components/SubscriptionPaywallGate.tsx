@@ -47,8 +47,9 @@ export function SubscriptionPaywallGate() {
     let cancelled = false;
     const run = async () => {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user || cancelled) {
         setPaywall(false);
         return;

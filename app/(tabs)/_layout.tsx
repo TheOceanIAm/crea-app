@@ -17,7 +17,12 @@ import { prefetchMainTabData } from '@/lib/prefetchTabData'
 import { readBootstrapHints, writeBootstrapHints } from '@/lib/bootstrapHints'
 import { hydrateDashboardOverviewFromDisk } from '@/lib/dashboardOverview'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
-import { countUnreadAlerts } from '@/lib/notificationsFeed'
+import { refreshNotificationsAndCount } from '@/lib/notificationsCache'
+import {
+  applyProjectMessageInsertAlert,
+  countUnreadAlertsCached,
+  enrichProjectMessageAlertTitle,
+} from '@/lib/alertsLivePatch'
 import { subscribeAlertsInvalidate } from '@/lib/invalidateAlerts'
 import { registerPushTokenSilently } from '@/lib/registerPushOnLaunch'
 import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
@@ -39,23 +44,35 @@ export default function TabLayout() {
   const [showWorkspaceProjectsTab, setShowWorkspaceProjectsTab] = useState(false)
   const [showMarketplaceJobsTab, setShowMarketplaceJobsTab] = useState(false)
   const unreadAlertsInFlight = useRef<Promise<void> | null>(null)
+  const needsUnreadAlertsReload = useRef(false)
   const dmEnabled = Boolean(userId)
   const { unreadDmCount } = useUnreadDmCount(userId, dmEnabled)
 
   const loadUnreadAlertsCount = useCallback(async (uid: string) => {
-    if (unreadAlertsInFlight.current) return unreadAlertsInFlight.current
+    if (unreadAlertsInFlight.current) {
+      needsUnreadAlertsReload.current = true
+      return unreadAlertsInFlight.current
+    }
+    // Instant badge from patched cache while a full recount runs.
+    const cachedCount = countUnreadAlertsCached(uid)
+    if (cachedCount != null) setUnreadAlertsCount(cachedCount)
+
     unreadAlertsInFlight.current = (async () => {
       try {
-        const n = await countUnreadAlerts(uid)
+        const n = await refreshNotificationsAndCount(uid)
         setUnreadAlertsCount(n)
       } catch {
-        setUnreadAlertsCount(0)
+        setUnreadAlertsCount(countUnreadAlertsCached(uid) ?? 0)
       }
     })()
     try {
       await unreadAlertsInFlight.current
     } finally {
       unreadAlertsInFlight.current = null
+      if (needsUnreadAlertsReload.current) {
+        needsUnreadAlertsReload.current = false
+        void loadUnreadAlertsCount(uid)
+      }
     }
   }, [])
 
@@ -181,7 +198,30 @@ export default function TabLayout() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => {
         void loadUnreadAlertsCount(userId)
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_messages' }, () => {
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'project_messages' },
+        (payload) => {
+          const result = applyProjectMessageInsertAlert(
+            userId,
+            (payload.new ?? {}) as Record<string, unknown>
+          )
+          if (result.badgeDelta > 0) {
+            setUnreadAlertsCount((n) => n + result.badgeDelta)
+          } else if (result.inserted) {
+            setUnreadAlertsCount(result.unreadCount)
+          }
+          if (result.inserted && result.row && result.row.title === 'Project') {
+            void enrichProjectMessageAlertTitle(userId, result.row.projectId, result.row.id)
+          }
+          // Background reconcile (trailing-safe) after optimistic patch.
+          void loadUnreadAlertsCount(userId)
+        }
+      )
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'project_messages' }, () => {
+        void loadUnreadAlertsCount(userId)
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'project_messages' }, () => {
         void loadUnreadAlertsCount(userId)
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, () => {

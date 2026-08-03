@@ -9,6 +9,7 @@ import {
 import { getAuthUser } from '@/lib/getAuthUser'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
+import { CREA_API_TAB_TIMEOUT_MS, fetchCreaApi } from '@/lib/creaApiFetch'
 import { supabase } from '@/lib/supabase'
 
 export type ListingKind = 'private' | 'customer'
@@ -127,7 +128,29 @@ export async function persistWorkspaceProjectsToDisk(
   await writePersistedCache(workspaceProjectsDiskKey(userId), data, DISK_TTL_MS)
 }
 
-export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceProjectsCache | null> {
+async function fetchWorkspaceProjectsFromApi(): Promise<WorkspaceProjectsCache | null> {
+  try {
+    const { data, error } = await fetchCreaApi<WorkspaceProjectsCache>('/api/app/workspace-projects', {
+      method: 'GET',
+      timeoutMs: CREA_API_TAB_TIMEOUT_MS,
+    })
+    if (error || !data || !Array.isArray(data.listings)) {
+      if (__DEV__ && error) console.warn('[workspace-projects] API', error)
+      return null
+    }
+    return {
+      listings: data.listings,
+      archivedListings: Array.isArray(data.archivedListings) ? data.archivedListings : [],
+      canCreatePrivate: Boolean(data.canCreatePrivate),
+      viewerRole: data.viewerRole === 'company' ? 'company' : 'freelancer',
+    }
+  } catch (e) {
+    if (__DEV__) console.warn('[workspace-projects] API exception', e)
+    return null
+  }
+}
+
+async function loadWorkspaceProjectsLocal(user: User): Promise<WorkspaceProjectsCache | null> {
   const { data: p } = await supabase
     .from('profiles')
     .select('role, subscription_tier, name, avatar_url')
@@ -497,6 +520,13 @@ export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceP
     canCreatePrivate: nextCanPrivate,
     viewerRole: 'freelancer',
   }
+}
+
+export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceProjectsCache | null> {
+  const localPromise = loadWorkspaceProjectsLocal(user)
+  const fromApi = await fetchWorkspaceProjectsFromApi()
+  if (fromApi) return fromApi
+  return localPromise
 }
 
 async function loadDeclinedCustomerJobIds(freelancerId: string, jobIds: string[]): Promise<Set<string>> {

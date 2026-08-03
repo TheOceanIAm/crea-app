@@ -31,22 +31,6 @@ export type CeoMrrTotals = CeoMrrCounts & {
   totalSubs: number
 }
 
-function isRealFreelancerProfile(
-  id: string,
-  role: string | null | undefined,
-  betaIds: Set<string>,
-  ceoIds: Set<string>
-): boolean {
-  if (betaIds.has(id)) return false
-  if (ceoIds.has(id)) return false
-  return String(role ?? '').trim().toLowerCase() === 'freelancer'
-}
-
-function isRealCompanyProfile(id: string, role: string | null | undefined, betaIds: Set<string>): boolean {
-  if (betaIds.has(id)) return false
-  return String(role ?? '').trim().toLowerCase() === 'company'
-}
-
 async function loadBetaIds(supabase: SupabaseClient): Promise<Set<string>> {
   const { data } = await supabase.from('profiles').select('id').eq('beta_invite', true)
   return new Set((data ?? []).map((p: { id: string }) => p.id))
@@ -57,7 +41,7 @@ export async function loadCeoPlatformUserStats(
   supabase: SupabaseClient
 ): Promise<CeoPlatformUserStats> {
   const ceoIds = new Set(getAllCeoUserIds())
-  const betaIds = await loadBetaIds(supabase)
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
   let freelancersQ = supabase
     .from('profiles')
@@ -67,12 +51,23 @@ export async function loadCeoPlatformUserStats(
     freelancersQ = freelancersQ.neq('id', id)
   }
 
+  let newFreelancersQ = supabase
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('role', 'freelancer')
+    .eq('beta_invite', false)
+    .gte('created_at', weekAgo)
+  for (const id of ceoIds) {
+    newFreelancersQ = newFreelancersQ.neq('id', id)
+  }
+
   const [
     { count: freelancerRaw },
     { count: companyRaw },
     { count: betaFreelancerN },
     { count: betaCompanyN },
-    { data: recentProfiles },
+    { count: newFreelancerN },
+    { count: newCompanyN },
   ] = await Promise.all([
     freelancersQ,
     supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'company'),
@@ -86,27 +81,21 @@ export async function loadCeoPlatformUserStats(
       .select('id', { count: 'exact', head: true })
       .eq('role', 'company')
       .eq('beta_invite', true),
-    supabase.from('profiles').select('id, role, created_at').eq('beta_invite', false),
+    newFreelancersQ,
+    supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'company')
+      .eq('beta_invite', false)
+      .gte('created_at', weekAgo),
   ])
 
   const freelancers = Math.max(0, (freelancerRaw ?? 0) - (betaFreelancerN ?? 0))
   const companies = Math.max(0, (companyRaw ?? 0) - (betaCompanyN ?? 0))
 
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-  let newUsers = 0
-  for (const row of recentProfiles ?? []) {
-    const id = (row as { id: string }).id
-    const role = (row as { role?: string | null }).role
-    const createdAt = (row as { created_at?: string | null }).created_at
-    const isFreelancer = isRealFreelancerProfile(id, role, betaIds, ceoIds)
-    const isCompany = isRealCompanyProfile(id, role, betaIds)
-    if (!isFreelancer && !isCompany) continue
-    if (createdAt && new Date(createdAt).getTime() >= weekAgo) newUsers++
-  }
-
   return {
     allUsers: freelancers + companies,
-    newUsers,
+    newUsers: (newFreelancerN ?? 0) + (newCompanyN ?? 0),
     freelancers,
     companies,
   }

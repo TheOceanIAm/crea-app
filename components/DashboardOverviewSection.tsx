@@ -5,20 +5,17 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
-  Linking,
   ScrollView,
 } from 'react-native'
 import { useRouter, type Href } from 'expo-router'
 import type { LucideIcon } from 'lucide-react-native'
 import {
-  AppWindow,
   Briefcase,
   Building2,
   ChevronDown,
   ChevronUp,
   CircleCheck,
   CircleDollarSign,
-  ExternalLink,
   MessageCircle,
   Settings2,
   UserPlus,
@@ -26,8 +23,7 @@ import {
 } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { money } from '@/lib/invoiceFormatting'
-import { getCreaWebBaseUrl, openCreaWebPath } from '@/lib/creaWeb'
-import { isDevDemoWorkspaceRouteEnabled } from '@/lib/devDemoWorkspace'
+import { openCreaWebPath } from '@/lib/creaWeb'
 import {
   isCeoProfile,
   isCompanyProfile,
@@ -37,6 +33,7 @@ import { isFreelancerPro } from '@/lib/freelancerPlan'
 import {
   parseCeoSnapshot,
   quickActionsForRole,
+  sanitizeCeoRpcError,
   type DashboardOverviewData,
 } from '@/lib/dashboardOverview'
 import { DashboardSkeleton } from '@/components/ScreenSkeletons'
@@ -87,7 +84,6 @@ export function DashboardOverviewSection({
   if (!overview) return null
 
   const firstName = name.split(' ')[0] || name || 'there'
-  const webBase = getCreaWebBaseUrl()
 
   const collapseToggle = showCollapseToggle ? (
     <TouchableOpacity
@@ -140,7 +136,7 @@ export function DashboardOverviewSection({
 
   if (isCeoProfile(role ?? undefined)) {
     const snap = overview.ceoSnap ?? parseCeoSnapshot(null)
-    const ceoRpcError = overview.ceoRpcError
+    const ceoRpcError = sanitizeCeoRpcError(overview.ceoRpcError)
     const statDefs: {
       label: string
       value: string
@@ -186,22 +182,6 @@ export function DashboardOverviewSection({
       { label: 'Messages', icon: MessageCircle, onPress: () => router.navigate('/(tabs)/messages') },
       { label: 'Job pool', icon: Briefcase, onPress: () => router.navigate('/(tabs)/jobs') },
       { label: 'Settings', icon: Settings2, onPress: () => router.push('/(tabs)/ceo-settings' as Href) },
-      {
-        label: 'Web admin',
-        icon: ExternalLink,
-        onPress: () => {
-          if (webBase) Linking.openURL(webBase).catch(() => {})
-        },
-      },
-      ...(isDevDemoWorkspaceRouteEnabled()
-        ? [
-            {
-              label: 'Demo workspace',
-              icon: AppWindow,
-              onPress: () => router.push('/project/demo' as Href),
-            } satisfies CeoQuick,
-          ]
-        : []),
     ]
 
     return (
@@ -260,13 +240,11 @@ export function DashboardOverviewSection({
         <View style={styles.actionsGrid}>
           {ceoQuick.map((a) => {
             const Icon = a.icon
-            const disabled = a.label === 'Web admin' && !webBase
             return (
               <TouchableOpacity
                 key={a.label}
-                style={[styles.actionCard, disabled && styles.actionCardDisabled]}
+                style={styles.actionCard}
                 onPress={a.onPress}
-                disabled={disabled}
                 activeOpacity={0.7}
               >
                 <View style={styles.actionIconWrap}>
