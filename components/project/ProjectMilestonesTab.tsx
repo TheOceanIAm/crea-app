@@ -21,7 +21,10 @@ import {
   deleteWorkspaceMilestone,
   fetchWorkspaceMilestones,
   insertWorkspaceMilestone,
+  MILESTONE_PRIORITY_CONFIG,
   setWorkspaceMilestoneCompleted,
+  setWorkspaceMilestonePriority,
+  type WorkspaceMilestonePriority,
   type WorkspaceMilestoneUi,
 } from '@/lib/workspaceMilestones'
 
@@ -32,6 +35,8 @@ type Props = {
   /** Company or lead: add/remove milestones. Crew can still mark items complete when false. */
   canManage: boolean
 }
+
+const PRIORITIES: WorkspaceMilestonePriority[] = ['p1', 'p2', 'p3']
 
 function defaultScheduleDate(): Date {
   const d = new Date()
@@ -44,6 +49,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
   const [rows, setRows] = useState<WorkspaceMilestoneUi[]>([])
   const [loading, setLoading] = useState(true)
   const [newTitle, setNewTitle] = useState('')
+  const [newPriority, setNewPriority] = useState<WorkspaceMilestonePriority>('p3')
   const [scheduleEnabled, setScheduleEnabled] = useState(false)
   const [scheduleDate, setScheduleDate] = useState(() => defaultScheduleDate())
   const [scheduleTime, setScheduleTime] = useState(() => defaultScheduleDate())
@@ -118,6 +124,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       title: t,
       position: nextOrder,
       scheduledAt: scheduledIso,
+      priority: newPriority,
     })
     setBusy(false)
     if (error || !row) {
@@ -125,6 +132,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       return
     }
     setNewTitle('')
+    setNewPriority('p3')
     setScheduleEnabled(false)
     setScheduleDate(defaultScheduleDate())
     setScheduleTime(defaultScheduleDate())
@@ -147,6 +155,16 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
     }
     setRows((prev) => prev.map((r) => (r.id === m.id ? { ...r, completed: !r.completed } : r)))
     onCountsChanged?.()
+  }
+
+  const setPriority = async (m: WorkspaceMilestoneUi, priority: WorkspaceMilestonePriority) => {
+    if (!canManage || m.priority === priority) return
+    const { error } = await setWorkspaceMilestonePriority(supabase, m.id, priority)
+    if (error) {
+      Alert.alert('Update failed', error)
+      return
+    }
+    setRows((prev) => prev.map((r) => (r.id === m.id ? { ...r, priority } : r)))
   }
 
   const remove = (m: WorkspaceMilestoneUi) => {
@@ -188,7 +206,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <Text style={styles.hint}>
         {canManage
-          ? 'Shared with the web workspace — add delivery steps with an optional date and time.'
+          ? 'Shared with the web workspace — add delivery steps with priority and an optional date and time.'
           : 'Shared with the web workspace. Check off steps as you go; only the company or lead can edit the list.'}
       </Text>
 
@@ -202,6 +220,33 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
             onChangeText={setNewTitle}
             onSubmitEditing={add}
           />
+
+          <Text style={styles.priorityLabel}>Priority</Text>
+          <View style={styles.priorityRow}>
+            {PRIORITIES.map((p) => {
+              const cfg = MILESTONE_PRIORITY_CONFIG[p]
+              const active = newPriority === p
+              return (
+                <TouchableOpacity
+                  key={p}
+                  style={[
+                    styles.priorityChip,
+                    {
+                      borderColor: active ? cfg.border : 'rgba(255,255,255,0.08)',
+                      backgroundColor: active ? cfg.bg : 'transparent',
+                    },
+                  ]}
+                  onPress={() => setNewPriority(p)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.priorityDot, { backgroundColor: cfg.color }]} />
+                  <Text style={[styles.priorityChipText, { color: active ? cfg.color : 'rgba(255,255,255,0.35)' }]}>
+                    {cfg.short}
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
 
           <TouchableOpacity
             style={styles.scheduleToggle}
@@ -257,8 +302,18 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       ) : (
         rows.map((m) => {
           const when = formatMilestoneSchedule(m.scheduledAt)
+          const cfg = MILESTONE_PRIORITY_CONFIG[m.priority]
           return (
-            <View key={m.id} style={styles.row}>
+            <View
+              key={m.id}
+              style={[
+                styles.row,
+                {
+                  backgroundColor: cfg.bg,
+                  borderColor: cfg.border,
+                },
+              ]}
+            >
               <TouchableOpacity style={styles.checkWrap} onPress={() => toggle(m)} hitSlop={8}>
                 {m.completed ? (
                   <View style={styles.checkOn}>
@@ -269,8 +324,45 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                 )}
               </TouchableOpacity>
               <View style={styles.rowBody}>
-                <Text style={[styles.title, m.completed && styles.titleDone]}>{m.title}</Text>
+                <View style={styles.titleRow}>
+                  <Text style={[styles.title, m.completed && styles.titleDone]}>{m.title}</Text>
+                  <View style={[styles.badge, { borderColor: cfg.border, backgroundColor: cfg.bg }]}>
+                    <View style={[styles.priorityDot, { backgroundColor: cfg.color }]} />
+                    <Text style={[styles.badgeText, { color: cfg.color }]}>{cfg.short}</Text>
+                  </View>
+                </View>
                 {when ? <Text style={styles.when}>Delivery: {when}</Text> : null}
+                {canManage ? (
+                  <View style={styles.priorityRowCompact}>
+                    {PRIORITIES.map((p) => {
+                      const pCfg = MILESTONE_PRIORITY_CONFIG[p]
+                      const active = m.priority === p
+                      return (
+                        <TouchableOpacity
+                          key={p}
+                          style={[
+                            styles.priorityChipCompact,
+                            {
+                              borderColor: active ? pCfg.border : 'rgba(255,255,255,0.08)',
+                              backgroundColor: active ? pCfg.bg : 'transparent',
+                            },
+                          ]}
+                          onPress={() => void setPriority(m, p)}
+                          activeOpacity={0.8}
+                        >
+                          <Text
+                            style={[
+                              styles.priorityChipCompactText,
+                              { color: active ? pCfg.color : 'rgba(255,255,255,0.3)' },
+                            ]}
+                          >
+                            {pCfg.short}
+                          </Text>
+                        </TouchableOpacity>
+                      )
+                    })}
+                  </View>
+                ) : null}
               </View>
               {canManage ? (
                 <TouchableOpacity onPress={() => remove(m)} hitSlop={8}>
@@ -311,6 +403,26 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
   },
+  priorityLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.4)',
+  },
+  priorityRow: { flexDirection: 'row', gap: 8 },
+  priorityChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  priorityChipText: { fontSize: 13, fontWeight: '700' },
+  priorityDot: { width: 8, height: 8, borderRadius: 4 },
   scheduleToggle: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   scheduleCheck: {
     width: 22,
@@ -354,8 +466,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 12,
+    marginBottom: 10,
+    borderRadius: 14,
+    borderWidth: 1,
   },
   checkWrap: { padding: 4, marginTop: 2 },
   checkOff: {
@@ -373,9 +487,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowBody: { flex: 1, gap: 4 },
-  title: { fontSize: 15, color: 'rgba(255,255,255,0.9)' },
+  rowBody: { flex: 1, gap: 6 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  title: { fontSize: 15, color: 'rgba(255,255,255,0.9)', flexShrink: 1 },
   titleDone: { textDecorationLine: 'line-through', color: 'rgba(255,255,255,0.35)' },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  badgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
   when: { fontSize: 12, color: 'rgba(255,220,0,0.75)', fontWeight: '500' },
+  priorityRowCompact: { flexDirection: 'row', gap: 6, marginTop: 2 },
+  priorityChipCompact: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  priorityChipCompactText: { fontSize: 11, fontWeight: '700' },
   trashSpacer: { width: 18 },
 })
