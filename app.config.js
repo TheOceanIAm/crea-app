@@ -18,6 +18,9 @@ basePlugins.push([
 module.exports = {
   expo: {
     ...appJson.expo,
+    // Bare workflow: runtimeVersion must be a string (policies are unsupported for EAS Update).
+    // Keep in lockstep with app version so OTA targets the matching store build.
+    runtimeVersion: String(appJson.expo.version),
     newArchEnabled: true,
     plugins: basePlugins,
   },
