@@ -58,6 +58,7 @@ import {
   freelancerProductionWeatherAllowed,
 } from '@/lib/sunPlannerWorkspaceTrial'
 import { runTimed } from '@/lib/perfMarks'
+import { CREA_API_WORKSPACE_TIMEOUT_MS, fetchCreaApi } from '@/lib/creaApiFetch'
 
 type TabId =
   | 'overview'
@@ -301,13 +302,146 @@ export default function ProjectWorkspaceScreen() {
       return
     }
     setUserId(user.id)
+
+    // Fast path: one crea-services aggregate (Bearer). Falls back to local waterfall.
+    type ShellPayload = {
+      access: string
+      isOwner: boolean
+      viewerFreelancerPlan?: string
+      job: {
+        description?: string | null
+        is_solo_workspace?: boolean | null
+        company_id?: string
+        project_status?: string | null
+      } | null
+      project: ProjectRow | null
+      counts?: { applicantsTotal?: number; acceptedCrew?: number }
+      workspaceSummaryDraft?: string
+    }
+    try {
+      const { data: shellJson, error: shellErr } = await fetchCreaApi<{ payload?: ShellPayload }>(
+        `/api/app/job-workspace/${encodeURIComponent(id)}`,
+        { timeoutMs: CREA_API_WORKSPACE_TIMEOUT_MS }
+      )
+      const shell = shellJson?.payload
+      if (!shellErr && shell?.access === 'allowed' && shell.project) {
+        const p = shell.project
+        const freelancerPlan = resolveFreelancerPlanFromUser(user)
+        const roleHint = shell.isOwner ? 'company' : 'freelancer'
+        const isStarterFreelancer =
+          roleHint !== 'company' && isFreelancerStarterPlan(freelancerPlan)
+        setStarterFreelancerPlan(isStarterFreelancer)
+        setWorkspaceOnlyPlan(
+          roleHint !== 'company' && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
+        )
+        setIsPrivateWorkspace(Boolean(shell.job?.is_solo_workspace && shell.isOwner))
+        setJobOwnerCompanyId(
+          typeof shell.job?.company_id === 'string' ? shell.job.company_id : p.company_id
+        )
+        setProject(p)
+        setBriefText(p.brief_ai_context ?? '')
+        setOverviewSummary(
+          (shell.workspaceSummaryDraft || '').trim() ||
+            (typeof shell.job?.description === 'string' ? shell.job.description.trim() : '') ||
+            (p.brief_ai_context ?? '').trim()
+        )
+        setOverviewBudgetAmount(typeof p.budget_amount === 'number' ? String(p.budget_amount) : '')
+        setOverviewBudgetType(p.budget_type ?? '')
+        setOverviewStatus(p.status)
+        setScheduleStart(
+          typeof p.scheduling_start_date === 'string' ? p.scheduling_start_date.slice(0, 10) : ''
+        )
+        setScheduleEnd(
+          typeof p.scheduling_end_date === 'string' ? p.scheduling_end_date.slice(0, 10) : ''
+        )
+        setPipelineStatCount(
+          shell.isOwner
+            ? shell.job?.is_solo_workspace
+              ? shell.counts?.acceptedCrew ?? 0
+              : shell.counts?.applicantsTotal ?? 0
+            : 0
+        )
+
+        // Plan gates (sun/weather) still need a light local resolve.
+        let sunTrialIso: string | null = null
+        const profileRes = await supabase
+          .from('profiles')
+          .select('role, subscription_tier')
+          .eq('id', user.id)
+          .maybeSingle()
+        const role = resolveAppRole(profileRes.data?.role, user)
+        if (
+          isFreelancerProfile(role) &&
+          (isFreelancerWorkspaceOnlyPlan(freelancerPlan) || isFreelancerStarterPlan(freelancerPlan))
+        ) {
+          const { data: trialData } = await supabase.rpc('touch_sun_planner_trial_start')
+          sunTrialIso = typeof trialData === 'string' ? trialData : null
+        }
+        let companyPlan: 'free' | 'pro' = 'free'
+        if (role === 'company') {
+          const { data: cp } = await supabase
+            .from('company_profiles')
+            .select('subscription_plan')
+            .eq('id', user.id)
+            .maybeSingle()
+          companyPlan = resolveCompanySubscriptionPlanFromSources(
+            user,
+            (profileRes.data as { subscription_tier?: string | null } | null)?.subscription_tier,
+            (cp as { subscription_plan?: string } | null)?.subscription_plan
+          )
+        }
+        const companySunAccess = role === 'company' && isCompanyPro(companyPlan)
+        let nextSun = false
+        let nextWeather = false
+        let nextSunHint: string | null = null
+        let nextWeatherHint: string | null = null
+        if (role === 'company') {
+          nextSun = companySunAccess
+          nextWeather = companySunAccess
+        } else if (isFreelancerProfile(role)) {
+          nextSun = freelancerProductionSunAllowed(freelancerPlan, sunTrialIso)
+          nextWeather = freelancerProductionWeatherAllowed(freelancerPlan, sunTrialIso)
+          if (!nextSun) {
+            if (isFreelancerStarterPlan(freelancerPlan)) {
+              nextSunHint =
+                'Sun Planner: your 14-day trial has ended. Upgrade to Pro for full access.'
+            } else if (isFreelancerWorkspaceOnlyPlan(freelancerPlan)) {
+              nextSunHint =
+                'Sun Planner is available on Pro. Upgrade to unlock production scheduling.'
+            } else {
+              nextSunHint = 'Sun Planner is not available on your current plan.'
+            }
+          }
+          if (!nextWeather) {
+            nextWeatherHint =
+              'Weather in production tools is available on Pro. Upgrade to unlock full access.'
+          }
+        }
+        setSunPlannerEnabled(nextSun)
+        setProductionWeatherEnabled(nextWeather)
+        setSunPlannerLockedHint(nextSunHint)
+        setProductionWeatherLockedHint(nextWeatherHint)
+        setForbidden(false)
+        setLoading(false)
+        return { hasJob: Boolean(p.job_id), via: 'aggregate' as const }
+      }
+    } catch {
+      // fall through
+    }
+
     const [profileRes, projectRes] = await Promise.all([
       supabase
         .from('profiles')
         .select('role, subscription_tier')
         .eq('id', user.id)
         .maybeSingle(),
-      supabase.from('projects').select('*').eq('id', id).maybeSingle(),
+      supabase
+        .from('projects')
+        .select(
+          'id, job_id, company_id, freelancer_id, title, status, budget_amount, budget_type, budget_currency, location, milestones_completed, milestones_total, brief_ai_context, frame_io_url, picdrop_url, brief_ai_outputs, scheduling_start_date, scheduling_end_date'
+        )
+        .eq('id', id)
+        .maybeSingle(),
     ])
     const profile = profileRes.data
     const role = resolveAppRole(profile?.role, user)
@@ -343,12 +477,15 @@ export default function ProjectWorkspaceScreen() {
       isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
     )
 
+    const PROJECT_SHELL_SELECT =
+      'id, job_id, company_id, freelancer_id, title, status, budget_amount, budget_type, budget_currency, location, milestones_completed, milestones_total, brief_ai_context, frame_io_url, picdrop_url, brief_ai_outputs, scheduling_start_date, scheduling_end_date'
+
     let row = projectRes.data
     let projErr = projectRes.error
     if (projErr || !row) {
       const ensured = await ensureSoloWorkspaceProjectRow(supabase, { projectOrJobId: id, userId: user.id })
       if (ensured.ok) {
-        const again = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
+        const again = await supabase.from('projects').select(PROJECT_SHELL_SELECT).eq('id', id).maybeSingle()
         row = again.data
         projErr = again.error
       }
@@ -359,7 +496,7 @@ export default function ProjectWorkspaceScreen() {
         userId: user.id,
       })
       if (ensuredMarketplace.ok) {
-        const again = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
+        const again = await supabase.from('projects').select(PROJECT_SHELL_SELECT).eq('id', id).maybeSingle()
         row = again.data
         projErr = again.error
       }

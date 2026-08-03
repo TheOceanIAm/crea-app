@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import { messagePreviewForInbox } from '@/lib/bookingDm'
 import { parseSupabaseTimestamp, supabaseTimestampMs } from '@/lib/supabaseTimestamp'
+import { fetchDmUnreadCountsByConversation } from '@/lib/dmUnreadCounts'
 
 export type ConvoRow = {
   id: string
@@ -60,23 +61,7 @@ export function formatMessageListTime(iso: string | null | undefined): string {
 }
 
 async function unreadCountsForConversations(conversationIds: string[], userId: string): Promise<Map<string, number>> {
-  const map = new Map<string, number>()
-  if (!conversationIds.length) return map
-  const { data, error } = await supabase
-    .from('messages')
-    .select('conversation_id')
-    .in('conversation_id', conversationIds)
-    .eq('read', false)
-    .neq('sender_id', userId)
-  if (error) {
-    console.warn('[messagesInboxLoad] unread batch', error.message)
-    return map
-  }
-  for (const row of data ?? []) {
-    const id = String((row as { conversation_id: string }).conversation_id)
-    map.set(id, (map.get(id) ?? 0) + 1)
-  }
-  return map
+  return fetchDmUnreadCountsByConversation(conversationIds, userId)
 }
 
 export type LoadInboxResult =

@@ -2,6 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { queryClient } from '@/lib/queryClient'
+import { fetchDmUnreadTotal } from '@/lib/dmUnreadCounts'
 
 let realtimeTopicSeq = 0
 
@@ -29,14 +30,7 @@ export async function fetchUnreadDmCount(uid: string): Promise<number> {
     ids = allIds.filter((id) => !archived.has(id))
   }
   if (!ids.length) return 0
-
-  const { count } = await supabase
-    .from('messages')
-    .select('*', { count: 'exact', head: true })
-    .in('conversation_id', ids)
-    .eq('read', false)
-    .neq('sender_id', uid)
-  return count ?? 0
+  return fetchDmUnreadTotal(ids, uid)
 }
 
 /**
