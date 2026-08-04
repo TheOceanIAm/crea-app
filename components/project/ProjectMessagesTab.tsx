@@ -20,7 +20,7 @@ import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { loadProfileAvatarsByIds, normalizeProfileAvatarUrl } from '@/lib/profileAvatar'
 import { mirrorProjectMessageToJob } from '@/lib/syncWorkspaceMessage'
 import { deleteOwnWorkspaceMessage, filterRowsAfterDelete } from '@/lib/deleteWorkspaceMessage'
-import { fetchMergedWorkspaceMessages, workspaceMessageSyncKey } from '@/lib/workspaceMessages'
+import { fetchMergedWorkspaceMessages, workspaceMessagesNearDuplicate } from '@/lib/workspaceMessages'
 
 type Row = {
   id: string
@@ -35,9 +35,17 @@ type Row = {
 type Props = { projectId: string; userId: string }
 
 function appendMessageRow(prev: Row[], next: Row): Row[] {
-  const syncKey = workspaceMessageSyncKey(next.sender_id, next.body, next.created_at)
   if (prev.some((m) => m.id === next.id)) return prev
-  if (prev.some((m) => workspaceMessageSyncKey(m.sender_id, m.body, m.created_at) === syncKey)) return prev
+  if (
+    prev.some((m) =>
+      workspaceMessagesNearDuplicate(
+        { senderId: m.sender_id, body: m.body, createdAt: m.created_at },
+        { senderId: next.sender_id, body: next.body, createdAt: next.created_at }
+      )
+    )
+  ) {
+    return prev
+  }
   return [...prev, next]
 }
 
@@ -205,7 +213,12 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
       )
     }
     if (jobId) {
-      const mirrored = await mirrorProjectMessageToJob({ jobId, senderId: userId, body: t })
+      const mirrored = await mirrorProjectMessageToJob({
+        jobId,
+        senderId: userId,
+        body: t,
+        createdAt: inserted?.created_at ?? null,
+      })
       if (mirrored.error) {
         Alert.alert('Sync warning', `Message sent, but web workspace sync failed: ${mirrored.error}`)
       }

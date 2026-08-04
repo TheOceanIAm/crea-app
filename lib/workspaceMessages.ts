@@ -10,6 +10,15 @@ export type WorkspaceMessageRaw = {
   profiles?: { name: string | null } | { name: string | null }[] | null
 }
 
+/** Mirror insert can land a second later — treat nearby same-body rows as one message. */
+export const WORKSPACE_MESSAGE_DEDUPE_WINDOW_MS = 30_000
+
+export function workspaceMessageTimeMs(createdAtIso: string): number {
+  const ms = Date.parse(createdAtIso)
+  return Number.isFinite(ms) ? ms : 0
+}
+
+/** Exact second key (legacy). Prefer `workspaceMessagesNearDuplicate` for UI/merge. */
 export function workspaceMessageSyncKey(senderId: string, body: string, createdAtIso: string): string {
   const t = Number.isNaN(Date.parse(createdAtIso))
     ? createdAtIso.trim()
@@ -17,18 +26,41 @@ export function workspaceMessageSyncKey(senderId: string, body: string, createdA
   return `${senderId}|${body.trim()}|${t}`
 }
 
+/** Same sender + body within a short window = job_messages ↔ project_messages mirror pair. */
+export function workspaceMessagesNearDuplicate(
+  a: { senderId: string; body: string; createdAt: string },
+  b: { senderId: string; body: string; createdAt: string },
+  windowMs = WORKSPACE_MESSAGE_DEDUPE_WINDOW_MS
+): boolean {
+  if (a.senderId !== b.senderId) return false
+  if (a.body.trim() !== b.body.trim()) return false
+  const ta = workspaceMessageTimeMs(a.createdAt)
+  const tb = workspaceMessageTimeMs(b.createdAt)
+  if (!ta || !tb) {
+    return (
+      workspaceMessageSyncKey(a.senderId, a.body, a.createdAt) ===
+      workspaceMessageSyncKey(b.senderId, b.body, b.createdAt)
+    )
+  }
+  return Math.abs(ta - tb) <= windowMs
+}
+
 function dedupeWorkspaceMessages(rows: WorkspaceMessageRaw[]): WorkspaceMessageRaw[] {
-  const byKey = new Map<string, WorkspaceMessageRaw>()
+  const kept: WorkspaceMessageRaw[] = []
   for (const row of rows) {
-    const key = workspaceMessageSyncKey(row.sender_id, row.content, row.created_at)
-    const existing = byKey.get(key)
-    if (!existing) {
-      byKey.set(key, row)
+    const dupIdx = kept.findIndex((existing) =>
+      workspaceMessagesNearDuplicate(
+        { senderId: existing.sender_id, body: existing.content, createdAt: existing.created_at },
+        { senderId: row.sender_id, body: row.content, createdAt: row.created_at }
+      )
+    )
+    if (dupIdx < 0) {
+      kept.push(row)
       continue
     }
-    if (row.id < existing.id) byKey.set(key, row)
+    if (row.id < kept[dupIdx].id) kept[dupIdx] = row
   }
-  return Array.from(byKey.values()).sort((a, b) => a.created_at.localeCompare(b.created_at))
+  return kept.sort((a, b) => a.created_at.localeCompare(b.created_at))
 }
 
 export async function fetchMergedWorkspaceMessages(
@@ -47,15 +79,15 @@ export async function fetchMergedWorkspaceMessages(
   const fromProject: WorkspaceMessageRaw[] = projRes.error
     ? []
     : (projRes.data ?? []).map((r) => {
-    const row = r as Record<string, unknown>
-    return {
-      id: String(row.id),
-      sender_id: String(row.sender_id),
-      content: String(row.body ?? ''),
-      created_at: String(row.created_at),
-      profiles: row.profiles as WorkspaceMessageRaw['profiles'],
-    }
-  })
+        const row = r as Record<string, unknown>
+        return {
+          id: String(row.id),
+          sender_id: String(row.sender_id),
+          content: String(row.body ?? ''),
+          created_at: String(row.created_at),
+          profiles: row.profiles as WorkspaceMessageRaw['profiles'],
+        }
+      })
 
   if (!opts.jobId) {
     return {

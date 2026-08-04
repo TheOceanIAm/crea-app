@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { workspaceMessageSyncKey } from '@/lib/workspaceMessages'
+import { workspaceMessagesNearDuplicate } from '@/lib/workspaceMessages'
 
 type DeleteOpts = {
   messageId: string
@@ -13,12 +13,14 @@ type DeleteOpts = {
 
 function rowMatchesDelete(
   row: { id: string; sender_id: string; content: string; created_at: string },
-  opts: DeleteOpts,
-  syncKey: string
+  opts: DeleteOpts
 ): boolean {
   if (row.sender_id !== opts.senderId) return false
   if (row.id === opts.messageId) return true
-  return workspaceMessageSyncKey(row.sender_id, row.content, row.created_at) === syncKey
+  return workspaceMessagesNearDuplicate(
+    { senderId: row.sender_id, body: row.content, createdAt: row.created_at },
+    { senderId: opts.senderId, body: opts.body, createdAt: opts.createdAt }
+  )
 }
 
 /** Remove own message and any mirrored duplicate (job_messages ↔ project_messages). */
@@ -26,7 +28,6 @@ export async function deleteOwnWorkspaceMessage(
   db: SupabaseClient,
   opts: DeleteOpts
 ): Promise<{ error: string | null }> {
-  const syncKey = workspaceMessageSyncKey(opts.senderId, opts.body, opts.createdAt)
   let deletedCount = 0
   const errors: string[] = []
 
@@ -40,7 +41,7 @@ export async function deleteOwnWorkspaceMessage(
 
     for (const row of jobRows ?? []) {
       const r = row as { id: string; sender_id: string; content: string; created_at: string }
-      if (!rowMatchesDelete(r, opts, syncKey)) continue
+      if (!rowMatchesDelete(r, opts)) continue
       const { error } = await db.from('job_messages').delete().eq('id', r.id).eq('sender_id', opts.senderId)
       if (error) errors.push(error.message)
       else deletedCount += 1
@@ -62,7 +63,7 @@ export async function deleteOwnWorkspaceMessage(
       content: r.body,
       created_at: r.created_at,
     }
-    if (!rowMatchesDelete(normalized, opts, syncKey)) continue
+    if (!rowMatchesDelete(normalized, opts)) continue
     const { error } = await db
       .from('project_messages')
       .delete()
@@ -81,10 +82,12 @@ export async function deleteOwnWorkspaceMessage(
 export function filterRowsAfterDelete<
   T extends { id: string; sender_id: string; body: string; created_at: string },
 >(prev: T[], deleted: T): T[] {
-  const syncKey = workspaceMessageSyncKey(deleted.sender_id, deleted.body, deleted.created_at)
   return prev.filter(
     (m) =>
       m.id !== deleted.id &&
-      workspaceMessageSyncKey(m.sender_id, m.body, m.created_at) !== syncKey
+      !workspaceMessagesNearDuplicate(
+        { senderId: m.sender_id, body: m.body, createdAt: m.created_at },
+        { senderId: deleted.sender_id, body: deleted.body, createdAt: deleted.created_at }
+      )
   )
 }
