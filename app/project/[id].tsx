@@ -1276,7 +1276,13 @@ export default function ProjectWorkspaceScreen() {
                 {tab === 'budget' && viewerIsCompanyOnProject ? (
                   <ProjectBudgetTab projectId={project.id} />
                 ) : null}
-                {tab === 'files' && <ProjectFilesTab projectId={project.id} />}
+                {tab === 'files' && (
+                  <ProjectFilesTab
+                    projectId={project.id}
+                    jobId={linkedJobId}
+                    userId={userId ?? ''}
+                  />
+                )}
               </View>
             </View>
           ) : (

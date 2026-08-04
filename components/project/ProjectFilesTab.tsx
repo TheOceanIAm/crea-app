@@ -20,7 +20,23 @@ import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
 
-type Props = { projectId: string }
+const JOB_ATTACHMENTS_BUCKET = 'job-attachments'
+const MAX_BYTES = 20 * 1024 * 1024
+
+type Props = {
+  projectId: string
+  /** Linked marketplace/solo job id — same store as web Files (`job_attachments`). */
+  jobId: string | null
+  userId: string
+}
+
+type FileRow = {
+  key: string
+  name: string
+  /** job-attachments path, or null for legacy project-files entries */
+  storagePath: string | null
+  source: 'job' | 'legacy'
+}
 
 type DocumentPickerModule = {
   getDocumentAsync: (opts?: {
@@ -39,12 +55,7 @@ function getDocumentPicker(): DocumentPickerModule | null {
   if (documentPickerLoad === false) return null
   if (documentPickerLoad) return documentPickerLoad
 
-  // Never call require('expo-document-picker') on native unless the native module exists — loading
-  // the JS package calls requireNativeModule and throws before try/catch helps.
-  if (
-    Platform.OS !== 'web' &&
-    requireOptionalNativeModule('ExpoDocumentPicker') == null
-  ) {
+  if (Platform.OS !== 'web' && requireOptionalNativeModule('ExpoDocumentPicker') == null) {
     documentPickerLoad = false
     return null
   }
@@ -73,35 +84,76 @@ function guessExt(name: string, mime?: string | null): string {
   return 'bin'
 }
 
-export function ProjectFilesTab({ projectId }: Props) {
-  const [names, setNames] = useState<string[]>([])
+function safeFileSegment(name: string): string {
+  const base = name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_+/g, '_')
+  return (base || 'file').slice(0, 120)
+}
+
+function uuid(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
+export function ProjectFilesTab({ projectId, jobId, userId }: Props) {
+  const [files, setFiles] = useState<FileRow[]>([])
   const [loading, setLoading] = useState(true)
   const [uploadingDoc, setUploadingDoc] = useState(false)
   const [uploadingMedia, setUploadingMedia] = useState(false)
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase.storage.from('project-files').list(projectId, {
-      limit: 100,
-      sortBy: { column: 'created_at', order: 'desc' },
-    })
-    if (error) {
-      if (error.message.includes('not found') || error.message.includes('Bucket')) {
-        setNames([])
+    const next: FileRow[] = []
+
+    if (jobId) {
+      const { data: rows, error } = await supabase
+        .from('job_attachments')
+        .select('id, file_name, storage_path, created_at')
+        .eq('job_id', jobId)
+        .order('created_at', { ascending: false })
+      if (error) {
+        console.warn('[ProjectFilesTab] job_attachments', error.message)
       } else {
-        Alert.alert('Files', error.message)
-        setNames([])
+        for (const r of rows ?? []) {
+          next.push({
+            key: `job:${String(r.id)}`,
+            name: String(r.file_name ?? 'file'),
+            storagePath: String(r.storage_path ?? ''),
+            source: 'job',
+          })
+        }
       }
-    } else {
-      const list = (data ?? []).map((f) => f.name).filter(Boolean)
-      setNames(list)
     }
+
+    // Legacy app uploads (pre job_attachments sync) — keep visible if present.
+    const { data: legacy, error: legacyErr } = await supabase.storage
+      .from('project-files')
+      .list(projectId, {
+        limit: 100,
+        sortBy: { column: 'created_at', order: 'desc' },
+      })
+    if (!legacyErr) {
+      for (const f of legacy ?? []) {
+        const name = (f.name ?? '').trim()
+        if (!name) continue
+        next.push({
+          key: `legacy:${name}`,
+          name: name.replace(/^\d+_/, ''),
+          storagePath: null,
+          source: 'legacy',
+        })
+      }
+    }
+
+    setFiles(next)
     setLoading(false)
-  }, [projectId])
+  }, [jobId, projectId])
 
   useFocusEffect(
     useCallback(() => {
       setLoading(true)
-      load()
+      void load()
     }, [load])
   )
 
@@ -109,24 +161,75 @@ export function ProjectFilesTab({ projectId }: Props) {
     buf: ArrayBuffer,
     baseName: string,
     mime: string,
+    byteLength: number,
     setBusy: (v: boolean) => void
   ) => {
-    const path = `${projectId}/${Date.now()}_${baseName}`
-    const { error } = await supabase.storage.from('project-files').upload(path, buf, {
+    if (!userId) {
+      Alert.alert('Upload failed', 'Please sign in again.')
+      setBusy(false)
+      return
+    }
+    if (byteLength > MAX_BYTES) {
+      Alert.alert('Upload failed', 'File must be 20MB or smaller.')
+      setBusy(false)
+      return
+    }
+
+    if (!jobId) {
+      // Fallback when project has no linked job yet.
+      const path = `${projectId}/${Date.now()}_${baseName}`
+      const { error } = await supabase.storage.from('project-files').upload(path, buf, {
+        contentType: mime || 'application/octet-stream',
+        upsert: false,
+      })
+      if (error) Alert.alert('Upload failed', error.message)
+      else {
+        void load()
+        void notifyExpoEvent({
+          kind: 'workspace_activity',
+          projectId,
+          activity: 'file',
+          detail: baseName,
+        })
+      }
+      setBusy(false)
+      return
+    }
+
+    const safe = safeFileSegment(baseName)
+    const path = `${jobId}/${userId}/${uuid()}_${safe}`
+    const { error: upErr } = await supabase.storage.from(JOB_ATTACHMENTS_BUCKET).upload(path, buf, {
       contentType: mime || 'application/octet-stream',
       upsert: false,
     })
-    if (error) {
-      Alert.alert('Upload failed', error.message)
-    } else {
-      void load()
-      void notifyExpoEvent({
-        kind: 'workspace_activity',
-        projectId,
-        activity: 'file',
-        detail: baseName,
-      })
+    if (upErr) {
+      Alert.alert('Upload failed', upErr.message)
+      setBusy(false)
+      return
     }
+
+    const { error: insErr } = await supabase.from('job_attachments').insert({
+      job_id: jobId,
+      uploaded_by: userId,
+      storage_path: path,
+      file_name: baseName,
+      file_size: byteLength,
+      content_type: mime || null,
+    })
+    if (insErr) {
+      await supabase.storage.from(JOB_ATTACHMENTS_BUCKET).remove([path])
+      Alert.alert('Upload failed', insErr.message)
+      setBusy(false)
+      return
+    }
+
+    void load()
+    void notifyExpoEvent({
+      kind: 'workspace_activity',
+      projectId,
+      activity: 'file',
+      detail: baseName,
+    })
     setBusy(false)
   }
 
@@ -166,7 +269,13 @@ export function ProjectFilesTab({ projectId }: Props) {
         (asset.name || 'document').replace(/[^a-zA-Z0-9._-]/g, '_') || 'document'
       const ext = guessExt(asset.name || '', asset.mimeType)
       const baseName = safeBase.includes('.') ? safeBase : `${safeBase}.${ext}`
-      await uploadBytes(buf, baseName, asset.mimeType ?? 'application/octet-stream', setUploadingDoc)
+      await uploadBytes(
+        buf,
+        baseName,
+        asset.mimeType ?? 'application/octet-stream',
+        buf.byteLength,
+        setUploadingDoc
+      )
     } catch (e) {
       Alert.alert('Upload failed', String(e))
       setUploadingDoc(false)
@@ -200,15 +309,34 @@ export function ProjectFilesTab({ projectId }: Props) {
       const extGuess =
         asset.mimeType?.includes('video') ? 'mp4' : asset.mimeType?.includes('png') ? 'png' : 'jpg'
       const baseName = (asset.fileName || `upload.${extGuess}`).replace(/[^a-zA-Z0-9._-]/g, '_')
-      await uploadBytes(buf, baseName, asset.mimeType ?? 'application/octet-stream', setUploadingMedia)
+      await uploadBytes(
+        buf,
+        baseName,
+        asset.mimeType ?? 'application/octet-stream',
+        buf.byteLength,
+        setUploadingMedia
+      )
     } catch (e) {
       Alert.alert('Upload failed', String(e))
       setUploadingMedia(false)
     }
   }
 
-  const openFile = async (name: string) => {
-    const path = `${projectId}/${name}`
+  const openFile = async (row: FileRow) => {
+    if (row.source === 'job' && row.storagePath) {
+      const { data, error } = await supabase.storage
+        .from(JOB_ATTACHMENTS_BUCKET)
+        .createSignedUrl(row.storagePath, 3600)
+      if (error || !data?.signedUrl) {
+        Alert.alert('Could not open', error?.message ?? 'No URL')
+        return
+      }
+      Linking.openURL(data.signedUrl).catch(() => {})
+      return
+    }
+
+    const legacyName = row.key.startsWith('legacy:') ? row.key.slice('legacy:'.length) : row.name
+    const path = `${projectId}/${legacyName}`
     const { data, error } = await supabase.storage.from('project-files').createSignedUrl(path, 3600)
     if (error || !data?.signedUrl) {
       Alert.alert('Could not open', error?.message ?? 'No URL')
@@ -249,17 +377,19 @@ export function ProjectFilesTab({ projectId }: Props) {
         disabled={busy}
       >
         <ImageIcon size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-        <Text style={styles.uploadTextSecondary}>{uploadingMedia ? 'Uploading…' : 'Photo or video from library'}</Text>
+        <Text style={styles.uploadTextSecondary}>
+          {uploadingMedia ? 'Uploading…' : 'Photo or video from library'}
+        </Text>
       </TouchableOpacity>
 
-      {names.length === 0 ? (
+      {files.length === 0 ? (
         <Text style={styles.empty}>No files yet.</Text>
       ) : (
-        names.map((n) => (
-          <TouchableOpacity key={n} style={styles.row} onPress={() => openFile(n)}>
+        files.map((f) => (
+          <TouchableOpacity key={f.key} style={styles.row} onPress={() => void openFile(f)}>
             <FileText size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
             <Text style={styles.fileName} numberOfLines={2}>
-              {n.replace(/^\d+_/, '')}
+              {f.name}
             </Text>
           </TouchableOpacity>
         ))
