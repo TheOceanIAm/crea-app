@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SubscriptionPaywallGate } from '@/components/SubscriptionPaywallGate'
 import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
 import * as Notifications from 'expo-notifications'
+import * as Updates from 'expo-updates'
 import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
@@ -133,6 +134,29 @@ function PushNotificationRouter() {
   return null
 }
 
+/** Ensure EAS Update is fetched in release builds (auto-check alone has been unreliable). */
+function EasUpdateBootstrap() {
+  useEffect(() => {
+    if (__DEV__ || Platform.OS === 'web') return
+    if (!Updates.isEnabled) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const check = await Updates.checkForUpdateAsync()
+        if (cancelled || !check.isAvailable) return
+        await Updates.fetchUpdateAsync()
+        if (!cancelled) await Updates.reloadAsync()
+      } catch {
+        // Offline / misconfigured — keep embedded bundle.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return null
+}
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
@@ -141,6 +165,7 @@ export default function RootLayout() {
           <QueryClientProvider client={queryClient}>
           <BootstrapAuthGate>
           <AuthDeepLinkBridge />
+          <EasUpdateBootstrap />
           <SubscriptionPaywallGate />
           {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
           {Platform.OS !== 'web' ? <InAppNotificationBridge /> : null}

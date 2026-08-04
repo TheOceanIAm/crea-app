@@ -364,9 +364,11 @@ export function ProductionTab({
         (shRes.data ?? []).map((row) => normalizeShotRow(row as Record<string, unknown>))
       )
 
-    if (crRes.error) Alert.alert('Crew', crRes.error.message)
-    else {
-      const members = ((crRes.data ?? []) as Array<{
+    let members: CallSheetCrewRow[] = []
+    if (crRes.error) {
+      Alert.alert('Crew', crRes.error.message)
+    } else {
+      members = ((crRes.data ?? []) as Array<{
         id: string
         profile_id: string
         member_role: string
@@ -380,34 +382,85 @@ export function ProductionTab({
           source: 'member' as const,
         }
       })
-      const manual = ((manualRes.error ? [] : manualRes.data) ?? []) as Array<{
-        id: string
-        name: string
-        member_role: string | null
-      }>
-      const manualRows: CallSheetCrewRow[] = manual.map((m) => ({
-        key: manualCallSheetKey(m.id),
-        name: (m.name && m.name.trim()) || 'Crew',
-        roleLabel: (m.member_role && m.member_role.trim()) || 'Crew',
-        source: 'manual',
-      }))
-      setCrew([...members, ...manualRows])
     }
 
-    if (dayRes.error) Alert.alert('Production day', dayRes.error.message)
-    else if (dayRes.data) {
+    let manualRows: CallSheetCrewRow[] = []
+    let manualData = manualRes.data
+    if (manualRes.error) {
+      console.warn('[ProductionTab] project_manual_crew', manualRes.error.message)
+      const retry = await supabase
+        .from('project_manual_crew')
+        .select('id, name, member_role')
+        .eq('project_id', projectId)
+      if (retry.error) {
+        Alert.alert('External crew', retry.error.message)
+      } else {
+        manualData = retry.data
+      }
+    }
+    manualRows = ((manualData ?? []) as Array<{
+      id: string
+      name: string
+      member_role: string | null
+    }>).map((m) => ({
+      key: manualCallSheetKey(m.id),
+      name: (m.name && m.name.trim()) || 'Crew',
+      roleLabel: (m.member_role && m.member_role.trim()) || 'Crew',
+      source: 'manual' as const,
+    }))
+
+    let callSheet: Record<string, CallOverride> = {}
+    if (dayRes.error) {
+      Alert.alert('Production day', dayRes.error.message)
+      setProdDay(null)
+    } else if (dayRes.data) {
       const row = dayRes.data as Record<string, unknown>
+      callSheet = (row.call_sheet as Record<string, CallOverride>) ?? {}
       setProdDay({
         id: row.id as string,
         project_id: row.project_id as string,
         date: row.date as string,
         wrap_time: (row.wrap_time as string | null) ?? null,
         notes: (row.notes as string | null) ?? null,
-        call_sheet: (row.call_sheet as Record<string, CallOverride>) ?? {},
+        call_sheet: callSheet,
       })
     } else {
       setProdDay(null)
     }
+
+    // Union directory + anyone already saved on this day's call sheet (manual:<uuid>).
+    const byKey = new Map<string, CallSheetCrewRow>()
+    for (const m of members) byKey.set(m.key, m)
+    for (const m of manualRows) byKey.set(m.key, m)
+    const missingManualIds: string[] = []
+    for (const key of Object.keys(callSheet)) {
+      if (!key.startsWith('manual:') || byKey.has(key)) continue
+      const id = key.slice('manual:'.length).trim()
+      if (id) missingManualIds.push(id)
+      byKey.set(key, {
+        key,
+        name: 'External',
+        roleLabel: 'Crew',
+        source: 'manual',
+      })
+    }
+    if (missingManualIds.length > 0) {
+      const { data: byId } = await supabase
+        .from('project_manual_crew')
+        .select('id, name, member_role')
+        .in('id', missingManualIds)
+      for (const m of byId ?? []) {
+        const row = m as { id: string; name: string; member_role: string | null }
+        const key = manualCallSheetKey(row.id)
+        byKey.set(key, {
+          key,
+          name: (row.name && row.name.trim()) || 'Crew',
+          roleLabel: (row.member_role && row.member_role.trim()) || 'Crew',
+          source: 'manual',
+        })
+      }
+    }
+    setCrew([...byKey.values()])
 
     setLoading(false)
   }, [projectId, shootDay])
@@ -480,6 +533,12 @@ export function ProductionTab({
     if (!entered || !projectId || !shootDay) return
     void fetchProdDayOnly()
   }, [openFeature, projectId, shootDay, fetchProdDayOnly])
+
+  useEffect(() => {
+    if (openFeature !== 'call_sheet') return
+    // Re-fetch when opening Call Sheet so web-added external crew appears immediately.
+    void load()
+  }, [openFeature, load])
 
   useEffect(() => {
     if (openFeature !== 'call_sheet' || !projectId || !shootDay) return
