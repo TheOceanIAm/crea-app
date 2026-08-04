@@ -6,6 +6,10 @@ export type CrewSpendMemberRow = {
   booked_dates?: unknown
   scheduling_start_date?: string | null
   scheduling_end_date?: string | null
+  /** Project-local rates for external/manual crew (no Crea profile). */
+  day_rate_amount?: number | null
+  half_day_rate_amount?: number | null
+  display_name?: string | null
   profiles: {
     name?: string | null
     day_rate_amount?: number | null
@@ -59,8 +63,18 @@ export function computeCrewSpendLines(
   rows.forEach((row, idx) => {
     if ((row.member_role ?? '').toLowerCase() === 'company') return
     const slots = memberBookedSlotsFromRow(row)
-    const dayRate = typeof row.profiles?.day_rate_amount === 'number' ? row.profiles.day_rate_amount : 0
-    const halfRaw = row.profiles?.half_day_rate_amount
+    const localDay =
+      typeof row.day_rate_amount === 'number' && !Number.isNaN(row.day_rate_amount) && row.day_rate_amount > 0
+        ? row.day_rate_amount
+        : null
+    const dayRate =
+      localDay ?? (typeof row.profiles?.day_rate_amount === 'number' ? row.profiles.day_rate_amount : 0)
+    const halfRaw =
+      typeof row.half_day_rate_amount === 'number' &&
+      !Number.isNaN(row.half_day_rate_amount) &&
+      row.half_day_rate_amount > 0
+        ? row.half_day_rate_amount
+        : row.profiles?.half_day_rate_amount
     const halfDayRate =
       typeof halfRaw === 'number' && !Number.isNaN(halfRaw) && halfRaw > 0 ? halfRaw : null
     const profCur = row.profiles?.rates_currency != null ? normCurrency(row.profiles.rates_currency) : pc
@@ -74,9 +88,9 @@ export function computeCrewSpendLines(
     const dayUnits = Math.round(slots.reduce((s, e) => s + e.units, 0) * 100) / 100
 
     if (dayUnits === 0 && dayRate === 0) return
-    const name = (row.profiles?.name ?? '').trim() || 'Crew member'
+    const name = (row.profiles?.name ?? '').trim() || (row.display_name ?? '').trim() || 'Crew member'
     lines.push({
-      profileIdKey: row.profile_id ?? `row-${idx}`,
+      profileIdKey: row.profile_id ?? `manual-${idx}`,
       displayName: name,
       dayUnits,
       dayRate,

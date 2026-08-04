@@ -78,13 +78,19 @@ export function ProjectBudgetTab({ projectId }: Props) {
   const load = useCallback(async () => {
     setLoading(true)
     setDeletedLineIds([])
-    const [planRes, linesRes, membersRes] = await Promise.all([
+    const [planRes, linesRes, membersRes, manualRes] = await Promise.all([
       supabase.from('project_budget_plans').select('*').eq('project_id', projectId).maybeSingle(),
       supabase.from('project_budget_lines').select('*').eq('project_id', projectId).order('sort_order'),
       supabase
         .from('project_members')
         .select(
           'profile_id, member_role, booked_dates, scheduling_start_date, scheduling_end_date, profiles(name, day_rate_amount, half_day_rate_amount, rates_currency)'
+        )
+        .eq('project_id', projectId),
+      supabase
+        .from('project_manual_crew')
+        .select(
+          'id, name, member_role, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount'
         )
         .eq('project_id', projectId),
     ])
@@ -121,8 +127,29 @@ export function ProjectBudgetTab({ projectId }: Props) {
       })),
     )
 
-    const rawMembers = membersRes.data ?? []
-    setMembers(rawMembers as CrewSpendMemberRow[])
+    const registered = (membersRes.data ?? []) as CrewSpendMemberRow[]
+    const manualRows = (manualRes.error ? [] : (manualRes.data ?? [])) as Array<{
+      id: string
+      name: string | null
+      member_role: string | null
+      booked_dates?: unknown
+      scheduling_start_date?: string | null
+      scheduling_end_date?: string | null
+      day_rate_amount?: number | null
+      half_day_rate_amount?: number | null
+    }>
+    const manualAsSpend: CrewSpendMemberRow[] = manualRows.map((m) => ({
+      profile_id: `manual:${m.id}`,
+      member_role: (m.member_role ?? 'crew').trim() || 'crew',
+      booked_dates: m.booked_dates,
+      scheduling_start_date: m.scheduling_start_date,
+      scheduling_end_date: m.scheduling_end_date,
+      day_rate_amount: m.day_rate_amount,
+      half_day_rate_amount: m.half_day_rate_amount,
+      display_name: (m.name ?? '').trim() || 'Crew',
+      profiles: null,
+    }))
+    setMembers([...registered, ...manualAsSpend])
     setLoading(false)
   }, [projectId])
 

@@ -58,6 +58,11 @@ type ManualCrew = {
   member_role: string
   email: string | null
   phone: string | null
+  booked_dates?: unknown
+  scheduling_start_date?: string | null
+  scheduling_end_date?: string | null
+  day_rate_amount?: number | null
+  half_day_rate_amount?: number | null
 }
 
 type CrewRow =
@@ -90,7 +95,27 @@ type CrewRow =
       role_display?: string | null
       email: string | null
       phone: string | null
+      bookingDates: string[]
+      bookingSlots: BookedDateEntry[]
+      day_rate_amount: number | null
+      half_day_rate_amount: number | null
     }
+
+function parseOptionalRate(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return Math.round(value * 100) / 100
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const n = Number(value.trim().replace(',', '.'))
+    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100) / 100
+  }
+  return null
+}
+
+function rateToInput(n: number | null | undefined): string {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return ''
+  return String(n)
+}
 
 type Props = {
   projectId: string
@@ -149,12 +174,17 @@ export function ProjectCrewTab({
   const [manualRole, setManualRole] = useState('')
   const [manualEmail, setManualEmail] = useState('')
   const [manualPhone, setManualPhone] = useState('')
+  const [manualDayRate, setManualDayRate] = useState('')
+  const [manualHalfDayRate, setManualHalfDayRate] = useState('')
+  const [manualAddSlots, setManualAddSlots] = useState<BookedDateEntry[]>([])
   const [personModalOpen, setPersonModalOpen] = useState(false)
   const [selectedCrew, setSelectedCrew] = useState<CrewRow | null>(null)
   const [personName, setPersonName] = useState('')
   const [personRole, setPersonRole] = useState('crew')
   const [personEmail, setPersonEmail] = useState('')
   const [personPhone, setPersonPhone] = useState('')
+  const [personDayRate, setPersonDayRate] = useState('')
+  const [personHalfDayRate, setPersonHalfDayRate] = useState('')
   const [memberBookedDraftSlots, setMemberBookedDraftSlots] = useState<BookedDateEntry[]>([])
   const [shootDatesEditorOpen, setShootDatesEditorOpen] = useState(false)
   const [savingMemberSchedule, setSavingMemberSchedule] = useState(false)
@@ -204,7 +234,9 @@ export function ProjectCrewTab({
         .order('member_role', { ascending: true }),
       supabase
         .from('project_manual_crew')
-        .select('id, project_id, name, member_role, email, phone')
+        .select(
+          'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount'
+        )
         .eq('project_id', projectId)
         .order('created_at', { ascending: true }),
     ])
@@ -286,15 +318,24 @@ export function ProjectCrewTab({
 
     const manual = ((manualRes.data as ManualCrew[]) ?? []).map((m) => {
       const role = (m.member_role || '').trim()
+      const bookingSlots = memberBookedSlotsFromRow(m)
+      const bookingDates = calendarDatesFromSlots(bookingSlots)
+      const dayRate = parseOptionalRate(m.day_rate_amount)
+      const rateNote = dayRate != null ? ` · €${dayRate}/day` : ''
+      const shootNote = formatBookedSlotsSummary(bookingSlots)
       return {
         source: 'manual' as const,
         id: m.id,
         member_role: m.member_role || 'crew',
         role_display: role || 'Crew',
         name: m.name,
-        subtitle: role || 'Crew',
+        subtitle: `${role || 'Crew'}${rateNote}${shootNote ? ` · ${shootNote}` : ''}`,
         email: m.email?.trim() || null,
         phone: m.phone?.trim() || null,
+        bookingDates,
+        bookingSlots,
+        day_rate_amount: dayRate,
+        half_day_rate_amount: parseOptionalRate(m.half_day_rate_amount),
       }
     })
 
@@ -415,6 +456,16 @@ export function ProjectCrewTab({
     const memberRole = manualRole.trim() || 'crew'
     const mail = manualEmail.trim().toLowerCase()
     const phone = manualPhone.trim()
+    const ws = productionWindowStart.trim().slice(0, 10)
+    const we = productionWindowEnd.trim().slice(0, 10)
+    const windowOk = /^\d{4}-\d{2}-\d{2}$/.test(ws) && /^\d{4}-\d{2}-\d{2}$/.test(we) && we >= ws
+    if (manualAddSlots.length > 0 && !windowOk) {
+      Alert.alert('Production window', 'Set the project production window on Overview first.')
+      return
+    }
+    const clamped = windowOk ? clampBookedEntriesToWindow(manualAddSlots, ws, we) : []
+    const payload = serializeBookedDateEntries(clamped)
+    const { start, end } = syncSchedulingRangeFromDates(calendarDatesFromSlots(clamped))
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -430,6 +481,11 @@ export function ProjectCrewTab({
       email: mail || null,
       phone: phone || null,
       created_by: user.id,
+      day_rate_amount: parseOptionalRate(manualDayRate),
+      half_day_rate_amount: parseOptionalRate(manualHalfDayRate),
+      booked_dates: payload.length > 0 ? payload : null,
+      scheduling_start_date: start,
+      scheduling_end_date: end,
     })
     setBusy(false)
     if (error) {
@@ -440,6 +496,9 @@ export function ProjectCrewTab({
     setManualRole('')
     setManualEmail('')
     setManualPhone('')
+    setManualDayRate('')
+    setManualHalfDayRate('')
+    setManualAddSlots([])
     setModalOpen(false)
     load()
     Alert.alert('Added', 'Crew member was added to this project.')
@@ -478,11 +537,15 @@ export function ProjectCrewTab({
     setPersonPhone((m.phone ?? '').trim())
     if (m.source === 'registered') {
       setMemberBookedDraftSlots([...m.bookingSlots])
+      setPersonDayRate('')
+      setPersonHalfDayRate('')
       setProjectContactEmail((m.contact_email ?? '').trim() || (m.email ?? '').trim())
       setProjectContactPhone((m.contact_phone ?? '').trim())
       setProjectContactLabel((m.contact_label ?? '').trim())
     } else {
-      setMemberBookedDraftSlots([])
+      setMemberBookedDraftSlots([...m.bookingSlots])
+      setPersonDayRate(rateToInput(m.day_rate_amount))
+      setPersonHalfDayRate(rateToInput(m.half_day_rate_amount))
       setProjectContactEmail('')
       setProjectContactPhone('')
       setProjectContactLabel('')
@@ -528,14 +591,17 @@ export function ProjectCrewTab({
       ? canEditManualCrewFields
       : Boolean(companyCanEditMemberJobFields || canEditOwnRegisteredRow)
 
+  const canEditSelectedShootDays = Boolean(
+    selectedCrew &&
+      ((selectedCrew.source === 'registered' &&
+        viewerIsCompany &&
+        selectedCrew.member_role !== 'company') ||
+        (selectedCrew.source === 'manual' && (viewerIsCompany || canManage)))
+  )
+
   const saveMemberProductionDates = async () => {
-    if (
-      !viewerIsCompany ||
-      !selectedCrew ||
-      selectedCrew.source !== 'registered' ||
-      selectedCrew.member_role === 'company'
-    )
-      return
+    if (!selectedCrew || !canEditSelectedShootDays) return
+    if (selectedCrew.source === 'registered' && selectedCrew.member_role === 'company') return
     const ws = productionWindowStart.trim().slice(0, 10)
     const we = productionWindowEnd.trim().slice(0, 10)
     if (!/^\d{4}-\d{2}-\d{2}$/.test(ws) || !/^\d{4}-\d{2}-\d{2}$/.test(we)) {
@@ -551,8 +617,9 @@ export function ProjectCrewTab({
     const dateKeys = calendarDatesFromSlots(clamped)
     const { start, end } = syncSchedulingRangeFromDates(dateKeys)
     setSavingMemberSchedule(true)
+    const table = selectedCrew.source === 'manual' ? 'project_manual_crew' : 'project_members'
     const { error } = await supabase
-      .from('project_members')
+      .from(table)
       .update({
         booked_dates: payload.length > 0 ? payload : null,
         scheduling_start_date: start,
@@ -566,20 +633,21 @@ export function ProjectCrewTab({
     }
     load()
     setShootDatesEditorOpen(false)
-    Alert.alert('Saved', 'Their public calendar shows busy only on these days when the project is active.')
+    Alert.alert(
+      'Saved',
+      selectedCrew.source === 'manual'
+        ? 'Shoot days saved for this crew contact.'
+        : 'Their public calendar shows busy only on these days when the project is active.'
+    )
   }
 
   const clearMemberProductionDates = async () => {
-    if (
-      !viewerIsCompany ||
-      !selectedCrew ||
-      selectedCrew.source !== 'registered' ||
-      selectedCrew.member_role === 'company'
-    )
-      return
+    if (!selectedCrew || !canEditSelectedShootDays) return
+    if (selectedCrew.source === 'registered' && selectedCrew.member_role === 'company') return
     setSavingMemberSchedule(true)
+    const table = selectedCrew.source === 'manual' ? 'project_manual_crew' : 'project_members'
     const { error } = await supabase
-      .from('project_members')
+      .from(table)
       .update({
         booked_dates: null,
         scheduling_start_date: null,
@@ -613,6 +681,14 @@ export function ProjectCrewTab({
       const nextRole = personRole.trim() || 'crew'
       const nextEmail = personEmail.trim().toLowerCase()
       const nextPhone = personPhone.trim()
+      const ws = productionWindowStart.trim().slice(0, 10)
+      const we = productionWindowEnd.trim().slice(0, 10)
+      const windowOk = /^\d{4}-\d{2}-\d{2}$/.test(ws) && /^\d{4}-\d{2}-\d{2}$/.test(we) && we >= ws
+      const clamped = windowOk
+        ? clampBookedEntriesToWindow(memberBookedDraftSlots, ws, we)
+        : memberBookedDraftSlots
+      const payload = serializeBookedDateEntries(clamped)
+      const { start, end } = syncSchedulingRangeFromDates(calendarDatesFromSlots(clamped))
       setBusy(true)
       const { error } = await supabase
         .from('project_manual_crew')
@@ -621,6 +697,11 @@ export function ProjectCrewTab({
           member_role: nextRole,
           email: nextEmail || null,
           phone: nextPhone || null,
+          day_rate_amount: parseOptionalRate(personDayRate),
+          half_day_rate_amount: parseOptionalRate(personHalfDayRate),
+          booked_dates: payload.length > 0 ? payload : null,
+          scheduling_start_date: start,
+          scheduling_end_date: end,
         })
         .eq('id', selectedCrew.id)
       setBusy(false)
@@ -631,7 +712,7 @@ export function ProjectCrewTab({
       setPersonModalOpen(false)
       setSelectedCrew(null)
       load()
-      Alert.alert('Saved', 'Crew contact info was updated.')
+      Alert.alert('Saved', 'Crew contact, rates, and shoot days were updated.')
       return
     }
 
@@ -915,8 +996,7 @@ export function ProjectCrewTab({
             <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Add crew (no Crea account)</Text>
             <Text style={styles.modalHint}>
-              For people not on Crea yet. Name and role are shown on the crew list; email and phone are stored so you can
-              reach them outside the app.
+              For people not on Crea yet. Set contact, day rate, and shoot days — same as Crea crew for budget.
             </Text>
             <TextInput
               style={styles.modalInput}
@@ -949,8 +1029,55 @@ export function ProjectCrewTab({
               onChangeText={setManualPhone}
               keyboardType="phone-pad"
             />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Day rate € (optional)"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={manualDayRate}
+              onChangeText={setManualDayRate}
+              keyboardType="decimal-pad"
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Half-day rate € (optional)"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={manualHalfDayRate}
+              onChangeText={setManualHalfDayRate}
+              keyboardType="decimal-pad"
+            />
+            <View style={styles.memberSchedBox}>
+              <Text style={styles.modalSectionKicker}>Shoot / booking days</Text>
+              {/^\d{4}-\d{2}-\d{2}$/.test(productionWindowStart.trim().slice(0, 10)) &&
+              /^\d{4}-\d{2}-\d{2}$/.test(productionWindowEnd.trim().slice(0, 10)) ? (
+                <>
+                  <Text style={styles.bookedForSummaryText}>
+                    {formatBookedSlotsSummary(manualAddSlots) ?? 'Not set yet'}
+                  </Text>
+                  <CrewMemberBookedDaysCalendar
+                    productionWindowStart={productionWindowStart}
+                    productionWindowEnd={productionWindowEnd}
+                    bookedSlots={manualAddSlots}
+                    disabled={busy}
+                    hideInstructions
+                    onCycleIso={(iso) => {
+                      setManualAddSlots((prev) => cycleBookedDaySlot(prev, iso))
+                    }}
+                  />
+                </>
+              ) : (
+                <Text style={styles.modalHintSmall}>
+                  Set the production window on Overview first to assign shoot days.
+                </Text>
+              )}
+            </View>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => setModalOpen(false)}>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => {
+                  setModalOpen(false)
+                  setManualAddSlots([])
+                }}
+              >
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalSave, busy && styles.dim]} onPress={addManualCrew} disabled={busy}>
@@ -973,7 +1100,7 @@ export function ProjectCrewTab({
             <Text style={styles.modalTitle}>Person info</Text>
             <Text style={styles.modalHint}>
               {selectedCrew?.source === 'manual'
-                ? 'Edit contact details for this crew member.'
+                ? 'Edit contact, day rate, and shoot days for this crew member (no Crea account).'
                 : companyCanEditMemberJobFields
                   ? 'Shoot days and “On this project” are for this job only (hiring company). Your display name still updates your Crea profile when this card is you.'
                   : canEditOwnRegisteredRow
@@ -982,12 +1109,13 @@ export function ProjectCrewTab({
                       : 'Your display name updates your Crea profile. Shoot days and job contact are set by the hiring company.'
                     : 'Shoot days and job contact can only be changed by the hiring company. Names come from each person’s Crea profile.'}
             </Text>
-            {selectedCrew?.source === 'registered' &&
-            selectedCrew.member_role !== 'company' &&
-            !workspaceOnly ? (
+            {((selectedCrew?.source === 'registered' &&
+              selectedCrew.member_role !== 'company' &&
+              !workspaceOnly) ||
+              selectedCrew?.source === 'manual') ? (
               <View style={styles.memberSchedBox}>
                 <Text style={styles.modalSectionKicker}>Booked for</Text>
-                {companyCanEditMemberJobFields ? (
+                {canEditSelectedShootDays ? (
                   <>
                     <TouchableOpacity
                       style={styles.bookedForExpandHeader}
@@ -1009,7 +1137,7 @@ export function ProjectCrewTab({
                     </TouchableOpacity>
                     {!shootDatesEditorOpen ? (
                       <Text style={styles.modalHintSmall}>
-                        Tap to cycle days: off → full → half (within the production window). Only the hiring company can change this.
+                        Tap to cycle days: off → full → half (within the production window).
                       </Text>
                     ) : (
                       <>
@@ -1095,6 +1223,24 @@ export function ProjectCrewTab({
                   value={personPhone}
                   onChangeText={setPersonPhone}
                   keyboardType="phone-pad"
+                  editable={canEditPersonFields}
+                />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Day rate €"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={personDayRate}
+                  onChangeText={setPersonDayRate}
+                  keyboardType="decimal-pad"
+                  editable={canEditPersonFields}
+                />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Half-day rate € (optional)"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={personHalfDayRate}
+                  onChangeText={setPersonHalfDayRate}
+                  keyboardType="decimal-pad"
                   editable={canEditPersonFields}
                 />
               </>
