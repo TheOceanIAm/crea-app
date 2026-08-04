@@ -17,6 +17,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { freelancerHasInvoicing, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { loadInvoiceBookedFeeForJob } from '@/lib/invoiceBookedFee'
 
 type CompanyOption = { id: string; name: string }
 
@@ -42,11 +43,14 @@ export default function NewInvoiceScreen() {
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [saving, setSaving] = useState(false)
   const [linkedJobId, setLinkedJobId] = useState<string | null>(null)
+  const [bookedFeeHint, setBookedFeeHint] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLinkedJobId(null)
     setSelectedCompany(null)
     setTitle('')
+    setAmount('')
+    setBookedFeeHint(null)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       setAllowed(false)
@@ -128,6 +132,18 @@ export default function NewInvoiceScreen() {
             typeof projectTitleRows?.[0]?.title === 'string' ? projectTitleRows[0].title.trim() : ''
           const effectiveTitle = projectTitleOverride || (job.title || '').trim()
           setTitle(effectiveTitle || 'Invoice')
+          const bookedFee = await loadInvoiceBookedFeeForJob(supabase, {
+            jobId: job.id,
+            freelancerId: user.id,
+          })
+          if (bookedFee && bookedFee.netFee > 0) {
+            setAmount(
+              String(
+                Number.isInteger(bookedFee.netFee) ? bookedFee.netFee : bookedFee.netFee.toFixed(2)
+              )
+            )
+            setBookedFeeHint(bookedFee.hint)
+          }
           const { data: clientProf } = await supabase
             .from('profiles')
             .select('id, name')
@@ -325,6 +341,7 @@ export default function NewInvoiceScreen() {
         />
 
         <Text style={styles.label}>Amount</Text>
+        {bookedFeeHint ? <Text style={styles.bookedHint}>{bookedFeeHint}</Text> : null}
         <View style={styles.row2}>
           <TextInput
             style={[styles.input, styles.inputFlex]}
@@ -406,6 +423,13 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     marginBottom: 8,
     textTransform: 'uppercase',
+  },
+  bookedHint: {
+    fontSize: 12,
+    color: 'rgba(255,220,0,0.85)',
+    marginTop: -4,
+    marginBottom: 10,
+    lineHeight: 17,
   },
   hintInline: {
     fontSize: 12,
