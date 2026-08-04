@@ -73,11 +73,16 @@ const EMPTY_SHOT_DRAFT: ShotDraft = {
   audio_notes: '',
 }
 
-type CrewRow = {
-  id: string
-  profile_id: string
-  member_role: string
-  profiles: { name: string | null } | null
+type CallSheetCrewRow = {
+  /** Key in production_days.call_sheet (`profile_id` or `manual:<uuid>`). */
+  key: string
+  name: string
+  roleLabel: string
+  source: 'member' | 'manual'
+}
+
+function manualCallSheetKey(manualId: string) {
+  return `manual:${manualId}`
 }
 
 type CallOverride = { call_time?: string; location?: string }
@@ -300,7 +305,11 @@ export function ProductionTab({
   }, [productionDays])
 
   const [shots, setShots] = useState<ProductionShot[]>([])
-  const [crew, setCrew] = useState<CrewRow[]>([])
+  const [crew, setCrew] = useState<CallSheetCrewRow[]>([])
+  const [addManualOpen, setAddManualOpen] = useState(false)
+  const [manualName, setManualName] = useState('')
+  const [manualRole, setManualRole] = useState('')
+  const [addingManual, setAddingManual] = useState(false)
   const [prodDay, setProdDay] = useState<ProductionDayRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyShot, setBusyShot] = useState<string | null>(null)
@@ -324,7 +333,7 @@ export function ProductionTab({
   const gearOutput = (briefOutputs?.gear ?? '').trim()
 
   const load = useCallback(async () => {
-    const [shRes, crRes, dayRes] = await Promise.all([
+    const [shRes, crRes, dayRes, manualRes] = await Promise.all([
       supabase
         .from('production_shots')
         .select('*')
@@ -342,6 +351,11 @@ export function ProductionTab({
         .eq('project_id', projectId)
         .eq('date', shootDay)
         .maybeSingle(),
+      supabase
+        .from('project_manual_crew')
+        .select('id, name, member_role')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true }),
     ])
 
     if (shRes.error) Alert.alert('Shot list', shRes.error.message)
@@ -351,7 +365,34 @@ export function ProductionTab({
       )
 
     if (crRes.error) Alert.alert('Crew', crRes.error.message)
-    else setCrew((crRes.data as unknown as CrewRow[]) ?? [])
+    else {
+      const members = ((crRes.data ?? []) as Array<{
+        id: string
+        profile_id: string
+        member_role: string
+        profiles: { name: string | null } | { name: string | null }[] | null
+      }>).map((m) => {
+        const prof = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles
+        return {
+          key: m.profile_id,
+          name: (prof?.name && String(prof.name).trim()) || 'Member',
+          roleLabel: roleLabel(m.member_role),
+          source: 'member' as const,
+        }
+      })
+      const manual = ((manualRes.error ? [] : manualRes.data) ?? []) as Array<{
+        id: string
+        name: string
+        member_role: string | null
+      }>
+      const manualRows: CallSheetCrewRow[] = manual.map((m) => ({
+        key: manualCallSheetKey(m.id),
+        name: (m.name && m.name.trim()) || 'Crew',
+        roleLabel: (m.member_role && m.member_role.trim()) || 'Crew',
+        source: 'manual',
+      }))
+      setCrew([...members, ...manualRows])
+    }
 
     if (dayRes.error) Alert.alert('Production day', dayRes.error.message)
     else if (dayRes.data) {
@@ -655,16 +696,41 @@ export function ProductionTab({
     Alert.alert('Saved', 'Call sheet saved — web workspace updates automatically.')
   }
 
+  const addManualToCallSheet = async () => {
+    if (!isCompany || addingManual) return
+    const name = manualName.trim()
+    if (name.length < 2) {
+      Alert.alert('Add person', 'Please enter at least 2 characters for the name.')
+      return
+    }
+    setAddingManual(true)
+    const { error } = await supabase.from('project_manual_crew').insert({
+      project_id: projectId,
+      name,
+      member_role: manualRole.trim() || 'crew',
+      email: null,
+      phone: null,
+      created_by: userId,
+    })
+    setAddingManual(false)
+    if (error) {
+      Alert.alert('Could not add', error.message)
+      return
+    }
+    setManualName('')
+    setManualRole('')
+    setAddManualOpen(false)
+    void load()
+  }
+
   const exportCallSheetPdf = async () => {
     setExportingPdf(true)
     try {
       const rowsHtml = crew
         .map((m) => {
-          const prof = m.profiles as { name: string | null } | { name: string | null }[] | null | undefined
-          const p = Array.isArray(prof) ? prof[0] : prof
-          const name = escapeHtml(p?.name || 'Member')
-          const role = escapeHtml(roleLabel(m.member_role))
-          const ov = callDraft[m.profile_id]
+          const name = escapeHtml(m.name || 'Member')
+          const role = escapeHtml(m.roleLabel)
+          const ov = callDraft[m.key]
           const call = escapeHtml(ov?.call_time?.trim() || '—')
           const loc = escapeHtml(ov?.location?.trim() || projectLocation || '—')
           return `<tr><td>${name}</td><td>${role}</td><td>${call}</td><td>${loc}</td></tr>`
@@ -1090,6 +1156,48 @@ export function ProductionTab({
         </View>
       ) : null}
 
+      {prodDay && isCompany ? (
+        <View style={{ marginBottom: 12 }}>
+          <TouchableOpacity
+            style={styles.addRowBtn}
+            onPress={() => setAddManualOpen((o) => !o)}
+            disabled={addingManual}
+          >
+            <Plus size={18} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+            <Text style={styles.addRowBtnText}>
+              {addManualOpen ? 'Cancel' : 'Add person (no Crea account)'}
+            </Text>
+          </TouchableOpacity>
+          {addManualOpen ? (
+            <View style={[styles.csMemberCard, { marginTop: 10 }]}>
+              <Text style={styles.csFieldLabel}>Name</Text>
+              <TextInput
+                style={styles.csInputBlock}
+                placeholder="Name"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={manualName}
+                onChangeText={setManualName}
+              />
+              <Text style={[styles.csFieldLabel, { marginTop: 8 }]}>Role</Text>
+              <TextInput
+                style={styles.csInputBlock}
+                placeholder="e.g. Gaffer"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={manualRole}
+                onChangeText={setManualRole}
+              />
+              <TouchableOpacity
+                style={[styles.accentBtn, { marginTop: 12 }, addingManual && styles.dim]}
+                onPress={() => void addManualToCallSheet()}
+                disabled={addingManual}
+              >
+                <Text style={styles.accentBtnText}>{addingManual ? '…' : 'Add to call sheet'}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
       {crew.length > 0 ? (
         <View style={styles.csCrewSection}>
           <View style={styles.csCrewSectionHead}>
@@ -1097,17 +1205,18 @@ export function ProductionTab({
             <Text style={styles.csCrewSectionTitle}>Crew calls</Text>
           </View>
           {crew.map((m) => {
-            const prof = m.profiles as { name: string | null } | { name: string | null }[] | null | undefined
-            const p = Array.isArray(prof) ? prof[0] : prof
-            const ov = callDraft[m.profile_id]
+            const ov = callDraft[m.key]
             const callVal = ov?.call_time ?? ''
             const locVal = ov?.location ?? ''
             return (
-              <View key={`${m.id}-${prodDay?.id ?? 'none'}`} style={styles.csMemberCard}>
+              <View key={`${m.key}-${prodDay?.id ?? 'none'}`} style={styles.csMemberCard}>
                 <View style={styles.csMemberHead}>
-                  <Text style={styles.csName}>{p?.name || 'Member'}</Text>
+                  <Text style={styles.csName}>
+                    {m.name}
+                    {m.source === 'manual' ? ' · external' : ''}
+                  </Text>
                   <View style={styles.csRolePill}>
-                    <Text style={styles.csRolePillText}>{roleLabel(m.member_role)}</Text>
+                    <Text style={styles.csRolePillText}>{m.roleLabel}</Text>
                   </View>
                 </View>
                 <View style={styles.csFieldRow}>
@@ -1125,7 +1234,7 @@ export function ProductionTab({
                         callSheetDirtyRef.current = true
                         setCallDraft((prev) => ({
                           ...prev,
-                          [m.profile_id]: { ...(prev[m.profile_id] ?? {}), call_time: v },
+                          [m.key]: { ...(prev[m.key] ?? {}), call_time: v },
                         }))
                       }}
                     />
@@ -1148,7 +1257,7 @@ export function ProductionTab({
                         callSheetDirtyRef.current = true
                         setCallDraft((prev) => ({
                           ...prev,
-                          [m.profile_id]: { ...(prev[m.profile_id] ?? {}), location: v },
+                          [m.key]: { ...(prev[m.key] ?? {}), location: v },
                         }))
                       }}
                     />
