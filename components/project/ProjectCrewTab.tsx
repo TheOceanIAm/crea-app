@@ -247,11 +247,24 @@ export function ProjectCrewTab({
       setLoading(false)
       return
     }
+
+    // Prefer masked view (hides day rates for non-hosts). Fall back to base table if the view is unavailable.
+    let manualData = manualRes.data as ManualCrew[] | null
     if (manualRes.error) {
-      Alert.alert('Crew', manualRes.error.message)
-      setRows([])
-      setLoading(false)
-      return
+      console.warn('[ProjectCrewTab] project_manual_crew_readable', manualRes.error.message)
+      const fallback = await supabase
+        .from('project_manual_crew')
+        .select(
+          'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount'
+        )
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true })
+      if (fallback.error) {
+        console.warn('[ProjectCrewTab] project_manual_crew', fallback.error.message)
+        manualData = []
+      } else {
+        manualData = (fallback.data as ManualCrew[]) ?? []
+      }
     }
 
     const registered = ((registeredRes.data as unknown as Member[]) ?? []).map((m) => {
@@ -316,10 +329,11 @@ export function ProjectCrewTab({
       }
     })
 
-    const manual = ((manualRes.data as ManualCrew[]) ?? []).map((m) => {
+    const manual = (manualData ?? []).map((m) => {
       const role = (m.member_role || '').trim()
       const bookingSlots = memberBookedSlotsFromRow(m)
       const bookingDates = calendarDatesFromSlots(bookingSlots)
+      // Day rates: host only (UI + masked view). Other crew still see name/role/contact/dates.
       const dayRate = viewerIsCompany ? parseOptionalRate(m.day_rate_amount) : null
       const rateNote = dayRate != null ? ` · €${dayRate}/day` : ''
       const shootNote = formatBookedSlotsSummary(bookingSlots)

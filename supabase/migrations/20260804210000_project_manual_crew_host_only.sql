@@ -83,13 +83,9 @@ comment on view public.project_manual_crew_readable is
   'project_manual_crew for clients; day_rate_* null unless viewer is project host.';
 
 grant select on public.project_manual_crew_readable to authenticated;
+revoke insert, update, delete, truncate, references, trigger on table public.project_manual_crew_readable from authenticated;
 
--- Base table: no SELECT on rate columns (read rates via the view). Writes still allowed for host RLS.
-revoke all on table public.project_manual_crew from anon, authenticated;
-grant select (
-  id, project_id, name, member_role, email, phone, created_by, created_at, updated_at, works_as,
-  booked_dates, scheduling_start_date, scheduling_end_date
-) on public.project_manual_crew to authenticated;
-grant insert, update, delete on public.project_manual_crew to authenticated;
-grant insert (day_rate_amount, half_day_rate_amount) on public.project_manual_crew to authenticated;
-grant update (day_rate_amount, half_day_rate_amount) on public.project_manual_crew to authenticated;
+-- All project members can read the directory (RLS: user_in_project).
+-- Day rates for non-hosts are masked via project_manual_crew_readable; host-only writes via RLS.
+revoke all on table public.project_manual_crew from anon;
+grant select, insert, update, delete on table public.project_manual_crew to authenticated;
