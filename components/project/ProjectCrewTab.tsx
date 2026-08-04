@@ -233,7 +233,7 @@ export function ProjectCrewTab({
         .eq('project_id', projectId)
         .order('member_role', { ascending: true }),
       supabase
-        .from('project_manual_crew')
+        .from('project_manual_crew_readable')
         .select(
           'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount'
         )
@@ -320,7 +320,7 @@ export function ProjectCrewTab({
       const role = (m.member_role || '').trim()
       const bookingSlots = memberBookedSlotsFromRow(m)
       const bookingDates = calendarDatesFromSlots(bookingSlots)
-      const dayRate = parseOptionalRate(m.day_rate_amount)
+      const dayRate = viewerIsCompany ? parseOptionalRate(m.day_rate_amount) : null
       const rateNote = dayRate != null ? ` · €${dayRate}/day` : ''
       const shootNote = formatBookedSlotsSummary(bookingSlots)
       return {
@@ -335,7 +335,7 @@ export function ProjectCrewTab({
         bookingDates,
         bookingSlots,
         day_rate_amount: dayRate,
-        half_day_rate_amount: parseOptionalRate(m.half_day_rate_amount),
+        half_day_rate_amount: viewerIsCompany ? parseOptionalRate(m.half_day_rate_amount) : null,
       }
     })
 
@@ -346,7 +346,7 @@ export function ProjectCrewTab({
       setPendingInvites([])
     }
     setLoading(false)
-  }, [projectId, canManage])
+  }, [projectId, canManage, viewerIsCompany])
 
   useEffect(() => {
     setLoading(true)
@@ -448,6 +448,10 @@ export function ProjectCrewTab({
 
   const addManualCrew = async () => {
     if (busy) return
+    if (!viewerIsCompany) {
+      Alert.alert('Add crew', 'Only the project client can add external crew.')
+      return
+    }
     const name = manualName.trim()
     if (name.length < 2) {
       Alert.alert('Add crew', 'Please enter at least 2 characters for the name.')
@@ -567,10 +571,8 @@ export function ProjectCrewTab({
         selectedCrew.profile_id === effectiveViewerId
     )
 
-  /** Workspace / project owner may edit manual crew cards (no Crea account). */
-  const canEditManualCrewFields = Boolean(
-    selectedCrew?.source === 'manual' && (viewerIsCompany || canManage)
-  )
+  /** Only the project host/client may edit manual (no Crea account) crew. */
+  const canEditManualCrewFields = Boolean(selectedCrew?.source === 'manual' && viewerIsCompany)
 
   /** Hiring company: shoot days + job contact for other freelancers. Workspace: own row contact too. */
   const companyCanEditMemberJobFields = Boolean(
@@ -591,12 +593,12 @@ export function ProjectCrewTab({
       ? canEditManualCrewFields
       : Boolean(companyCanEditMemberJobFields || canEditOwnRegisteredRow)
 
+  /** Shoot days: host for registered freelancers + manual crew; lead/crew cannot edit manual dates. */
   const canEditSelectedShootDays = Boolean(
     selectedCrew &&
-      ((selectedCrew.source === 'registered' &&
-        viewerIsCompany &&
-        selectedCrew.member_role !== 'company') ||
-        (selectedCrew.source === 'manual' && (viewerIsCompany || canManage)))
+      viewerIsCompany &&
+      ((selectedCrew.source === 'registered' && selectedCrew.member_role !== 'company') ||
+        selectedCrew.source === 'manual')
   )
 
   const saveMemberProductionDates = async () => {
@@ -668,9 +670,8 @@ export function ProjectCrewTab({
     if (!selectedCrew) return
 
     if (selectedCrew.source === 'manual') {
-      const manualOk = viewerIsCompany || canManage
-      if (!manualOk) {
-        Alert.alert('Person info', 'You cannot edit this entry.')
+      if (!viewerIsCompany) {
+        Alert.alert('Person info', 'Only the project client can edit external crew.')
         return
       }
       const nextName = personName.trim()
@@ -807,19 +808,24 @@ export function ProjectCrewTab({
       {canManage && (
         <>
           {workspaceOnly ? (
-            <>
-              <Text style={styles.label}>Add crew</Text>
-              <Text style={styles.hint}>Workspace mode: add external crew manually without requiring a CREA account.</Text>
-              <TouchableOpacity style={[styles.addBtnWide, busy && styles.dim]} onPress={() => setModalOpen(true)}>
-                <Text style={styles.addBtnText}>ADD CREW</Text>
-              </TouchableOpacity>
-            </>
+            viewerIsCompany ? (
+              <>
+                <Text style={styles.label}>Add crew</Text>
+                <Text style={styles.hint}>
+                  Workspace mode: add external crew manually without requiring a CREA account.
+                </Text>
+                <TouchableOpacity style={[styles.addBtnWide, busy && styles.dim]} onPress={() => setModalOpen(true)}>
+                  <Text style={styles.addBtnText}>ADD CREW</Text>
+                </TouchableOpacity>
+              </>
+            ) : null
           ) : (
             <>
               <Text style={styles.label}>Add crew</Text>
               <Text style={styles.hint}>
-                Search freelancers on Crea by name, or add someone without an account (name, email, phone for your
-                records).
+                {viewerIsCompany
+                  ? 'Search freelancers on Crea by name, or add someone without an account (name, email, phone for your records).'
+                  : 'Search freelancers on Crea by name to invite them to this project.'}
               </Text>
               {!workspaceOnly ? (
                 <Text style={styles.hintTight}>
@@ -887,16 +893,18 @@ export function ProjectCrewTab({
                   </View>
                 ) : null}
               </View>
-              <TouchableOpacity
-                style={[styles.addExternalBtn, (!proFeaturesEnabled || busy) && styles.dim]}
-                onPress={() => {
-                  if (!proFeaturesEnabled) return
-                  setModalOpen(true)
-                }}
-                disabled={!proFeaturesEnabled || busy}
-              >
-                <Text style={styles.addExternalBtnText}>Add crew without a Crea account</Text>
-              </TouchableOpacity>
+              {viewerIsCompany ? (
+                <TouchableOpacity
+                  style={[styles.addExternalBtn, (!proFeaturesEnabled || busy) && styles.dim]}
+                  onPress={() => {
+                    if (!proFeaturesEnabled) return
+                    setModalOpen(true)
+                  }}
+                  disabled={!proFeaturesEnabled || busy}
+                >
+                  <Text style={styles.addExternalBtnText}>Add crew without a Crea account</Text>
+                </TouchableOpacity>
+              ) : null}
             </>
           )}
         </>
@@ -1100,7 +1108,9 @@ export function ProjectCrewTab({
             <Text style={styles.modalTitle}>Person info</Text>
             <Text style={styles.modalHint}>
               {selectedCrew?.source === 'manual'
-                ? 'Edit contact, day rate, and shoot days for this crew member (no Crea account).'
+                ? viewerIsCompany
+                  ? 'Edit contact, day rate, and shoot days for this crew member (no Crea account).'
+                  : 'External crew — you can see when they are booked. Day rates are only visible to the project client.'
                 : companyCanEditMemberJobFields
                   ? 'Shoot days and “On this project” are for this job only (hiring company). Your display name still updates your Crea profile when this card is you.'
                   : canEditOwnRegisteredRow
@@ -1225,24 +1235,28 @@ export function ProjectCrewTab({
                   keyboardType="phone-pad"
                   editable={canEditPersonFields}
                 />
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="Day rate €"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  value={personDayRate}
-                  onChangeText={setPersonDayRate}
-                  keyboardType="decimal-pad"
-                  editable={canEditPersonFields}
-                />
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="Half-day rate € (optional)"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  value={personHalfDayRate}
-                  onChangeText={setPersonHalfDayRate}
-                  keyboardType="decimal-pad"
-                  editable={canEditPersonFields}
-                />
+                {viewerIsCompany ? (
+                  <>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="Day rate €"
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                      value={personDayRate}
+                      onChangeText={setPersonDayRate}
+                      keyboardType="decimal-pad"
+                      editable={canEditPersonFields}
+                    />
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="Half-day rate € (optional)"
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                      value={personHalfDayRate}
+                      onChangeText={setPersonHalfDayRate}
+                      keyboardType="decimal-pad"
+                      editable={canEditPersonFields}
+                    />
+                  </>
+                ) : null}
               </>
             ) : selectedCrew ? (
               <View style={styles.projectContactSection}>

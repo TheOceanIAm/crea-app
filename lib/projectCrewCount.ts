@@ -11,7 +11,7 @@ export async function countProjectCrewMembers(
       .select('*', { count: 'exact', head: true })
       .eq('project_id', projectId),
     supabase
-      .from('project_manual_crew')
+      .from('project_manual_crew_readable')
       .select('*', { count: 'exact', head: true })
       .eq('project_id', projectId),
   ])

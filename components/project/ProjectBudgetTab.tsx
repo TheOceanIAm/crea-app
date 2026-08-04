@@ -88,7 +88,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
         )
         .eq('project_id', projectId),
       supabase
-        .from('project_manual_crew')
+        .from('project_manual_crew_readable')
         .select(
           'id, name, member_role, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount'
         )

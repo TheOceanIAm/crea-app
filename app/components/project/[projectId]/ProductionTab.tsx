@@ -352,7 +352,7 @@ export function ProductionTab({
         .eq('date', shootDay)
         .maybeSingle(),
       supabase
-        .from('project_manual_crew')
+        .from('project_manual_crew_readable')
         .select('id, name, member_role')
         .eq('project_id', projectId)
         .order('created_at', { ascending: true }),
@@ -389,7 +389,7 @@ export function ProductionTab({
     if (manualRes.error) {
       console.warn('[ProductionTab] project_manual_crew', manualRes.error.message)
       const retry = await supabase
-        .from('project_manual_crew')
+        .from('project_manual_crew_readable')
         .select('id, name, member_role')
         .eq('project_id', projectId)
       if (retry.error) {
@@ -446,7 +446,7 @@ export function ProductionTab({
     }
     if (missingManualIds.length > 0) {
       const { data: byId } = await supabase
-        .from('project_manual_crew')
+        .from('project_manual_crew_readable')
         .select('id, name, member_role')
         .in('id', missingManualIds)
       for (const m of byId ?? []) {
