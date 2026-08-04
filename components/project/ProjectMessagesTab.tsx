@@ -81,6 +81,7 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
   const [sending, setSending] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const listRef = useRef<FlatList>(null)
+  const sendingLockRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -181,50 +182,55 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
 
   const send = async () => {
     const t = body.trim()
-    if (!t || sending) return
+    if (!t || sending || sendingLockRef.current) return
+    sendingLockRef.current = true
     setSending(true)
-    const { data: insertedMsg, error } = await supabase
-      .from('project_messages')
-      .insert({
-        project_id: projectId,
-        sender_id: userId,
-        body: t,
-      })
-      .select('id, project_id, sender_id, body, created_at, profiles(name, avatar_url)')
-      .single()
-    setSending(false)
-    if (error) {
-      Alert.alert('Send failed', error.message)
-      return
-    }
-    if (insertedMsg?.id) {
-      void notifyExpoEvent({ kind: 'project_message', messageId: insertedMsg.id })
-    }
-    const inserted = insertedMsg as Row | null
-    if (inserted) {
-      const prof = inserted.profiles as { name?: string | null; avatar_url?: string | null } | null
-      const avatar_url = normalizeProfileAvatarUrl(prof?.avatar_url) ?? null
-      setRows((prev) =>
-        appendMessageRow(prev, {
-          ...inserted,
-          avatar_url,
-          profiles: prof ? { name: prof.name ?? null, avatar_url } : null,
+    try {
+      const { data: insertedMsg, error } = await supabase
+        .from('project_messages')
+        .insert({
+          project_id: projectId,
+          sender_id: userId,
+          body: t,
         })
-      )
-    }
-    if (jobId) {
-      const mirrored = await mirrorProjectMessageToJob({
-        jobId,
-        senderId: userId,
-        body: t,
-        createdAt: inserted?.created_at ?? null,
-      })
-      if (mirrored.error) {
-        Alert.alert('Sync warning', `Message sent, but web workspace sync failed: ${mirrored.error}`)
+        .select('id, project_id, sender_id, body, created_at, profiles(name, avatar_url)')
+        .single()
+      if (error) {
+        Alert.alert('Send failed', error.message)
+        return
       }
+      if (insertedMsg?.id) {
+        void notifyExpoEvent({ kind: 'project_message', messageId: insertedMsg.id })
+      }
+      const inserted = insertedMsg as Row | null
+      if (inserted) {
+        const prof = inserted.profiles as { name?: string | null; avatar_url?: string | null } | null
+        const avatar_url = normalizeProfileAvatarUrl(prof?.avatar_url) ?? null
+        setRows((prev) =>
+          appendMessageRow(prev, {
+            ...inserted,
+            avatar_url,
+            profiles: prof ? { name: prof.name ?? null, avatar_url } : null,
+          })
+        )
+      }
+      setBody('')
+      if (jobId) {
+        const mirrored = await mirrorProjectMessageToJob({
+          jobId,
+          senderId: userId,
+          body: t,
+          createdAt: inserted?.created_at ?? null,
+        })
+        if (mirrored.error) {
+          Alert.alert('Sync warning', `Message sent, but web workspace sync failed: ${mirrored.error}`)
+        }
+      }
+      // Realtime + focus refresh; avoid an immediate load() race that can flash a mirror duplicate.
+    } finally {
+      sendingLockRef.current = false
+      setSending(false)
     }
-    setBody('')
-    load()
   }
 
   const removeMessage = (item: Row) => {
