@@ -1124,7 +1124,7 @@ export function ProjectCrewTab({
               {selectedCrew?.source === 'manual'
                 ? viewerIsCompany
                   ? 'Edit contact, day rate, and shoot days for this crew member (no Crea account).'
-                  : 'External crew — you can see when they are booked. Day rates are only visible to the project client.'
+                  : 'External crew (no Crea account). Contact and booked days are set by the project client.'
                 : companyCanEditMemberJobFields
                   ? 'Shoot days and “On this project” are for this job only (hiring company). Your display name still updates your Crea profile when this card is you.'
                   : canEditOwnRegisteredRow
@@ -1133,103 +1133,120 @@ export function ProjectCrewTab({
                       : 'Your display name updates your Crea profile. Shoot days and job contact are set by the hiring company.'
                     : 'Shoot days and job contact can only be changed by the hiring company. Names come from each person’s Crea profile.'}
             </Text>
-            {((selectedCrew?.source === 'registered' &&
-              selectedCrew.member_role !== 'company' &&
-              !workspaceOnly) ||
-              selectedCrew?.source === 'manual') ? (
-              <View style={styles.memberSchedBox}>
-                <Text style={styles.modalSectionKicker}>Booked for</Text>
-                {canEditSelectedShootDays ? (
-                  <>
-                    <TouchableOpacity
-                      style={styles.bookedForExpandHeader}
-                      onPress={() => setShootDatesEditorOpen((o) => !o)}
-                      accessibilityRole="button"
-                      accessibilityLabel={shootDatesEditorOpen ? 'Hide calendar' : 'Change shoot days'}
-                    >
-                      <Text style={styles.bookedForSummaryText}>
-                        {formatBookedSlotsSummary(memberBookedDraftSlots) ?? 'Not set yet'}
-                      </Text>
-                      <ChevronDown
-                        size={20}
-                        color="rgba(255,255,255,0.55)"
-                        strokeWidth={ICON_STROKE}
-                        style={{
-                          transform: [{ rotate: shootDatesEditorOpen ? '180deg' : '0deg' }],
+
+            {/* Manual crew — crew/freelancers: same read-only card as other members (no day rates, no edit). */}
+            {selectedCrew?.source === 'manual' && !viewerIsCompany ? (
+              <>
+                {!workspaceOnly ? (
+                  <View style={styles.memberSchedBox}>
+                    <Text style={styles.modalSectionKicker}>Booked for</Text>
+                    <Text style={styles.modalReadonlyValue}>
+                      {formatBookedSlotsSummary(selectedCrew.bookingSlots) ?? 'Not set yet'}
+                    </Text>
+                  </View>
+                ) : null}
+                <View style={styles.modalReadonlyBlock}>
+                  <Text style={styles.modalReadonlyLabel}>Name</Text>
+                  <Text style={styles.modalReadonlyValue}>{selectedCrew.name}</Text>
+                </View>
+                <View style={styles.modalReadonlyBlock}>
+                  <Text style={styles.modalReadonlyLabel}>Role</Text>
+                  <Text style={styles.modalReadonlyValue}>
+                    {(selectedCrew.role_display ?? '').trim() || roleLabel(selectedCrew.member_role)}
+                  </Text>
+                </View>
+                <View style={styles.projectContactSection}>
+                  <Text style={styles.modalSectionKicker}>Contact</Text>
+                  <View style={styles.modalReadonlyBlock}>
+                    <Text style={styles.modalReadonlyLabel}>Email</Text>
+                    <Text style={styles.modalReadonlyValue}>
+                      {(selectedCrew.email ?? '').trim() || '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.modalReadonlyBlock}>
+                    <Text style={styles.modalReadonlyLabel}>Phone</Text>
+                    <Text style={styles.modalReadonlyValue}>
+                      {(selectedCrew.phone ?? '').trim() || '—'}
+                    </Text>
+                  </View>
+                </View>
+              </>
+            ) : null}
+
+            {/* Manual crew — project owner only: full edit (dates, rates, contact). */}
+            {selectedCrew?.source === 'manual' && viewerIsCompany ? (
+              <>
+                <View style={styles.memberSchedBox}>
+                  <Text style={styles.modalSectionKicker}>Booked for</Text>
+                  <TouchableOpacity
+                    style={styles.bookedForExpandHeader}
+                    onPress={() => setShootDatesEditorOpen((o) => !o)}
+                    accessibilityRole="button"
+                    accessibilityLabel={shootDatesEditorOpen ? 'Hide calendar' : 'Change shoot days'}
+                  >
+                    <Text style={styles.bookedForSummaryText}>
+                      {formatBookedSlotsSummary(memberBookedDraftSlots) ?? 'Not set yet'}
+                    </Text>
+                    <ChevronDown
+                      size={20}
+                      color="rgba(255,255,255,0.55)"
+                      strokeWidth={ICON_STROKE}
+                      style={{
+                        transform: [{ rotate: shootDatesEditorOpen ? '180deg' : '0deg' }],
+                      }}
+                    />
+                  </TouchableOpacity>
+                  {!shootDatesEditorOpen ? (
+                    <Text style={styles.modalHintSmall}>
+                      Tap to cycle days: off → full → half (within the production window).
+                    </Text>
+                  ) : (
+                    <>
+                      <CrewMemberBookedDaysCalendar
+                        productionWindowStart={productionWindowStart}
+                        productionWindowEnd={productionWindowEnd}
+                        bookedSlots={memberBookedDraftSlots}
+                        disabled={savingMemberSchedule || busy}
+                        hideInstructions
+                        onCycleIso={(iso) => {
+                          setMemberBookedDraftSlots((prev) => cycleBookedDaySlot(prev, iso))
                         }}
                       />
-                    </TouchableOpacity>
-                    {!shootDatesEditorOpen ? (
-                      <Text style={styles.modalHintSmall}>
-                        Tap to cycle days: off → full → half (within the production window).
-                      </Text>
-                    ) : (
-                      <>
-                        <CrewMemberBookedDaysCalendar
-                          productionWindowStart={productionWindowStart}
-                          productionWindowEnd={productionWindowEnd}
-                          bookedSlots={memberBookedDraftSlots}
+                      <View style={styles.modalSchedActions}>
+                        <TouchableOpacity
+                          style={[styles.modalSave, (savingMemberSchedule || busy) && styles.dim]}
+                          onPress={() => void saveMemberProductionDates()}
                           disabled={savingMemberSchedule || busy}
-                          hideInstructions
-                          onCycleIso={(iso) => {
-                            setMemberBookedDraftSlots((prev) => cycleBookedDaySlot(prev, iso))
-                          }}
-                        />
-                        <View style={styles.modalSchedActions}>
-                          <TouchableOpacity
-                            style={[styles.modalSave, (savingMemberSchedule || busy) && styles.dim]}
-                            onPress={() => void saveMemberProductionDates()}
-                            disabled={savingMemberSchedule || busy}
-                          >
-                            <Text style={styles.modalSaveText}>
-                              {savingMemberSchedule ? 'Saving…' : 'Save shoot days'}
-                            </Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.modalGhost}
-                            onPress={() => void clearMemberProductionDates()}
-                            disabled={savingMemberSchedule || busy}
-                          >
-                            <Text style={styles.modalGhostText}>Clear</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <Text style={styles.modalReadonlyValue}>
-                    {formatBookedSlotsSummary(selectedCrew.bookingSlots) ?? 'Not set yet'}
-                  </Text>
-                )}
-              </View>
-            ) : null}
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Name"
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              value={personName}
-              onChangeText={setPersonName}
-              editable={canEditPersonFields}
-            />
-            {selectedCrew?.source === 'manual' ? (
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Role"
-                placeholderTextColor="rgba(255,255,255,0.3)"
-                value={personRole}
-                onChangeText={setPersonRole}
-                editable={canEditPersonFields}
-              />
-            ) : selectedCrew ? (
-              <View style={styles.modalReadonlyBlock}>
-                <Text style={styles.modalReadonlyLabel}>Role</Text>
-                <Text style={styles.modalReadonlyValue}>
-                  {(selectedCrew.role_display ?? '').trim() || roleLabel(selectedCrew.member_role)}
-                </Text>
-              </View>
-            ) : null}
-            {selectedCrew?.source === 'manual' ? (
-              <>
+                        >
+                          <Text style={styles.modalSaveText}>
+                            {savingMemberSchedule ? 'Saving…' : 'Save shoot days'}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.modalGhost}
+                          onPress={() => void clearMemberProductionDates()}
+                          disabled={savingMemberSchedule || busy}
+                        >
+                          <Text style={styles.modalGhostText}>Clear</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
+                </View>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Name"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={personName}
+                  onChangeText={setPersonName}
+                />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Role"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={personRole}
+                  onChangeText={setPersonRole}
+                />
                 <TextInput
                   style={styles.modalInput}
                   placeholder="Email"
@@ -1238,7 +1255,6 @@ export function ProjectCrewTab({
                   onChangeText={setPersonEmail}
                   autoCapitalize="none"
                   keyboardType="email-address"
-                  editable={canEditPersonFields}
                 />
                 <TextInput
                   style={styles.modalInput}
@@ -1247,71 +1263,150 @@ export function ProjectCrewTab({
                   value={personPhone}
                   onChangeText={setPersonPhone}
                   keyboardType="phone-pad"
+                />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Day rate €"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={personDayRate}
+                  onChangeText={setPersonDayRate}
+                  keyboardType="decimal-pad"
+                />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Half-day rate € (optional)"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={personHalfDayRate}
+                  onChangeText={setPersonHalfDayRate}
+                  keyboardType="decimal-pad"
+                />
+              </>
+            ) : null}
+
+            {/* Registered Crea members */}
+            {selectedCrew?.source === 'registered' ? (
+              <>
+                {selectedCrew.member_role !== 'company' && !workspaceOnly ? (
+                  <View style={styles.memberSchedBox}>
+                    <Text style={styles.modalSectionKicker}>Booked for</Text>
+                    {canEditSelectedShootDays ? (
+                      <>
+                        <TouchableOpacity
+                          style={styles.bookedForExpandHeader}
+                          onPress={() => setShootDatesEditorOpen((o) => !o)}
+                          accessibilityRole="button"
+                          accessibilityLabel={shootDatesEditorOpen ? 'Hide calendar' : 'Change shoot days'}
+                        >
+                          <Text style={styles.bookedForSummaryText}>
+                            {formatBookedSlotsSummary(memberBookedDraftSlots) ?? 'Not set yet'}
+                          </Text>
+                          <ChevronDown
+                            size={20}
+                            color="rgba(255,255,255,0.55)"
+                            strokeWidth={ICON_STROKE}
+                            style={{
+                              transform: [{ rotate: shootDatesEditorOpen ? '180deg' : '0deg' }],
+                            }}
+                          />
+                        </TouchableOpacity>
+                        {!shootDatesEditorOpen ? (
+                          <Text style={styles.modalHintSmall}>
+                            Tap to cycle days: off → full → half (within the production window).
+                          </Text>
+                        ) : (
+                          <>
+                            <CrewMemberBookedDaysCalendar
+                              productionWindowStart={productionWindowStart}
+                              productionWindowEnd={productionWindowEnd}
+                              bookedSlots={memberBookedDraftSlots}
+                              disabled={savingMemberSchedule || busy}
+                              hideInstructions
+                              onCycleIso={(iso) => {
+                                setMemberBookedDraftSlots((prev) => cycleBookedDaySlot(prev, iso))
+                              }}
+                            />
+                            <View style={styles.modalSchedActions}>
+                              <TouchableOpacity
+                                style={[styles.modalSave, (savingMemberSchedule || busy) && styles.dim]}
+                                onPress={() => void saveMemberProductionDates()}
+                                disabled={savingMemberSchedule || busy}
+                              >
+                                <Text style={styles.modalSaveText}>
+                                  {savingMemberSchedule ? 'Saving…' : 'Save shoot days'}
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={styles.modalGhost}
+                                onPress={() => void clearMemberProductionDates()}
+                                disabled={savingMemberSchedule || busy}
+                              >
+                                <Text style={styles.modalGhostText}>Clear</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <Text style={styles.modalReadonlyValue}>
+                        {formatBookedSlotsSummary(selectedCrew.bookingSlots) ?? 'Not set yet'}
+                      </Text>
+                    )}
+                  </View>
+                ) : null}
+                <TextInput
+                  style={[styles.modalInput, !canEditPersonFields && styles.modalInputLocked]}
+                  placeholder="Name"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={personName}
+                  onChangeText={setPersonName}
                   editable={canEditPersonFields}
                 />
-                {viewerIsCompany ? (
-                  <>
-                    <TextInput
-                      style={styles.modalInput}
-                      placeholder="Day rate €"
-                      placeholderTextColor="rgba(255,255,255,0.3)"
-                      value={personDayRate}
-                      onChangeText={setPersonDayRate}
-                      keyboardType="decimal-pad"
-                      editable={canEditPersonFields}
-                    />
-                    <TextInput
-                      style={styles.modalInput}
-                      placeholder="Half-day rate € (optional)"
-                      placeholderTextColor="rgba(255,255,255,0.3)"
-                      value={personHalfDayRate}
-                      onChangeText={setPersonHalfDayRate}
-                      keyboardType="decimal-pad"
-                      editable={canEditPersonFields}
-                    />
-                  </>
-                ) : null}
+                <View style={styles.modalReadonlyBlock}>
+                  <Text style={styles.modalReadonlyLabel}>Role</Text>
+                  <Text style={styles.modalReadonlyValue}>
+                    {(selectedCrew.role_display ?? '').trim() || roleLabel(selectedCrew.member_role)}
+                  </Text>
+                </View>
+                <View style={styles.projectContactSection}>
+                  <Text style={styles.modalSectionKicker}>On this project</Text>
+                  <Text style={styles.modalHintSmall}>
+                    Who is the contact for this job (e.g. producer on set)? Optional — only stored for this listing.
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.modalInput,
+                      styles.modalInputMultiline,
+                      !canEditProjectContactFields && styles.modalInputLocked,
+                    ]}
+                    placeholder="Contact person / note for crew…"
+                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    value={projectContactLabel}
+                    onChangeText={setProjectContactLabel}
+                    multiline
+                    textAlignVertical="top"
+                    editable={canEditProjectContactFields}
+                  />
+                  <TextInput
+                    style={[styles.modalInput, !canEditProjectContactFields && styles.modalInputLocked]}
+                    placeholder="Email for this job"
+                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    value={projectContactEmail}
+                    onChangeText={setProjectContactEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    editable={canEditProjectContactFields}
+                  />
+                  <TextInput
+                    style={[styles.modalInput, !canEditProjectContactFields && styles.modalInputLocked]}
+                    placeholder="Phone for this job"
+                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    value={projectContactPhone}
+                    onChangeText={setProjectContactPhone}
+                    keyboardType="phone-pad"
+                    editable={canEditProjectContactFields}
+                  />
+                </View>
               </>
-            ) : selectedCrew ? (
-              <View style={styles.projectContactSection}>
-                <Text style={styles.modalSectionKicker}>On this project</Text>
-                <Text style={styles.modalHintSmall}>
-                  Who is the contact for this job (e.g. producer on set)? Optional — only stored for this listing.
-                </Text>
-                <TextInput
-                  style={[
-                    styles.modalInput,
-                    styles.modalInputMultiline,
-                    !canEditProjectContactFields && styles.modalInputLocked,
-                  ]}
-                  placeholder="Contact person / note for crew…"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  value={projectContactLabel}
-                  onChangeText={setProjectContactLabel}
-                  multiline
-                  textAlignVertical="top"
-                  editable={canEditProjectContactFields}
-                />
-                <TextInput
-                  style={[styles.modalInput, !canEditProjectContactFields && styles.modalInputLocked]}
-                  placeholder="Email for this job"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  value={projectContactEmail}
-                  onChangeText={setProjectContactEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  editable={canEditProjectContactFields}
-                />
-                <TextInput
-                  style={[styles.modalInput, !canEditProjectContactFields && styles.modalInputLocked]}
-                  placeholder="Phone for this job"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  value={projectContactPhone}
-                  onChangeText={setProjectContactPhone}
-                  keyboardType="phone-pad"
-                  editable={canEditProjectContactFields}
-                />
-              </View>
             ) : null}
             <View style={styles.contactActions}>
               <TouchableOpacity style={styles.contactBtn} onPress={callPerson}>
