@@ -33,7 +33,10 @@ import { publishCeoExternalJob } from '@/lib/ceoExternalJobsApi'
 import { instagramUrl, linkedinUrl } from '@/lib/profilePublicLinks'
 import {
   cacheJobsFeed,
+  hydrateJobsFeedFromDisk,
   loadJobsFeed,
+  persistJobsFeedToDisk,
+  prefetchJobsFeedTab,
   readCachedJobsFeed,
   type ExternalJobRow,
   type JobFeedRow,
@@ -81,9 +84,11 @@ function isCreaJobItem(item: Job | ExternalJob): item is Job {
 }
 
 function readInitialJobsFeed(): { jobs: Job[]; externalJobs: ExternalJob[]; loading: boolean } {
-  const uid = peekWarmedOverview()?.userId
+  const warmed = peekWarmedOverview()
+  const uid = warmed?.userId
   if (!uid) return { jobs: [], externalJobs: [], loading: true }
-  const cached = readCachedJobsFeed(uid, 'crea', false)
+  const companyOnly = isCompanyProfile(warmed?.role ?? readCachedDashboardOverview(uid)?.role ?? null)
+  const cached = readCachedJobsFeed(uid, 'crea', companyOnly)
   if (!cached) return { jobs: [], externalJobs: [], loading: true }
   return { jobs: cached.jobs, externalJobs: cached.externalJobs, loading: false }
 }
@@ -132,45 +137,68 @@ export default function JobsListScreen() {
         return
 
       const user = await getAuthUser()
-      let role: string | null = null
-      if (user) {
+      if (!user) {
+        setIsFreeFreelancer(false)
+        setIsCeoUser(false)
+        setIsCompanyUser(false)
+        setLoading(false)
+        return
+      }
+
+      const overview =
+        peekWarmedOverview()?.userId === user.id
+          ? peekWarmedOverview()
+          : readCachedDashboardOverview(user.id)
+      let role = overview?.role ? resolveAppRole(overview.role, user) : null
+      let plan = overview?.freelancerPlan ?? null
+
+      /** Paint cache immediately (memory, then disk) before any network. */
+      let companyOnlyGuess = Boolean(role && isCompanyProfile(role))
+      let hit = readCachedJobsFeed(user.id, feedTab, companyOnlyGuess)
+      if (!hit) {
+        const hydrated = await hydrateJobsFeedFromDisk(user.id, feedTab, companyOnlyGuess)
+        if (hydrated) hit = readCachedJobsFeed(user.id, feedTab, companyOnlyGuess)
+      }
+      /** Company users may have been warmed under the other key on first guess. */
+      if (!hit && role == null) {
+        const alt = readCachedJobsFeed(user.id, feedTab, !companyOnlyGuess)
+        if (alt) {
+          hit = alt
+          companyOnlyGuess = !companyOnlyGuess
+        } else {
+          const hydratedAlt = await hydrateJobsFeedFromDisk(user.id, feedTab, !companyOnlyGuess)
+          if (hydratedAlt) {
+            hit = readCachedJobsFeed(user.id, feedTab, !companyOnlyGuess)
+            if (hit) companyOnlyGuess = !companyOnlyGuess
+          }
+        }
+      }
+      if (hit) {
+        setJobs(hit.jobs)
+        setExternalJobs(hit.externalJobs)
+        setLoading(false)
+        hasLoadedRef.current = true
+      } else if (!hasLoadedRef.current) {
+        setLoading(true)
+      }
+
+      /** Only hit profiles when role/plan are not already warmed. */
+      if (!role || plan == null) {
         const { data: prof } = await supabase
           .from('profiles')
           .select('role, subscription_tier')
           .eq('id', user.id)
           .maybeSingle()
         role = resolveAppRole(prof?.role, user)
-        const plan = resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier)
-        setIsFreeFreelancer(isFreelancerProfile(role) && !freelancerCanApplyToJobs(plan))
-      } else {
-        setIsFreeFreelancer(false)
-        setIsCeoUser(false)
+        plan = resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier)
       }
-      const companyOnly = Boolean(user && isCompanyProfile(role))
+
+      setIsFreeFreelancer(isFreelancerProfile(role) && !freelancerCanApplyToJobs(plan))
+      const companyOnly = isCompanyProfile(role)
       setIsCompanyUser(companyOnly)
-      setIsCeoUser(Boolean(user && isCeoProfile(role)))
+      setIsCeoUser(isCeoProfile(role))
 
-      if (user && !opts?.bypassCooldown) {
-        const hit = readCachedJobsFeed(user.id, feedTab, companyOnly)
-        if (hit && !hasLoadedRef.current) {
-          setJobs(hit.jobs)
-          setExternalJobs(hit.externalJobs)
-          setLoading(false)
-        }
-      }
-      if (!hasLoadedRef.current && !(user && readCachedJobsFeed(user.id, feedTab, companyOnly))) {
-        setLoading(true)
-      }
-
-      if (!user) {
-        setLoading(false)
-        return
-      }
-
-      const loaded = await loadJobsFeed(user, {
-        feedTab,
-        knownRole: peekWarmedOverview()?.role ?? readCachedDashboardOverview(user.id)?.role ?? null,
-      })
+      const loaded = await loadJobsFeed(user, { feedTab, knownRole: role })
       if (!loaded) {
         setLoading(false)
         return
@@ -178,9 +206,16 @@ export default function JobsListScreen() {
       setJobs(loaded.data.jobs)
       setExternalJobs(loaded.data.externalJobs)
       cacheJobsFeed(user.id, loaded.feedTab, loaded.companyOnly, loaded.data)
+      void persistJobsFeedToDisk(user.id, loaded.feedTab, loaded.companyOnly, loaded.data)
       setLoading(false)
       hasLoadedRef.current = true
       lastLoadedAtRef.current = Date.now()
+
+      /** Warm the other tab in the background so tab switches feel instant. */
+      if (!companyOnly) {
+        const otherTab = feedTab === 'crea' ? 'external' : 'crea'
+        void prefetchJobsFeedTab(user, otherTab, { knownRole: role })
+      }
     },
     [feedTab]
   )

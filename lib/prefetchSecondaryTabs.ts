@@ -50,7 +50,11 @@ export async function hydrateSecondaryTabsFromDisk(userId: string, role: string 
     (() => {
       const companyOnly = isCompanyProfile(role)
       if (isFreelancerProfile(role) || companyOnly) {
-        return hydrateJobsFeedFromDisk(userId, 'crea', companyOnly)
+        const jobsHydrate: Promise<boolean>[] = [hydrateJobsFeedFromDisk(userId, 'crea', companyOnly)]
+        if (!companyOnly) {
+          jobsHydrate.push(hydrateJobsFeedFromDisk(userId, 'external', false))
+        }
+        return Promise.all(jobsHydrate).then((hits) => hits.some(Boolean))
       }
       return false
     })(),
@@ -71,8 +75,8 @@ async function runSecondaryTabPrefetch(userId: string, user: User, role: string 
     prefetchMainTabDataAwait(userId, 'dashboard'),
   ]
 
-  if (isFreelancerProfile(role)) {
-    tasks.push(prefetchJobsFeed(user))
+  if (isFreelancerProfile(role) || isCompanyProfile(role)) {
+    tasks.push(prefetchJobsFeed(user, { knownRole: role }))
   }
 
   if (isCompanyProfile(role) || isFreelancerProfile(role)) {

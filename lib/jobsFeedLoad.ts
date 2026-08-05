@@ -190,27 +190,53 @@ export async function loadJobsFeed(
   return { cacheKey, data: { jobs, externalJobs: [] }, companyOnly, feedTab }
 }
 
-let inflight: Promise<void> | null = null
+const inflightByKey = new Map<string, Promise<void>>()
 
-export async function prefetchJobsFeed(user: User): Promise<void> {
-  if (inflight) return inflight
-  inflight = (async () => {
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle()
-    const role = resolveAppRole(prof?.role, user)
-    const companyOnly = isCompanyProfile(role)
-    if (!readCachedJobsFeed(user.id, 'crea', companyOnly)) {
-      await hydrateJobsFeedFromDisk(user.id, 'crea', companyOnly)
+/** Prefetch one feed tab into memory + disk (deduped per user/tab/role). */
+export async function prefetchJobsFeedTab(
+  user: User,
+  feedTab: 'crea' | 'external',
+  opts?: { knownRole?: string | null }
+): Promise<void> {
+  let role = opts?.knownRole ? resolveAppRole(opts.knownRole, user) : null
+  if (!role) {
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+    role = resolveAppRole(prof?.role, user)
+  }
+  const companyOnly = isCompanyProfile(role)
+  /** External pool is freelancer-only. */
+  if (companyOnly && feedTab === 'external') return
+
+  const key = `${user.id}:${feedTab}:${companyOnly ? 'c' : 'f'}`
+  const existing = inflightByKey.get(key)
+  if (existing) return existing
+
+  const run = (async () => {
+    if (!readCachedJobsFeed(user.id, feedTab, companyOnly)) {
+      await hydrateJobsFeedFromDisk(user.id, feedTab, companyOnly)
     }
-    const loaded = await loadJobsFeed(user, { feedTab: 'crea' })
+    const loaded = await loadJobsFeed(user, { feedTab, knownRole: role })
     if (!loaded) return
     cacheJobsFeed(user.id, loaded.feedTab, loaded.companyOnly, loaded.data)
     void persistJobsFeedToDisk(user.id, loaded.feedTab, loaded.companyOnly, loaded.data)
   })().finally(() => {
-    inflight = null
+    inflightByKey.delete(key)
   })
-  return inflight
+
+  inflightByKey.set(key, run)
+  return run
+}
+
+/** Warm Crea (+ External for freelancers) after Feed is visible. */
+export async function prefetchJobsFeed(user: User, opts?: { knownRole?: string | null }): Promise<void> {
+  let role = opts?.knownRole ? resolveAppRole(opts.knownRole, user) : null
+  if (!role) {
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+    role = resolveAppRole(prof?.role, user)
+  }
+  const companyOnly = isCompanyProfile(role)
+  await prefetchJobsFeedTab(user, 'crea', { knownRole: role })
+  if (!companyOnly) {
+    void prefetchJobsFeedTab(user, 'external', { knownRole: role })
+  }
 }
