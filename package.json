@@ -49,7 +49,6 @@
     "@react-native-community/datetimepicker": "8.2.0",
     "@react-native-community/slider": "4.5.5",
     "@react-navigation/bottom-tabs": "^7.15.9",
-    "@rnmapbox/maps": "^10.3.0",
     "@supabase/supabase-js": "^2.45.0",
     "@tanstack/react-query": "^5.101.1",
     "@vis.gl/react-mapbox": "^8.1.1",
@@ -89,7 +88,8 @@
     "react-native-screens": "~4.4.0",
     "react-native-svg": "15.8.0",
     "react-native-url-polyfill": "^2.0.0",
-    "react-native-web": "~0.19.13"
+    "react-native-web": "~0.19.13",
+    "react-native-webview": "13.12.5"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

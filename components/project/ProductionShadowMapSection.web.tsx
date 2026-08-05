@@ -1,7 +1,10 @@
-import React, { useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { canShowShadowMap, getMapboxAccessToken } from '@/lib/mapboxConfig'
-import { destinationLatLon, shadowAreaFeatures, shadowLineFeature } from '@/lib/shadowGeometry'
+import {
+  buildSunPlannerMapPayload,
+  type ShadowRealism,
+} from '@/lib/sunPlannerMapModel'
 import type { ProductionShadowMapSectionProps } from '@/components/project/productionShadowMapTypes'
 
 const MAPBOX_JS_URL = 'https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.js'
@@ -57,6 +60,227 @@ function ensureMapboxGlLoaded(): Promise<void> {
   return mapboxLoadPromise
 }
 
+function firstSymbolLayerId(map: any): string | undefined {
+  const layers = map.getStyle()?.layers || []
+  for (const layer of layers) {
+    if (layer.type === 'symbol') return layer.id
+  }
+  return undefined
+}
+
+function applyPayload(map: any, payload: ReturnType<typeof buildSunPlannerMapPayload>) {
+  const empty = { type: 'FeatureCollection', features: [] }
+  const setSrc = (id: string, data: unknown) => {
+    const src = map.getSource(id)
+    if (src && typeof src.setData === 'function') src.setData(data || empty)
+  }
+
+  map.easeTo({
+    center: payload.camera.center,
+    zoom: payload.camera.zoom,
+    pitch: payload.camera.pitch,
+    duration: 220,
+    essential: true,
+  })
+
+  try {
+    map.setLight({
+      anchor: payload.mapLight.anchor,
+      position: payload.mapLight.position,
+      intensity: payload.mapLight.intensity,
+    })
+  } catch {
+    // ignore
+  }
+
+  setSrc('crea-subject', payload.subjectPoint)
+  setSrc('crea-sun-direction', payload.sunDirection)
+  setSrc('crea-sun-tip', payload.sunTip)
+  setSrc('crea-shadow-area', payload.shadowArea)
+  setSrc('crea-shadow-line', payload.shadowLine)
+
+  if (map.getLayer('crea-shadow-penumbra')) {
+    map.setPaintProperty('crea-shadow-penumbra', 'fill-opacity', payload.shadowTone.penumbraOpacity)
+  }
+  if (map.getLayer('crea-shadow-umbra')) {
+    map.setPaintProperty('crea-shadow-umbra', 'fill-opacity', payload.shadowTone.umbraOpacity)
+  }
+  if (map.getLayer('crea-shadow-line-soft')) {
+    map.setPaintProperty('crea-shadow-line-soft', 'line-opacity', payload.shadowTone.lineOpacity * 0.42)
+  }
+  if (map.getLayer('crea-shadow-line-core')) {
+    map.setPaintProperty('crea-shadow-line-core', 'line-opacity', payload.shadowTone.lineOpacity)
+  }
+
+  if (map.getLayer('crea-building-shadow')) {
+    const visible = payload.buildingShadow.visible
+    map.setLayoutProperty('crea-building-shadow', 'visibility', visible ? 'visible' : 'none')
+    map.setPaintProperty('crea-building-shadow', 'fill-opacity', visible ? payload.buildingShadow.opacity : 0)
+    map.setPaintProperty('crea-building-shadow', 'fill-translate', payload.buildingShadow.translate)
+  }
+}
+
+function ensureMapLayers(map: any) {
+  const before = firstSymbolLayerId(map)
+  const empty = { type: 'FeatureCollection', features: [] }
+
+  if (!map.getSource('crea-buildings')) {
+    map.addSource('crea-buildings', {
+      type: 'vector',
+      url: 'mapbox://mapbox.mapbox-streets-v8',
+    })
+  }
+
+  if (!map.getLayer('crea-building-shadow')) {
+    map.addLayer(
+      {
+        id: 'crea-building-shadow',
+        source: 'crea-buildings',
+        'source-layer': 'building',
+        filter: ['==', ['get', 'extrude'], 'true'],
+        type: 'fill',
+        paint: {
+          'fill-color': 'rgba(0,0,0,0.4)',
+          'fill-opacity': 0,
+          'fill-translate': [0, 0],
+          'fill-translate-anchor': 'map',
+        },
+      },
+      before
+    )
+  }
+
+  if (!map.getLayer('crea-3d-buildings')) {
+    map.addLayer(
+      {
+        id: 'crea-3d-buildings',
+        source: 'crea-buildings',
+        'source-layer': 'building',
+        filter: ['==', ['get', 'extrude'], 'true'],
+        type: 'fill-extrusion',
+        paint: {
+          'fill-extrusion-color': '#e6e8ec',
+          'fill-extrusion-opacity': 0.88,
+          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 12],
+          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+        },
+      },
+      before
+    )
+  }
+
+  if (!map.getSource('crea-shadow-area')) {
+    map.addSource('crea-shadow-area', { type: 'geojson', data: empty })
+    map.addLayer(
+      {
+        id: 'crea-shadow-penumbra',
+        type: 'fill',
+        source: 'crea-shadow-area',
+        filter: ['==', ['get', 'kind'], 'penumbra'],
+        paint: { 'fill-color': 'rgba(20,20,20,0.22)', 'fill-opacity': 0.12 },
+      },
+      before
+    )
+    map.addLayer(
+      {
+        id: 'crea-shadow-umbra',
+        type: 'fill',
+        source: 'crea-shadow-area',
+        filter: ['==', ['get', 'kind'], 'umbra'],
+        paint: { 'fill-color': 'rgba(10,10,10,0.4)', 'fill-opacity': 0.2 },
+      },
+      before
+    )
+  }
+
+  if (!map.getSource('crea-shadow-line')) {
+    map.addSource('crea-shadow-line', { type: 'geojson', data: empty })
+    map.addLayer(
+      {
+        id: 'crea-shadow-line-soft',
+        type: 'line',
+        source: 'crea-shadow-line',
+        paint: {
+          'line-color': 'rgba(10,10,10,0.35)',
+          'line-width': 10,
+          'line-opacity': 0.2,
+          'line-blur': 2.5,
+        },
+      },
+      before
+    )
+    map.addLayer(
+      {
+        id: 'crea-shadow-line-core',
+        type: 'line',
+        source: 'crea-shadow-line',
+        paint: {
+          'line-color': 'rgba(10,10,10,0.7)',
+          'line-width': 3.5,
+          'line-opacity': 0.35,
+          'line-blur': 0.6,
+        },
+      },
+      before
+    )
+  }
+
+  if (!map.getSource('crea-sun-direction')) {
+    map.addSource('crea-sun-direction', { type: 'geojson', data: empty })
+    map.addLayer({
+      id: 'crea-sun-direction-soft',
+      type: 'line',
+      source: 'crea-sun-direction',
+      paint: {
+        'line-color': 'rgba(255,220,0,0.42)',
+        'line-width': 8,
+        'line-opacity': 0.5,
+        'line-blur': 1.5,
+      },
+    })
+    map.addLayer({
+      id: 'crea-sun-direction-core',
+      type: 'line',
+      source: 'crea-sun-direction',
+      paint: {
+        'line-color': '#FFDC00',
+        'line-width': 3,
+        'line-opacity': 0.95,
+      },
+    })
+  }
+
+  if (!map.getSource('crea-sun-tip')) {
+    map.addSource('crea-sun-tip', { type: 'geojson', data: empty })
+    map.addLayer({
+      id: 'crea-sun-tip-circle',
+      type: 'circle',
+      source: 'crea-sun-tip',
+      paint: {
+        'circle-radius': 5,
+        'circle-color': '#FFDC00',
+        'circle-stroke-width': 1.5,
+        'circle-stroke-color': '#0a0a0a',
+      },
+    })
+  }
+
+  if (!map.getSource('crea-subject')) {
+    map.addSource('crea-subject', { type: 'geojson', data: empty })
+    map.addLayer({
+      id: 'crea-subject-circle',
+      type: 'circle',
+      source: 'crea-subject',
+      paint: {
+        'circle-radius': 9,
+        'circle-color': '#FFDC00',
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#0a0a0a',
+      },
+    })
+  }
+}
+
 export function ProductionShadowMapSection({
   subject,
   onSubjectChange,
@@ -74,59 +298,19 @@ export function ProductionShadowMapSection({
   const mapRef = useRef<any>(null)
   const token = getMapboxAccessToken()
   const ready = canShowShadowMap()
+  const [realism, setRealism] = useState<ShadowRealism>('subtle')
 
-  const shadowLine = useMemo(
+  const payload = useMemo(
     () =>
-      shadowLineFeature(subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, {
-        maxShadowMeters: 500,
+      buildSunPlannerMapPayload({
+        subject,
+        sunAzimuthDeg,
+        sunAltitudeDeg,
+        subjectHeightM,
+        realism,
       }),
-    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM]
+    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, realism]
   )
-
-  const shadowArea = useMemo(
-    () =>
-      shadowAreaFeatures(subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, {
-        maxShadowMeters: 500,
-      }),
-    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM]
-  )
-
-  const subjectPoint = useMemo(
-    () => ({
-      type: 'FeatureCollection' as const,
-      features: [
-        {
-          type: 'Feature' as const,
-          properties: {},
-          geometry: {
-            type: 'Point' as const,
-            coordinates: [subject.lon, subject.lat] as [number, number],
-          },
-        },
-      ],
-    }),
-    [subject.lat, subject.lon]
-  )
-
-  const sunDirection = useMemo(() => {
-    const tip = destinationLatLon(subject, sunAzimuthDeg, 95)
-    return {
-      type: 'FeatureCollection' as const,
-      features: [
-        {
-          type: 'Feature' as const,
-          properties: {},
-          geometry: {
-            type: 'LineString' as const,
-            coordinates: [
-              [subject.lon, subject.lat],
-              [tip.lon, tip.lat],
-            ] as [number, number][],
-          },
-        },
-      ],
-    }
-  }, [subject.lat, subject.lon, sunAzimuthDeg])
 
   useEffect(() => {
     if (!ready || !token || !mapElRef.current) return
@@ -142,9 +326,9 @@ export function ProductionShadowMapSection({
         const map = new mapboxgl.Map({
           container: mapElRef.current,
           style: 'mapbox://styles/mapbox/streets-v12',
-          center: [subject.lon, subject.lat],
-          zoom: 16.5,
-          pitch: 45,
+          center: payload.camera.center,
+          zoom: payload.camera.zoom,
+          pitch: payload.camera.pitch,
           bearing: 0,
         })
         mapRef.current = map
@@ -157,68 +341,8 @@ export function ProductionShadowMapSection({
         })
 
         map.on('load', () => {
-          map.addSource('crea-subject', { type: 'geojson', data: subjectPoint })
-          map.addLayer({
-            id: 'crea-subject-circle',
-            type: 'circle',
-            source: 'crea-subject',
-            paint: {
-              'circle-radius': 8,
-              'circle-color': '#FFDC00',
-              'circle-stroke-width': 2,
-              'circle-stroke-color': '#0a0a0a',
-            },
-          })
-
-          map.addSource('crea-sun-direction', { type: 'geojson', data: sunDirection })
-          map.addLayer({
-            id: 'crea-sun-direction-line',
-            type: 'line',
-            source: 'crea-sun-direction',
-            paint: {
-              'line-color': '#FFDC00',
-              'line-width': 3,
-              'line-opacity': 0.9,
-            },
-          })
-
-          map.addSource('crea-shadow-area', {
-            type: 'geojson',
-            data: shadowArea ?? { type: 'FeatureCollection', features: [] },
-          })
-          map.addLayer({
-            id: 'crea-shadow-penumbra',
-            type: 'fill',
-            source: 'crea-shadow-area',
-            filter: ['==', ['get', 'kind'], 'penumbra'],
-            paint: { 'fill-color': 'rgba(20,20,20,0.35)', 'fill-opacity': 0.28 },
-          })
-          map.addLayer({
-            id: 'crea-shadow-umbra',
-            type: 'fill',
-            source: 'crea-shadow-area',
-            filter: ['==', ['get', 'kind'], 'umbra'],
-            paint: { 'fill-color': 'rgba(10,10,10,0.65)', 'fill-opacity': 0.42 },
-          })
-
-          map.addSource('crea-shadow-line', {
-            type: 'geojson',
-            data:
-              shadowLine ?? ({
-                type: 'FeatureCollection',
-                features: [],
-              } as const),
-          })
-          map.addLayer({
-            id: 'crea-shadow-line-layer',
-            type: 'line',
-            source: 'crea-shadow-line',
-            paint: {
-              'line-color': 'rgba(10,10,10,0.9)',
-              'line-width': 4,
-              'line-opacity': 0.75,
-            },
-          })
+          ensureMapLayers(map)
+          applyPayload(map, payload)
         })
       })
       .catch(() => {
@@ -232,34 +356,16 @@ export function ProductionShadowMapSection({
         mapRef.current = null
       }
     }
-  }, [ready, token, onSubjectChange, subject.lat, subject.lon, shadowArea, shadowLine, subjectPoint, sunDirection])
+    // Intentionally mount once; updates flow through the second effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, token, onSubjectChange])
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map) return
-
-    map.easeTo({
-      center: [subject.lon, subject.lat],
-      duration: 220,
-      essential: true,
-    })
-
-    const subjectSrc = map.getSource('crea-subject')
-    if (subjectSrc && typeof subjectSrc.setData === 'function') subjectSrc.setData(subjectPoint)
-
-    const sunSrc = map.getSource('crea-sun-direction')
-    if (sunSrc && typeof sunSrc.setData === 'function') sunSrc.setData(sunDirection)
-
-    const areaSrc = map.getSource('crea-shadow-area')
-    if (areaSrc && typeof areaSrc.setData === 'function') {
-      areaSrc.setData(shadowArea ?? { type: 'FeatureCollection', features: [] })
-    }
-
-    const lineSrc = map.getSource('crea-shadow-line')
-    if (lineSrc && typeof lineSrc.setData === 'function') {
-      lineSrc.setData(shadowLine ?? { type: 'FeatureCollection', features: [] })
-    }
-  }, [subject.lat, subject.lon, subjectPoint, sunDirection, shadowArea, shadowLine])
+    if (!map || !map.isStyleLoaded?.()) return
+    ensureMapLayers(map)
+    applyPayload(map, payload)
+  }, [payload])
 
   if (!ready || !token) {
     return (
@@ -272,6 +378,19 @@ export function ProductionShadowMapSection({
   return (
     <View style={styles.wrapper}>
       <Text style={styles.hint}>Tap map to place subject. Shadow preview is approximated on flat ground.</Text>
+      <View style={styles.realismRow}>
+        {(['subtle', 'balanced', 'strong'] as const).map((key) => (
+          <TouchableOpacity
+            key={key}
+            style={[styles.realismBtn, realism === key && styles.realismBtnOn]}
+            onPress={() => setRealism(key)}
+          >
+            <Text style={[styles.realismText, realism === key && styles.realismTextOn]}>
+              {key[0].toUpperCase() + key.slice(1)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       <View style={styles.mapShell}>
         <div ref={mapElRef} style={{ width: '100%', height: '100%' }} />
@@ -310,7 +429,7 @@ export function ProductionShadowMapSection({
         />
       </View>
 
-      <Text style={styles.metaHint}>Web map is active (bundler-safe CDN integration).</Text>
+      <Text style={styles.metaHint}>Mapbox GL JS (same engine as native WebView).</Text>
       <TouchableOpacity style={styles.resetBtn} onPress={onResetSubject}>
         <Text style={styles.resetText}>Reset subject to location</Text>
       </TouchableOpacity>
@@ -325,6 +444,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
   },
+  realismRow: { flexDirection: 'row', gap: 8 },
+  realismBtn: {
+    flex: 1,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: '#141414',
+    paddingVertical: 7,
+    alignItems: 'center',
+  },
+  realismBtnOn: { borderColor: '#FFDC00', backgroundColor: 'rgba(255,220,0,0.12)' },
+  realismText: { color: 'rgba(255,255,255,0.74)', fontSize: 11, fontWeight: '700' },
+  realismTextOn: { color: '#FFDC00' },
   mapShell: {
     width: '100%',
     height: MAP_HEIGHT,

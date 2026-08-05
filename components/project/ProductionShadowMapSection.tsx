@@ -1,24 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native'
 import Slider from '@react-native-community/slider'
+import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import { getMapboxAccessToken, canShowShadowMap } from '@/lib/mapboxConfig'
-import { destinationLatLon, shadowAreaFeatures, shadowLineFeature } from '@/lib/shadowGeometry'
+import { buildSunPlannerMapHtml } from '@/lib/sunPlannerMapHtml'
+import {
+  buildSunPlannerMapPayload,
+  type ShadowRealism,
+} from '@/lib/sunPlannerMapModel'
 import type { ProductionShadowMapSectionProps } from '@/components/project/productionShadowMapTypes'
 
 export type { ProductionShadowMapSectionProps } from '@/components/project/productionShadowMapTypes'
 
 const MAP_HEIGHT = 280
-type NativeMapboxModule = {
-  default: { setAccessToken: (token: string) => void; StyleURL: { Street: string } }
-  MapView: React.ComponentType<Record<string, unknown>>
-  Camera: React.ComponentType<Record<string, unknown>>
-  Light: React.ComponentType<Record<string, unknown>>
-  ShapeSource: React.ComponentType<Record<string, unknown>>
-  FillLayer: React.ComponentType<Record<string, unknown>>
-  LineLayer: React.ComponentType<Record<string, unknown>>
-  CircleLayer: React.ComponentType<Record<string, unknown>>
-  VectorSource: React.ComponentType<Record<string, unknown>>
-  FillExtrusionLayer: React.ComponentType<Record<string, unknown>>
+
+function injectJson(fnName: string, value: unknown): string {
+  // JSON is safe inside a single-quoted JS string when we escape quotes/newlines via stringify twice.
+  return `window.${fnName} && window.${fnName}(${JSON.stringify(value)}); true;`
 }
 
 export function ProductionShadowMapSection({
@@ -37,159 +35,86 @@ export function ProductionShadowMapSection({
 }: ProductionShadowMapSectionProps) {
   const token = getMapboxAccessToken()
   const ready = canShowShadowMap()
+  const webRef = useRef<WebView>(null)
+  const mapReadyRef = useRef(false)
   const [mapError, setMapError] = useState<string | null>(null)
-  const [nativeUnavailable, setNativeUnavailable] = useState(false)
-  const [realism, setRealism] = useState<'subtle' | 'balanced' | 'strong'>('balanced')
+  const [realism, setRealism] = useState<ShadowRealism>('subtle')
 
-  const nativeMapbox = useMemo<NativeMapboxModule | null>(() => {
-    try {
-      return require('@rnmapbox/maps') as NativeMapboxModule
-    } catch {
-      return null
-    }
-  }, [])
+  const html = useMemo(() => buildSunPlannerMapHtml(), [])
+  const payload = useMemo(
+    () =>
+      buildSunPlannerMapPayload({
+        subject,
+        sunAzimuthDeg,
+        sunAltitudeDeg,
+        subjectHeightM,
+        realism,
+      }),
+    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, realism]
+  )
+
+  const bootMap = useCallback(() => {
+    if (!token || !webRef.current) return
+    webRef.current.injectJavaScript(
+      injectJson('__creaBoot', {
+        token,
+        state: payload,
+      })
+    )
+  }, [token, payload])
+
+  const pushUpdate = useCallback(() => {
+    if (!mapReadyRef.current || !webRef.current) return
+    webRef.current.injectJavaScript(injectJson('__creaUpdate', payload))
+  }, [payload])
 
   useEffect(() => {
-    if (!nativeMapbox) setNativeUnavailable(true)
-  }, [nativeMapbox])
+    pushUpdate()
+  }, [pushUpdate])
 
-  useEffect(() => {
-    if (token && nativeMapbox?.default?.setAccessToken) nativeMapbox.default.setAccessToken(token)
-  }, [token, nativeMapbox])
+  const onMessage = useCallback(
+    (event: WebViewMessageEvent) => {
+      let data: { type?: string; lat?: number; lon?: number; message?: string } | null = null
+      try {
+        data = JSON.parse(event.nativeEvent.data)
+      } catch {
+        return
+      }
+      if (!data?.type) return
 
-  const shadowShape = useMemo(
-    () =>
-      shadowLineFeature(subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, {
-        maxShadowMeters: 500,
-      }),
-    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM]
-  )
-  const shadowAreaShape = useMemo(
-    () =>
-      shadowAreaFeatures(subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, {
-        maxShadowMeters: 500,
-      }),
-    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM]
-  )
-  const shadowTone = useMemo(() => {
-    const altitude = Math.max(0, sunAltitudeDeg)
-    const t = Math.max(0, Math.min(1, altitude / 70))
-    return {
-      penumbraOpacity: 0.12 + (1 - t) * 0.24,
-      umbraOpacity: 0.24 + (1 - t) * 0.38,
-      lineOpacity: 0.28 + (1 - t) * 0.62,
-    }
-  }, [sunAltitudeDeg])
-  const realismScale = realism === 'subtle' ? 0.78 : realism === 'strong' ? 1.22 : 1
-  const buildingShadow = useMemo(() => {
-    const altitude = Math.max(1, sunAltitudeDeg)
-    const shadowBearing = ((sunAzimuthDeg + 180) % 360 + 360) % 360
-    const r = (shadowBearing * Math.PI) / 180
-    const baseOffsetPx = Math.max(5, Math.min(38, 260 / altitude))
-    const nearOpacity = Math.max(0.14, Math.min(0.36, (0.46 - altitude / 110) * realismScale))
-    const midOpacity = nearOpacity * 0.62
-    const farOpacity = nearOpacity * 0.34
-    return {
-      nearTranslate: [Math.sin(r) * baseOffsetPx * 0.72, -Math.cos(r) * baseOffsetPx * 0.72] as [number, number],
-      midTranslate: [Math.sin(r) * baseOffsetPx * 1.08, -Math.cos(r) * baseOffsetPx * 1.08] as [number, number],
-      farTranslate: [Math.sin(r) * baseOffsetPx * 1.5, -Math.cos(r) * baseOffsetPx * 1.5] as [number, number],
-      nearOpacity,
-      midOpacity,
-      farOpacity,
-    }
-  }, [sunAzimuthDeg, sunAltitudeDeg, realismScale])
-  const mapLight = useMemo(() => {
-    const altitude = Math.max(0, Math.min(85, sunAltitudeDeg))
-    const polar = 90 - altitude
-    return {
-      anchor: 'map',
-      position: [1.35, sunAzimuthDeg, polar],
-      intensity: Math.max(0.35, Math.min(0.92, 0.35 + shadowTone.lineOpacity * 0.6)),
-    }
-  }, [sunAzimuthDeg, sunAltitudeDeg, shadowTone.lineOpacity])
-
-  const subjectFeature = useMemo(
-    () => ({
-      type: 'Feature' as const,
-      properties: {},
-      geometry: {
-        type: 'Point' as const,
-        coordinates: [subject.lon, subject.lat] as [number, number],
-      },
-    }),
-    [subject.lat, subject.lon]
-  )
-  const sunDirectionLineFeature = useMemo(() => {
-    const length = realism === 'subtle' ? 70 : realism === 'strong' ? 120 : 95
-    const tip = destinationLatLon(subject, sunAzimuthDeg, length)
-    return {
-      type: 'Feature' as const,
-      properties: {},
-      geometry: {
-        type: 'LineString' as const,
-        coordinates: [
-          [subject.lon, subject.lat] as [number, number],
-          [tip.lon, tip.lat] as [number, number],
-        ],
-      },
-    }
-  }, [subject.lat, subject.lon, sunAzimuthDeg, realism])
-  const sunDirectionTipFeature = useMemo(() => {
-    const length = realism === 'subtle' ? 70 : realism === 'strong' ? 120 : 95
-    const tip = destinationLatLon(subject, sunAzimuthDeg, length)
-    return {
-      type: 'Feature' as const,
-      properties: {},
-      geometry: {
-        type: 'Point' as const,
-        coordinates: [tip.lon, tip.lat] as [number, number],
-      },
-    }
-  }, [subject.lat, subject.lon, sunAzimuthDeg, realism])
-
-  const onPress = useCallback(
-    (feature: { geometry?: { coordinates?: number[] } }) => {
-      const c = feature.geometry?.coordinates
-      if (c && c.length >= 2 && typeof c[0] === 'number' && typeof c[1] === 'number') {
-        onSubjectChange(c[1], c[0])
+      if (data.type === 'script-ready') {
+        bootMap()
+        return
+      }
+      if (data.type === 'ready') {
+        mapReadyRef.current = true
+        setMapError(null)
+        pushUpdate()
+        return
+      }
+      if (data.type === 'subject') {
+        const lat = Number(data.lat)
+        const lon = Number(data.lon)
+        if (Number.isFinite(lat) && Number.isFinite(lon)) onSubjectChange(lat, lon)
+        return
+      }
+      if (data.type === 'error') {
+        setMapError(data.message || 'Map failed to load')
       }
     },
-    [onSubjectChange]
+    [bootMap, onSubjectChange, pushUpdate]
   )
 
-  if (!ready) {
+  if (!ready || !token) {
     return (
       <View style={styles.fallback}>
         <Text style={styles.fallbackTitle}>Sun Planner</Text>
         <Text style={styles.fallbackText}>
-          Set EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN (public pk token) to load Mapbox 3D buildings and shadow
-          direction. Native builds also need MAPBOX_DOWNLOADS_TOKEN for prebuild (see .env.example).
+          Set EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN (public pk token) to load the Mapbox GL JS shadow map.
         </Text>
       </View>
     )
   }
-
-  if (!nativeMapbox || nativeUnavailable) {
-    return (
-      <View style={styles.fallback}>
-        <Text style={styles.fallbackTitle}>Sun Planner unavailable in this build</Text>
-        <Text style={styles.fallbackText}>
-          @rnmapbox/maps needs native linking. Start with a Dev Client / prebuild (`expo run:ios` or `expo
-          run:android`) instead of Expo Go.
-        </Text>
-      </View>
-    )
-  }
-
-  const MapView = nativeMapbox.MapView
-  const Camera = nativeMapbox.Camera
-  const Light = nativeMapbox.Light
-  const ShapeSource = nativeMapbox.ShapeSource
-  const FillLayer = nativeMapbox.FillLayer
-  const LineLayer = nativeMapbox.LineLayer
-  const CircleLayer = nativeMapbox.CircleLayer
-  const VectorSource = nativeMapbox.VectorSource
-  const FillExtrusionLayer = nativeMapbox.FillExtrusionLayer
 
   return (
     <View style={styles.wrapper}>
@@ -209,156 +134,33 @@ export function ProductionShadowMapSection({
       </View>
       {mapError ? <Text style={styles.mapErr}>{mapError}</Text> : null}
       <View style={styles.mapShell}>
-        <MapView
+        <WebView
+          ref={webRef}
+          originWhitelist={['*']}
+          source={{ html, baseUrl: 'https://api.mapbox.com' }}
           style={[styles.map, { height: MAP_HEIGHT }]}
-          styleURL={nativeMapbox.default.StyleURL.Street}
-          scaleBarEnabled={false}
-          logoEnabled
-          attributionEnabled
-          onPress={onPress}
-          onMapLoadingError={() => setMapError('Map failed to load (check token / network).')}
-          onDidFinishLoadingMap={() => setMapError(null)}
-        >
-          <Light style={mapLight} />
-          <Camera
-            centerCoordinate={[subject.lon, subject.lat]}
-            zoomLevel={17}
-            pitch={55}
-            heading={0}
-            animationMode="flyTo"
-            animationDuration={220}
-            triggerKey={`${subject.lat.toFixed(5)}-${subject.lon.toFixed(5)}`}
-            minZoomLevel={8}
-            maxZoomLevel={19}
-          />
-          <VectorSource id="mapbox-streets-buildings" url="mapbox://mapbox.mapbox-streets-v8">
-            <FillLayer
-              id="crea-building-shadow-layer-near"
-              sourceLayerID="building"
-              filter={['==', ['get', 'extrude'], 'true']}
-              style={{
-                fillColor: 'rgba(0,0,0,0.9)',
-                fillOpacity: buildingShadow.nearOpacity,
-                fillTranslate: buildingShadow.nearTranslate,
-                fillTranslateAnchor: 'map',
-              }}
-            />
-            <FillLayer
-              id="crea-building-shadow-layer-mid"
-              sourceLayerID="building"
-              filter={['==', ['get', 'extrude'], 'true']}
-              style={{
-                fillColor: 'rgba(0,0,0,0.9)',
-                fillOpacity: buildingShadow.midOpacity,
-                fillTranslate: buildingShadow.midTranslate,
-                fillTranslateAnchor: 'map',
-              }}
-            />
-            <FillLayer
-              id="crea-building-shadow-layer-far"
-              sourceLayerID="building"
-              filter={['==', ['get', 'extrude'], 'true']}
-              style={{
-                fillColor: 'rgba(0,0,0,0.9)',
-                fillOpacity: buildingShadow.farOpacity,
-                fillTranslate: buildingShadow.farTranslate,
-                fillTranslateAnchor: 'map',
-              }}
-            />
-            <FillExtrusionLayer
-              id="crea-3d-buildings"
-              sourceLayerID="building"
-              filter={['==', ['get', 'extrude'], 'true']}
-              style={{
-                fillExtrusionColor: '#e6e8ec',
-                fillExtrusionOpacity: 0.92,
-                fillExtrusionHeight: ['coalesce', ['get', 'render_height'], ['get', 'height'], 12],
-                fillExtrusionBase: ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-              }}
-            />
-          </VectorSource>
-          {shadowAreaShape ? (
-            <ShapeSource id="shadow-area" shape={shadowAreaShape}>
-              <FillLayer
-                id="shadow-penumbra-layer"
-                filter={['==', ['get', 'kind'], 'penumbra']}
-                style={{
-                  fillColor: 'rgba(20,20,20,0.3)',
-                  fillOpacity: shadowTone.penumbraOpacity,
-                }}
-              />
-              <FillLayer
-                id="shadow-umbra-layer"
-                filter={['==', ['get', 'kind'], 'umbra']}
-                style={{
-                  fillColor: 'rgba(10,10,10,0.62)',
-                  fillOpacity: shadowTone.umbraOpacity,
-                }}
-              />
-            </ShapeSource>
-          ) : null}
-          <ShapeSource id="subject-pt" shape={subjectFeature}>
-            <CircleLayer
-              id="subject-circle"
-              style={{
-                circleRadius: 9,
-                circleColor: '#FFDC00',
-                circleStrokeWidth: 2,
-                circleStrokeColor: '#0a0a0a',
-              }}
-            />
-          </ShapeSource>
-          <ShapeSource id="sun-direction-line" shape={sunDirectionLineFeature}>
-            <LineLayer
-              id="sun-direction-line-soft"
-              style={{
-                lineColor: 'rgba(255,220,0,0.42)',
-                lineWidth: 8,
-                lineOpacity: 0.5,
-              }}
-            />
-            <LineLayer
-              id="sun-direction-line-core"
-              style={{
-                lineColor: '#FFDC00',
-                lineWidth: 3,
-                lineOpacity: 0.95,
-              }}
-            />
-          </ShapeSource>
-          <ShapeSource id="sun-direction-tip" shape={sunDirectionTipFeature}>
-            <CircleLayer
-              id="sun-direction-tip-circle"
-              style={{
-                circleRadius: 5,
-                circleColor: '#FFDC00',
-                circleStrokeWidth: 1.5,
-                circleStrokeColor: '#0a0a0a',
-              }}
-            />
-          </ShapeSource>
-          {shadowShape ? (
-            <ShapeSource id="shadow-line" shape={shadowShape}>
-              <LineLayer
-                id="shadow-line-soft"
-                style={{
-                  lineColor: 'rgba(10,10,10,0.45)',
-                  lineWidth: 12,
-                  lineOpacity: shadowTone.lineOpacity * 0.42,
-                }}
-              />
-              <LineLayer
-                id="shadow-line-layer"
-                style={{
-                  lineColor: 'rgba(10,10,10,0.92)',
-                  lineWidth: 5,
-                  lineOpacity: shadowTone.lineOpacity,
-                }}
-              />
-            </ShapeSource>
-          ) : null}
-        </MapView>
-        <View style={styles.timeOverlay}>
+          onMessage={onMessage}
+          onLoadStart={() => {
+            mapReadyRef.current = false
+          }}
+          onLoadEnd={() => {
+            // iOS sometimes finishes load before inline script posts script-ready.
+            bootMap()
+          }}
+          onError={() => setMapError('Map WebView failed to load.')}
+          onHttpError={() => setMapError('Map WebView HTTP error.')}
+          javaScriptEnabled
+          domStorageEnabled
+          allowFileAccess
+          mixedContentMode="always"
+          setSupportMultipleWindows={false}
+          scrollEnabled={false}
+          bounces={false}
+          overScrollMode="never"
+          nestedScrollEnabled
+          androidLayerType={Platform.OS === 'android' ? 'hardware' : undefined}
+        />
+        <View style={styles.timeOverlay} pointerEvents="box-none">
           <View style={styles.timeHead}>
             <Text style={styles.timeLabel}>Time scrub</Text>
             <Text style={styles.timeValue}>{timeLabel}</Text>
@@ -426,8 +228,15 @@ const styles = StyleSheet.create({
   realismText: { color: 'rgba(255,255,255,0.74)', fontSize: 11, fontWeight: '700' },
   realismTextOn: { color: '#FFDC00' },
   mapErr: { color: '#ff9b9b', fontSize: 12, marginBottom: 6 },
-  mapShell: { position: 'relative' },
-  map: { width: '100%', borderRadius: 12, overflow: 'hidden' },
+  mapShell: {
+    position: 'relative',
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: '#111',
+  },
+  map: { width: '100%', backgroundColor: '#111' },
   timeOverlay: {
     position: 'absolute',
     left: 10,

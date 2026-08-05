@@ -1,9 +1,0 @@
-diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXFabricPropConvert.mm b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXFabricPropConvert.mm
-index 8762b37..f797c20 100644
---- a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXFabricPropConvert.mm
-+++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXFabricPropConvert.mm
-@@ -1,3 +1,4 @@
-+#include <sstream>
- #import <React/RCTConversions.h>
- #import <React/RCTFabricComponentsPlugins.h>
- #import <React/RCTBridge+Private.h>
