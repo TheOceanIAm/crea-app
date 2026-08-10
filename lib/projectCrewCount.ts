@@ -13,7 +13,8 @@ export async function countProjectCrewMembers(
     supabase
       .from('project_manual_crew_readable')
       .select('*', { count: 'exact', head: true })
-      .eq('project_id', projectId),
+      .eq('project_id', projectId)
+      .is('claimed_profile_id', null),
   ])
   return (membersRes.count ?? 0) + (manualRes.count ?? 0)
 }

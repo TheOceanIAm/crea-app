@@ -90,9 +90,10 @@ export function ProjectBudgetTab({ projectId }: Props) {
       supabase
         .from('project_manual_crew_readable')
         .select(
-          'id, name, member_role, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount'
+          'id, name, member_role, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount, claimed_profile_id'
         )
-        .eq('project_id', projectId),
+        .eq('project_id', projectId)
+        .is('claimed_profile_id', null),
     ])
 
     if (planRes.error) {
@@ -207,7 +208,10 @@ export function ProjectBudgetTab({ projectId }: Props) {
       currency: payload.currency,
     })
     if (!synced.ok) {
-      Alert.alert('Saved with warning', `Budget targets saved, but overview sync failed:\n${synced.error}`)
+      Alert.alert(
+        'Saved with warning',
+        `Budget targets saved, but overview sync failed:\n${'error' in synced ? synced.error : 'Unknown error'}`
+      )
       void load()
       return
     }

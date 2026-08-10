@@ -18,6 +18,7 @@ import { Trash2, ChevronDown } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { cancelCrewInvite, listProjectCrewInvites, type ProjectCrewInvite } from '@/lib/crewInvites'
+import { fetchCreaApi } from '@/lib/creaApiFetch'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import {
   clampBookedEntriesToWindow,
@@ -63,6 +64,7 @@ type ManualCrew = {
   scheduling_end_date?: string | null
   day_rate_amount?: number | null
   half_day_rate_amount?: number | null
+  claimed_profile_id?: string | null
 }
 
 type CrewRow =
@@ -99,6 +101,8 @@ type CrewRow =
       bookingSlots: BookedDateEntry[]
       day_rate_amount: number | null
       half_day_rate_amount: number | null
+      inviteStatus?: 'none' | 'pending'
+      pendingInviteId?: string | null
     }
 
 function parseOptionalRate(value: unknown): number | null {
@@ -235,7 +239,7 @@ export function ProjectCrewTab({
       supabase
         .from('project_manual_crew_readable')
         .select(
-          'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount'
+          'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount, claimed_profile_id'
         )
         .eq('project_id', projectId)
         .order('created_at', { ascending: true }),
@@ -255,7 +259,7 @@ export function ProjectCrewTab({
       const fallback = await supabase
         .from('project_manual_crew')
         .select(
-          'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount'
+          'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount, claimed_profile_id'
         )
         .eq('project_id', projectId)
         .order('created_at', { ascending: true })
@@ -264,6 +268,25 @@ export function ProjectCrewTab({
         manualData = []
       } else {
         manualData = (fallback.data as ManualCrew[]) ?? []
+      }
+    }
+
+    manualData = (manualData ?? []).filter(
+      (m) => !(typeof m.claimed_profile_id === 'string' && m.claimed_profile_id.trim())
+    )
+
+    const pendingByManual: Record<string, { id: string }> = {}
+    if (viewerIsCompany) {
+      const nowIso = new Date().toISOString()
+      const { data: pendingInv } = await supabase
+        .from('project_manual_crew_invites')
+        .select('id, manual_crew_id')
+        .eq('project_id', projectId)
+        .eq('status', 'pending')
+        .gt('expires_at', nowIso)
+      for (const row of pendingInv ?? []) {
+        const mid = String((row as { manual_crew_id?: string }).manual_crew_id ?? '')
+        if (mid) pendingByManual[mid] = { id: String((row as { id: string }).id) }
       }
     }
 
@@ -337,19 +360,23 @@ export function ProjectCrewTab({
       const dayRate = viewerIsCompany ? parseOptionalRate(m.day_rate_amount) : null
       const rateNote = dayRate != null ? ` · €${dayRate}/day` : ''
       const shootNote = formatBookedSlotsSummary(bookingSlots)
+      const pending = pendingByManual[m.id]
+      const inviteNote = pending ? ' · Invite sent' : ''
       return {
         source: 'manual' as const,
         id: m.id,
         member_role: m.member_role || 'crew',
         role_display: role || 'Crew',
         name: m.name,
-        subtitle: `${role || 'Crew'}${rateNote}${shootNote ? ` · ${shootNote}` : ''}`,
+        subtitle: `${role || 'Crew'}${rateNote}${shootNote ? ` · ${shootNote}` : ''}${inviteNote}`,
         email: m.email?.trim() || null,
         phone: m.phone?.trim() || null,
         bookingDates,
         bookingSlots,
         day_rate_amount: dayRate,
         half_day_rate_amount: viewerIsCompany ? parseOptionalRate(m.half_day_rate_amount) : null,
+        inviteStatus: pending ? ('pending' as const) : ('none' as const),
+        pendingInviteId: pending?.id ?? null,
       }
     })
 
@@ -458,6 +485,47 @@ export function ProjectCrewTab({
         },
       },
     ])
+  }
+
+  const inviteManualToCrea = async (
+    row: Extract<CrewRow, { source: 'manual' }>,
+    action: 'send' | 'resend' | 'cancel'
+  ) => {
+    if (!viewerIsCompany || !proFeaturesEnabled) return
+    if (action !== 'cancel' && !(row.email ?? '').trim()) {
+      Alert.alert('Email required', 'Add an email address before inviting this person to Crea.')
+      return
+    }
+    setBusy(true)
+    const { data, error, status } = await fetchCreaApi<{
+      ok?: boolean
+      error?: string
+      warning?: string
+      emailSent?: boolean
+    }>('/api/projects/manual-crew-invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        projectId,
+        manualCrewId: row.id,
+        inviteId: row.pendingInviteId ?? undefined,
+      }),
+    })
+    setBusy(false)
+    if (error || !data?.ok) {
+      Alert.alert('Invite', data?.error || error || `Request failed (${status})`)
+      return
+    }
+    if (action === 'cancel') {
+      Alert.alert('Invite cancelled')
+    } else if (data.emailSent === false) {
+      Alert.alert('Invite saved', data.warning || 'Email may not have sent.')
+    } else {
+      Alert.alert(action === 'resend' ? 'Invite resent' : 'Invite sent', row.email ?? undefined)
+    }
+    setPersonModalOpen(false)
+    load()
   }
 
   const addManualCrew = async () => {
@@ -1036,7 +1104,7 @@ export function ProjectCrewTab({
             />
             <TextInput
               style={styles.modalInput}
-              placeholder="Email (optional)"
+              placeholder="Email (needed to invite to Crea)"
               placeholderTextColor="rgba(255,255,255,0.3)"
               value={manualEmail}
               onChangeText={setManualEmail}
@@ -1280,6 +1348,46 @@ export function ProjectCrewTab({
                   onChangeText={setPersonHalfDayRate}
                   keyboardType="decimal-pad"
                 />
+                <View style={styles.inviteSection}>
+                  <Text style={styles.modalSectionKicker}>Invite to Crea</Text>
+                  <Text style={styles.modalHintSmall}>
+                    Email them a link to create a free profile (30-day Pro trial) and join this workspace.
+                  </Text>
+                  <Text style={styles.inviteStatusLine}>
+                    {selectedCrew.inviteStatus === 'pending' ? 'Invite sent' : 'Not invited'}
+                  </Text>
+                  <View style={styles.inviteActionsRow}>
+                    {selectedCrew.inviteStatus === 'pending' ? (
+                      <>
+                        <TouchableOpacity
+                          style={[styles.inviteActionBtn, busy && styles.dim]}
+                          disabled={busy || !proFeaturesEnabled}
+                          onPress={() => void inviteManualToCrea(selectedCrew, 'resend')}
+                        >
+                          <Text style={styles.inviteActionText}>Resend</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.inviteActionBtnMuted, busy && styles.dim]}
+                          disabled={busy}
+                          onPress={() => void inviteManualToCrea(selectedCrew, 'cancel')}
+                        >
+                          <Text style={styles.inviteActionTextMuted}>Cancel invite</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <TouchableOpacity
+                        style={[
+                          styles.inviteActionBtnPrimary,
+                          (busy || !proFeaturesEnabled || !(selectedCrew.email ?? '').trim()) && styles.dim,
+                        ]}
+                        disabled={busy || !proFeaturesEnabled || !(selectedCrew.email ?? '').trim()}
+                        onPress={() => void inviteManualToCrea(selectedCrew, 'send')}
+                      >
+                        <Text style={styles.inviteActionTextPrimary}>Invite to Crea</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
               </>
             ) : null}
 
@@ -1650,6 +1758,45 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   modalHintSmall: { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginBottom: 10, lineHeight: 16 },
+  inviteSection: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  inviteStatusLine: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,220,0,0.85)',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  inviteActionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  inviteActionBtnPrimary: {
+    borderRadius: 999,
+    backgroundColor: '#FFDC00',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  inviteActionTextPrimary: { color: '#0a0a0a', fontWeight: '800', fontSize: 13 },
+  inviteActionBtn: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.35)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  inviteActionText: { color: '#FFDC00', fontWeight: '700', fontSize: 13 },
+  inviteActionBtnMuted: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  inviteActionTextMuted: { color: 'rgba(255,255,255,0.5)', fontWeight: '600', fontSize: 13 },
+
   modalSchedActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginTop: 4 },
   modalGhost: { paddingVertical: 10, paddingHorizontal: 12 },
   modalGhostText: { color: 'rgba(255,255,255,0.45)', fontWeight: '700', fontSize: 13 },

@@ -353,7 +353,7 @@ export function ProductionTab({
         .maybeSingle(),
       supabase
         .from('project_manual_crew_readable')
-        .select('id, name, member_role')
+        .select('id, name, member_role, claimed_profile_id')
         .eq('project_id', projectId)
         .order('created_at', { ascending: true }),
     ])
@@ -390,7 +390,7 @@ export function ProductionTab({
       console.warn('[ProductionTab] project_manual_crew', manualRes.error.message)
       const retry = await supabase
         .from('project_manual_crew_readable')
-        .select('id, name, member_role')
+        .select('id, name, member_role, claimed_profile_id')
         .eq('project_id', projectId)
       if (retry.error) {
         Alert.alert('External crew', retry.error.message)
@@ -402,7 +402,10 @@ export function ProductionTab({
       id: string
       name: string
       member_role: string | null
-    }>).map((m) => ({
+      claimed_profile_id?: string | null
+    }>)
+      .filter((m) => !(typeof m.claimed_profile_id === 'string' && m.claimed_profile_id.trim()))
+      .map((m) => ({
       key: manualCallSheetKey(m.id),
       name: (m.name && m.name.trim()) || 'Crew',
       roleLabel: (m.member_role && m.member_role.trim()) || 'Crew',
