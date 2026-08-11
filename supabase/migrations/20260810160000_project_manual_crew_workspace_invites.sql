@@ -68,8 +68,6 @@ select
   m.booked_dates,
   m.scheduling_start_date,
   m.scheduling_end_date,
-  m.claimed_profile_id,
-  m.claimed_at,
   case
     when public.crea_user_is_project_host(m.project_id) then m.day_rate_amount
     else null
@@ -77,7 +75,10 @@ select
   case
     when public.crea_user_is_project_host(m.project_id) then m.half_day_rate_amount
     else null
-  end as half_day_rate_amount
+  end as half_day_rate_amount,
+  -- Appended after rates: CREATE OR REPLACE VIEW cannot rename/reorder existing columns.
+  m.claimed_profile_id,
+  m.claimed_at
 from public.project_manual_crew m
 where public.user_in_project(m.project_id, auth.uid());
 
