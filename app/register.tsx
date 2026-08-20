@@ -21,6 +21,7 @@ import {
   IOS_SIGNUP_ON_WEB_ONLY,
   getCreaWebRegisterUrl,
 } from '@/lib/iosAppStoreCompliance'
+import { isMeaningfulProfileName, PROFILE_DISPLAY_NAME_MIN } from '@/lib/resolveProfileDisplayName'
 
 function RegisterIosWebOnly() {
   return (
@@ -54,12 +55,18 @@ function RegisterIosWebOnly() {
 function RegisterForm() {
   const { fromPurchase } = useLocalSearchParams<{ fromPurchase?: string; plan?: string }>()
   const showPurchaseBanner = fromPurchase === 'true'
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleRegister = async () => {
+    const trimmedName = name.trim()
     const normalizedEmail = email.trim().toLowerCase()
+    if (!isMeaningfulProfileName(trimmedName)) {
+      Alert.alert('Name', `Please enter your name (at least ${PROFILE_DISPLAY_NAME_MIN} characters).`)
+      return
+    }
     if (!normalizedEmail || !password) return
     setLoading(true)
     const emailRedirectTo = getWebAuthConfirmRedirectUrl()
@@ -74,7 +81,13 @@ function RegisterForm() {
     const { data, error } = await supabase.auth.signUp({
       email: normalizedEmail,
       password,
-      options: { emailRedirectTo },
+      options: {
+        emailRedirectTo,
+        data: {
+          name: trimmedName,
+          full_name: trimmedName,
+        },
+      },
     })
     setLoading(false)
     if (error) {
@@ -83,6 +96,17 @@ function RegisterForm() {
     }
     if (data.session) {
       const userId = data.session.user.id
+      const { error: profileErr } = await supabase.from('profiles').upsert(
+        {
+          id: userId,
+          email: normalizedEmail,
+          name: trimmedName,
+        },
+        { onConflict: 'id' }
+      )
+      if (profileErr && __DEV__) {
+        console.warn('[register] profiles upsert', profileErr.message)
+      }
       if (await Purchases.isConfigured()) {
         try {
           await Purchases.logIn(userId)
@@ -90,7 +114,7 @@ function RegisterForm() {
           console.warn('[RevenueCat] logIn after register failed', e)
         }
       }
-      router.replace(showPurchaseBanner ? '/onboarding' : '/')
+      router.replace('/onboarding')
       return
     }
     Alert.alert(
@@ -117,6 +141,17 @@ function RegisterForm() {
         <Text style={styles.subtitle}>Create your account</Text>
 
         <View style={styles.form}>
+          <TextInput
+            style={styles.input}
+            placeholder="Full name"
+            placeholderTextColor="rgba(255,255,255,0.3)"
+            value={name}
+            onChangeText={setName}
+            autoCapitalize="words"
+            autoCorrect={false}
+            textContentType="name"
+            autoComplete="name"
+          />
           <TextInput
             style={styles.input}
             placeholder="Email"

@@ -70,7 +70,7 @@ export function onboardingDoneFromHints(hints: BootstrapHints | null): boolean |
 
 export async function syncBootstrapHintsFromProfile(
   userId: string,
-  profile: { onboarding_completed?: boolean | null; role?: string | null } | null,
+  profile: { onboarding_completed?: boolean | null; role?: string | null; name?: string | null } | null,
   user?: User | { id: string; user_metadata?: Record<string, unknown> }
 ): Promise<boolean> {
   const done = !profileNeedsOnboarding(profile)

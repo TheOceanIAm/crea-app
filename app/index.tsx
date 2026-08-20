@@ -98,10 +98,11 @@ export default function Index() {
 
       setSession(sessionToUse)
       setEntryHref(entry)
-      if (hinted === false) {
-        setOnboardingDone(false)
-      } else {
+      // Unknown hints (null): do not assume complete — nameless accounts must hit onboarding.
+      if (hinted === true) {
         setOnboardingDone(true)
+      } else {
+        setOnboardingDone(false)
       }
 
       await awaitBootstrapReveal({ startedAt: bootstrapStartedAt, userId: uid, entryTab })
@@ -112,7 +113,7 @@ export default function Index() {
       runPostLoginWarmup(sessionToUse, {
         onOnboardingResolved: (done) => {
           if (cancelled) return
-          if (!done) setOnboardingDone(false)
+          setOnboardingDone(done)
           void resolveAppEntryHref(uid).then((href) => {
             if (!cancelled) setEntryHref(href)
           })

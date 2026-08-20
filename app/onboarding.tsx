@@ -22,6 +22,7 @@ import { pickAndUploadAvatarOnly } from '@/lib/uploadProfileAvatar'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { postTrialPlan } from '@/lib/trialPlanApi'
 import { IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY, getLoggedOutEntryRoute } from '@/lib/iosAppStoreCompliance'
+import { isMeaningfulProfileName, PROFILE_DISPLAY_NAME_MIN } from '@/lib/resolveProfileDisplayName'
 import {
   freelancerPlanDescription,
   freelancerPlanLabel,
@@ -67,7 +68,7 @@ export default function OnboardingScreen() {
 
     const { data: profile, error } = await supabase
       .from('profiles')
-      .select('onboarding_completed')
+      .select('onboarding_completed, name')
       .eq('id', user.id)
       .maybeSingle()
 
@@ -87,6 +88,17 @@ export default function OnboardingScreen() {
       router.replace('/(tabs)/feed')
       return
     }
+
+    const metaName =
+      typeof user.user_metadata?.name === 'string'
+        ? user.user_metadata.name.trim()
+        : typeof user.user_metadata?.full_name === 'string'
+          ? user.user_metadata.full_name.trim()
+          : ''
+    const fromProfile = typeof profile?.name === 'string' ? profile.name.trim() : ''
+    if (fromProfile.length >= 2) setDisplayName(fromProfile)
+    else if (metaName.length >= 2) setDisplayName(metaName)
+
     setChecking(false)
   }, [])
 
@@ -118,9 +130,8 @@ export default function OnboardingScreen() {
       return
     }
     if (step === 2) {
-      const name = displayName.trim()
-      if (name.length < 2) {
-        Alert.alert('Name', 'Please enter at least 2 characters.')
+      if (!isMeaningfulProfileName(displayName)) {
+        Alert.alert('Name', `Please enter at least ${PROFILE_DISPLAY_NAME_MIN} characters.`)
         return
       }
       setStep(3)
@@ -137,8 +148,8 @@ export default function OnboardingScreen() {
       Alert.alert('Account type', 'Choose how you want to use Crea.')
       return
     }
-    if (name.length < 2) {
-      Alert.alert('Name', 'Please enter at least 2 characters.')
+    if (!isMeaningfulProfileName(name)) {
+      Alert.alert('Name', `Please enter at least ${PROFILE_DISPLAY_NAME_MIN} characters.`)
       return
     }
     if (!termsAccepted) {

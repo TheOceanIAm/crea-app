@@ -3,7 +3,6 @@ import { supabase } from '@/lib/supabase'
 import {
   isMeaningfulProfileName,
   nameFromAuthMetadata,
-  nameFromEmailAddress,
   resolveProfileDisplayName,
 } from '@/lib/resolveProfileDisplayName'
 
@@ -15,16 +14,11 @@ function pickNameToPersist(
 ): string | null {
   if (isMeaningfulProfileName(profile?.name)) return null
 
-  const fromAuth = nameFromAuthMetadata(user.user_metadata as Record<string, unknown>)
-  if (fromAuth) return fromAuth
-
-  const fromEmail = nameFromEmailAddress(profile?.email ?? user.email)
-  if (fromEmail) return fromEmail
-
-  return null
+  // Only copy a name the user entered (auth metadata). Never invent from email.
+  return nameFromAuthMetadata(user.user_metadata as Record<string, unknown>)
 }
 
-/** Heal empty profiles.name from auth metadata or email — safe on every cold start. */
+/** Heal empty profiles.name from auth metadata — safe on every cold start. */
 export async function ensureOwnProfileName(user: User): Promise<string> {
   const { data: profile } = await supabase
     .from('profiles')

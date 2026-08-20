@@ -1,6 +1,7 @@
 import type { User } from '@supabase/supabase-js'
 
 import { fetchCreaApi } from '@/lib/creaApiFetch'
+import { isMeaningfulProfileName } from '@/lib/resolveProfileDisplayName'
 
 export type AppBootstrapProfile = {
   name: string | null
@@ -38,7 +39,8 @@ export function bootstrapProfileToHints(
     (typeof profile.role === 'string' && profile.role.trim()) ||
     (typeof user.user_metadata?.role === 'string' ? String(user.user_metadata.role) : null)
   return {
-    onboardingCompleted: profile.onboarding_completed === true,
+    onboardingCompleted:
+      profile.onboarding_completed === true && isMeaningfulProfileName(profile.name),
     role,
   }
 }

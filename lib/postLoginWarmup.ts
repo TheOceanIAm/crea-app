@@ -11,7 +11,11 @@ import {
 } from '@/lib/dashboardOverview'
 import { supabase } from '@/lib/supabase'
 import { setWarmedOverview } from '@/lib/warmAppCaches'
-import { prefetchSecondaryTabsIdle } from '@/lib/prefetchSecondaryTabs'
+import {
+  hydrateSecondaryTabsFromDisk,
+  prefetchSecondaryTabsIdle,
+} from '@/lib/prefetchSecondaryTabs'
+import { seedSecondaryQueriesFromMem } from '@/lib/seedQueryCaches'
 
 type WarmupOpts = {
   onOnboardingResolved?: (done: boolean) => void
@@ -33,10 +37,11 @@ async function resolveOnboardingFromNetwork(
 
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('onboarding_completed, role')
+    .select('onboarding_completed, role, name')
     .eq('id', uid)
     .maybeSingle()
-  if (error) return true
+  // Fail closed: never treat a read error as "onboarding done".
+  if (error) return false
   return syncBootstrapHintsFromProfile(uid, profile, session.user)
 }
 
@@ -44,9 +49,13 @@ async function resolveOnboardingFromNetwork(
 export function runPostLoginWarmup(session: Session, opts?: WarmupOpts): void {
   const uid = session.user.id
 
+  // Hydrate secondary tabs from disk immediately (don't wait for network overview
+  // or InteractionManager) so Alerts/Messages/Jobs paint from cache on first open.
   void (async () => {
     const diskOverview = await hydrateDashboardOverviewFromDisk(uid)
     if (diskOverview) setWarmedOverview(diskOverview)
+    await hydrateSecondaryTabsFromDisk(uid, diskOverview?.role ?? null)
+    seedSecondaryQueriesFromMem(uid)
   })()
 
   void (async () => {

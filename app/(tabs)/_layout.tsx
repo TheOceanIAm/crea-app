@@ -16,6 +16,7 @@ import { mainTabFromPathname, writeLastMainTab } from '@/lib/appEntryRoute'
 import { prefetchMainTabData } from '@/lib/prefetchTabData'
 import { readBootstrapHints, writeBootstrapHints } from '@/lib/bootstrapHints'
 import { hydrateDashboardOverviewFromDisk } from '@/lib/dashboardOverview'
+import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { refreshNotificationsAndCount } from '@/lib/notificationsCache'
 import {
@@ -100,7 +101,7 @@ export default function TabLayout() {
         if (!hints && !diskOverview) {
           const { data: profile } = await supabase
             .from('profiles')
-            .select('role, subscription_tier, onboarding_completed')
+            .select('role, subscription_tier, onboarding_completed, name')
             .eq('id', user.id)
             .maybeSingle()
           const fetchedRole = resolveAppRole(profile?.role, user)
@@ -108,7 +109,7 @@ export default function TabLayout() {
           setShowMarketplaceJobsTab(isFreelancerProfile(fetchedRole))
           await writeBootstrapHints(user.id, {
             role: fetchedRole,
-            onboardingCompleted: profile?.onboarding_completed === true,
+            onboardingCompleted: !profileNeedsOnboarding(profile),
           })
         }
 
