@@ -2,13 +2,13 @@
   "expo": {
     "name": "CREA",
     "slug": "crea-app",
-    "version": "1.0.10",
+    "version": "1.0.11",
     "orientation": "portrait",
     "icon": "./assets/crea-icon.png",
     "scheme": "crea",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0a0a0a",
-    "runtimeVersion": "1.0.10",
+    "runtimeVersion": "1.0.11",
     "updates": {
       "url": "https://u.expo.dev/fe41eddf-6492-4a35-868c-abd3ffdaffd7",
       "enabled": true,
