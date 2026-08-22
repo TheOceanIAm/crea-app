@@ -35,8 +35,21 @@ import { PLATFORM_TRIAL_DAYS } from '@/lib/platformTrial'
 import { mainTabHref, writeLastMainTab } from '@/lib/appEntryRoute'
 import { writeBootstrapHints } from '@/lib/bootstrapHints'
 import { ensureOwnProfileName } from '@/lib/ensureProfileName'
+import { upsertFreelancerProfilesRow } from '@/lib/syncFreelancerProfileToWeb'
 
 type RoleChoice = 'freelancer' | 'company'
+
+function hasOnboardingPhoto(url: string | null | undefined): boolean {
+  return typeof url === 'string' && /^https?:\/\//i.test(url.trim())
+}
+
+function parsePositiveDayRate(raw: string): number | null {
+  const n = Number.parseFloat(raw.replace(',', '.').trim())
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n
+}
+
+const DAY_RATE_PRESETS = ['350', '450', '550', '650', '750', '900']
 
 type TrialFreelancerPlanKey = NormalizedFreelancerPlan
 type TrialCompanyPlanKey = CompanySubscriptionPlanDb
@@ -53,6 +66,7 @@ export default function OnboardingScreen() {
   const [headline, setHeadline] = useState('')
   const [avatarPublicUrl, setAvatarPublicUrl] = useState<string | null>(null)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [dayRate, setDayRate] = useState('')
   const [termsAccepted, setTermsAccepted] = useState(false)
   const [saving, setSaving] = useState(false)
   const [trialFreelancerPlan, setTrialFreelancerPlan] = useState<TrialFreelancerPlanKey>('free')
@@ -68,7 +82,7 @@ export default function OnboardingScreen() {
 
     const { data: profile, error } = await supabase
       .from('profiles')
-      .select('onboarding_completed, name')
+      .select('onboarding_completed, name, avatar_url, day_rate_amount, role')
       .eq('id', user.id)
       .maybeSingle()
 
@@ -98,6 +112,19 @@ export default function OnboardingScreen() {
     const fromProfile = typeof profile?.name === 'string' ? profile.name.trim() : ''
     if (fromProfile.length >= 2) setDisplayName(fromProfile)
     else if (metaName.length >= 2) setDisplayName(metaName)
+
+    const existingAvatar = typeof profile?.avatar_url === 'string' ? profile.avatar_url.trim() : ''
+    if (hasOnboardingPhoto(existingAvatar)) setAvatarPublicUrl(existingAvatar)
+
+    const existingRate = profile?.day_rate_amount
+    if (typeof existingRate === 'number' && Number.isFinite(existingRate) && existingRate > 0) {
+      setDayRate(String(Math.round(existingRate)))
+    }
+
+    const existingRole = typeof profile?.role === 'string' ? profile.role.trim().toLowerCase() : ''
+    if (existingRole === 'freelancer' || existingRole === 'company') {
+      setRoleChoice(existingRole)
+    }
 
     setChecking(false)
   }, [])
@@ -138,6 +165,19 @@ export default function OnboardingScreen() {
       return
     }
     if (step === 3) {
+      if (!hasOnboardingPhoto(avatarPublicUrl)) {
+        Alert.alert(
+          roleChoice === 'company' ? 'Company logo' : 'Profile photo',
+          roleChoice === 'company'
+            ? 'Upload a company logo to continue.'
+            : 'Upload a profile photo to continue.'
+        )
+        return
+      }
+      if (roleChoice === 'freelancer' && parsePositiveDayRate(dayRate) == null) {
+        Alert.alert('Day rate', 'Enter your day rate so companies know what you charge.')
+        return
+      }
       void completeOnboarding()
     }
   }
@@ -150,6 +190,20 @@ export default function OnboardingScreen() {
     }
     if (!isMeaningfulProfileName(name)) {
       Alert.alert('Name', `Please enter at least ${PROFILE_DISPLAY_NAME_MIN} characters.`)
+      return
+    }
+    if (!hasOnboardingPhoto(avatarPublicUrl)) {
+      Alert.alert(
+        roleChoice === 'company' ? 'Company logo' : 'Profile photo',
+        roleChoice === 'company'
+          ? 'Upload a company logo to continue.'
+          : 'Upload a profile photo to continue.'
+      )
+      return
+    }
+    const parsedDayRate = roleChoice === 'freelancer' ? parsePositiveDayRate(dayRate) : null
+    if (roleChoice === 'freelancer' && parsedDayRate == null) {
+      Alert.alert('Day rate', 'Enter your day rate so companies know what you charge.')
       return
     }
     if (!termsAccepted) {
@@ -183,14 +237,15 @@ export default function OnboardingScreen() {
         role: roleChoice,
         headline: headline.trim() || null,
         avatar_url: avatarPublicUrl,
+        ...(parsedDayRate != null ? { day_rate_amount: parsedDayRate, rates_currency: 'EUR' } : {}),
         onboarding_completed: true,
         terms_accepted_at: acceptedAt,
       },
       { onConflict: 'id' }
     )
-    setSaving(false)
 
     if (error) {
+      setSaving(false)
       const em = error.message.toLowerCase()
       if (em.includes('terms_accepted_at') || em.includes('column')) {
         Alert.alert(
@@ -202,6 +257,29 @@ export default function OnboardingScreen() {
       }
       return
     }
+
+    if (roleChoice === 'freelancer' && parsedDayRate != null) {
+      const { error: fpErr } = await upsertFreelancerProfilesRow(user.id, {
+        day_rate: parsedDayRate,
+      })
+      if (fpErr) {
+        console.warn('[onboarding] freelancer_profiles:', fpErr)
+      }
+    } else if (roleChoice === 'company') {
+      const { error: cpErr } = await supabase.from('company_profiles').upsert(
+        {
+          id: user.id,
+          company_name: name,
+          logo_url: avatarPublicUrl,
+        },
+        { onConflict: 'id' }
+      )
+      if (cpErr) {
+        console.warn('[onboarding] company_profiles:', cpErr.message)
+      }
+    }
+
+    setSaving(false)
 
     const { error: metaErr } = await supabase.auth.updateUser({
       data: {
@@ -251,7 +329,9 @@ export default function OnboardingScreen() {
         ? 'Trial plan'
         : step === 2
           ? 'Tell us about you'
-          : 'Photo & agreements'
+          : roleChoice === 'freelancer'
+            ? 'Photo, rate & agreements'
+            : 'Photo & agreements'
 
   const sub =
     step === 0
@@ -262,7 +342,15 @@ export default function OnboardingScreen() {
           ? roleChoice === 'company'
             ? 'This is how you appear to freelancers.'
             : 'This is how you appear on your public profile.'
-          : 'Profile photo is optional. You must accept our policies to finish.'
+          : roleChoice === 'freelancer'
+            ? 'A profile photo and day rate are required. You must also accept our policies to finish.'
+            : 'A logo or profile photo is required. You must accept our policies to finish.'
+
+  const photoRequired = !hasOnboardingPhoto(avatarPublicUrl)
+  const dayRateRequired = roleChoice === 'freelancer' && parsePositiveDayRate(dayRate) == null
+  const finishBlocked =
+    step === 3 &&
+    (photoRequired || dayRateRequired || !termsAccepted || saving || uploadingAvatar)
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -393,7 +481,9 @@ export default function OnboardingScreen() {
                 <Text style={styles.backText}>Back</Text>
               </TouchableOpacity>
 
-              <Text style={styles.fieldLabel}>Profile photo (optional)</Text>
+              <Text style={styles.fieldLabel}>
+                {roleChoice === 'company' ? 'Company logo' : 'Profile photo'}
+              </Text>
               <TouchableOpacity
                 style={styles.avatarRow}
                 onPress={onPickAvatar}
@@ -409,11 +499,51 @@ export default function OnboardingScreen() {
                 </View>
                 <View style={styles.avatarMeta}>
                   <Text style={styles.avatarCta}>
-                    {uploadingAvatar ? 'Uploading…' : showAvatarImage ? 'Change photo' : 'Add photo'}
+                    {uploadingAvatar
+                      ? 'Uploading…'
+                      : showAvatarImage
+                        ? roleChoice === 'company'
+                          ? 'Change logo'
+                          : 'Change photo'
+                        : roleChoice === 'company'
+                          ? 'Add logo'
+                          : 'Add photo'}
                   </Text>
-                  <Text style={styles.avatarHint}>Square crop · shown on your profile</Text>
+                  <Text style={styles.avatarHint}>
+                    Required · square crop · shown on your profile
+                  </Text>
                 </View>
               </TouchableOpacity>
+
+              {roleChoice === 'freelancer' ? (
+                <>
+                  <Text style={styles.fieldLabel}>Day rate (€)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={dayRate}
+                    onChangeText={setDayRate}
+                    placeholder="e.g. 650"
+                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    keyboardType="decimal-pad"
+                  />
+                  <View style={styles.rateChipRow}>
+                    {DAY_RATE_PRESETS.map((rate) => (
+                      <TouchableOpacity
+                        key={rate}
+                        style={[styles.rateChip, dayRate === rate && styles.rateChipSelected]}
+                        onPress={() => setDayRate(rate)}
+                        activeOpacity={0.85}
+                      >
+                        <Text
+                          style={[styles.rateChipText, dayRate === rate && styles.rateChipTextSelected]}
+                        >
+                          €{rate}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              ) : null}
 
               <View style={styles.termsCard}>
                 <View style={styles.notifyBlock}>
@@ -447,7 +577,7 @@ export default function OnboardingScreen() {
               styles.primaryBtn,
               ((step === 0 && !roleChoice) ||
                 (step === 2 && displayName.trim().length < 2) ||
-                (step === 3 && (!termsAccepted || saving)) ||
+                finishBlocked ||
                 saving) &&
                 styles.primaryBtnDisabled,
             ]}
@@ -455,7 +585,7 @@ export default function OnboardingScreen() {
             disabled={
               (step === 0 && !roleChoice) ||
               (step === 2 && displayName.trim().length < 2) ||
-              (step === 3 && (!termsAccepted || saving)) ||
+              finishBlocked ||
               saving
             }
             activeOpacity={0.85}
@@ -595,6 +725,26 @@ const styles = StyleSheet.create({
   avatarMeta: { flex: 1 },
   avatarCta: { fontSize: 16, fontWeight: '700', color: '#FFDC00', marginBottom: 4 },
   avatarHint: { fontSize: 12, color: 'rgba(255,255,255,0.35)', lineHeight: 16 },
+  rateChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  rateChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 100,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  rateChipSelected: {
+    backgroundColor: '#FFDC00',
+    borderColor: '#FFDC00',
+  },
+  rateChipText: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.4)' },
+  rateChipTextSelected: { color: '#0a0a0a' },
   termsCard: {
     backgroundColor: '#111111',
     borderRadius: 16,
