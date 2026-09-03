@@ -467,7 +467,7 @@ export default function OnboardingScreen() {
                 placeholder={
                   roleChoice === 'company'
                     ? 'e.g. Commercial production · Berlin'
-                    : 'e.g. Director of Photography'
+                    : 'e.g. Web Designer · Director of Photography'
                 }
                 placeholderTextColor="rgba(255,255,255,0.3)"
               />

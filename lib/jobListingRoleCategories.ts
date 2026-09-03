@@ -1,5 +1,6 @@
 /**
- * Individual disciplines for job listings — same labels as crea-services PostJobModal.
+ * Individual disciplines for job listings — same labels as crea-services
+ * `lib/job-listing-role-categories.ts` / PostJobModal.
  * Stored on `jobs.category` as comma-separated values via `formatJobCategoryRoles`.
  */
 export const JOB_LISTING_ROLE_CATEGORIES = [
@@ -22,6 +23,8 @@ export const JOB_LISTING_ROLE_CATEGORIES = [
   'Social Media',
   'Animation',
   'Color Grading',
+  'Web Design',
+  'Web Development',
 ] as const
 
 export type JobListingRoleCategory = (typeof JOB_LISTING_ROLE_CATEGORIES)[number]
@@ -31,6 +34,8 @@ export const FEATURED_JOB_LISTING_ROLES: readonly JobListingRoleCategory[] = [
   'Direction',
   'Videography',
   'Photography',
+  'Web Design',
+  'Web Development',
 ]
 
 export function filterJobListingRoleCategories(

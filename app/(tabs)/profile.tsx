@@ -1551,7 +1551,7 @@ export default function ProfileScreen() {
                   style={styles.input}
                   value={headline}
                   onChangeText={setHeadline}
-                  placeholder={company ? 'e.g. Production company · Commercials' : 'e.g. Director · DoP'}
+                  placeholder={company ? 'e.g. Production company · Commercials' : 'e.g. Web Designer · Director · DoP'}
                   placeholderTextColor="rgba(255,255,255,0.28)"
                 />
                 <Text style={styles.inlineHint}>
