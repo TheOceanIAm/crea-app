@@ -15,6 +15,7 @@ import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { supabase } from '@/lib/supabase'
 import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
 import { isFreelancerProPlanTier } from '@/lib/freelancerPlan'
+import { LIST_DISK_TTL_MS, LIST_MEM_TTL_MS } from '@/lib/cachePolicy'
 
 type TalentRow = {
   id: string
@@ -36,8 +37,8 @@ type TalentPoolCache = {
 }
 
 const TALENT_POOL_MAX_ROWS = 60
-const TALENT_POOL_CACHE_TTL_MS = 60_000
-const DISK_TTL_MS = 24 * 60 * 60 * 1000
+const TALENT_POOL_CACHE_TTL_MS = LIST_MEM_TTL_MS
+const DISK_TTL_MS = LIST_DISK_TTL_MS
 const FOLDERS_TABLE = 'talent_pool_folders'
 
 export function talentPoolCacheKey(userId: string): string {

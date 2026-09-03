@@ -60,11 +60,11 @@ export async function countUnreadAlerts(userId: string): Promise<number> {
 
 /** Loads combined Alerts feed (no direct messages — those use the Messages tab). */
 export async function loadNotificationFeed(userId: string): Promise<NotificationRow[]> {
-  const { data: myProfile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', userId)
-    .maybeSingle()
+  // Phase 1: role + pending invites in parallel (invites don't need access context).
+  const [{ data: myProfile }, myInvites] = await Promise.all([
+    supabase.from('profiles').select('role').eq('id', userId).maybeSingle(),
+    listMyCrewInvites(),
+  ])
   const myRole = String(myProfile?.role ?? '').trim().toLowerCase()
 
   if (myRole === 'ceo') {
@@ -72,33 +72,38 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
   }
 
   const accessCtx = await loadNotificationAccessContext(userId, myRole)
-
-  const { data: memberships } = await supabase
-    .from('project_members')
-    .select('id, project_id, member_role, created_at')
-    .eq('profile_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(200)
-
   const projectIds = [...accessCtx.accessibleProjectIds]
 
-  const { data: projects } = projectIds.length
-    ? await supabase
-        .from('projects')
-        .select('id, title, updated_at, status, freelancer_id, company_id, created_at, job_id')
-        .in('id', projectIds)
-        .limit(200)
-    : { data: [] as Array<Record<string, unknown>> }
+  // Phase 2: memberships + projects in parallel.
+  const [{ data: memberships }, { data: projects }] = await Promise.all([
+    supabase
+      .from('project_members')
+      .select('id, project_id, member_role, created_at')
+      .eq('profile_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(200),
+    projectIds.length
+      ? supabase
+          .from('projects')
+          .select('id, title, updated_at, status, freelancer_id, company_id, created_at, job_id')
+          .in('id', projectIds)
+          .limit(200)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
+  ])
 
   const projectTitle = new Map<string, string>()
   const projectJobId = new Map<string, string>()
   const projectById = new Map<string, Record<string, unknown>>()
+  const jobIdToProjectId = new Map<string, string>()
   for (const p of projects ?? []) {
     const id = String(p.id)
     projectTitle.set(id, String(p.title || 'Project'))
     projectById.set(id, p as Record<string, unknown>)
     const jid = p.job_id != null ? String(p.job_id).trim() : ''
-    if (jid) projectJobId.set(id, jid)
+    if (jid) {
+      projectJobId.set(id, jid)
+      jobIdToProjectId.set(jid, id)
+    }
   }
 
   const leadIds = [
@@ -108,9 +113,173 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
         .filter((x): x is string => typeof x === 'string' && x.length > 0)
     ),
   ]
-  const { data: leadProfiles } = leadIds.length
-    ? await supabase.from('profiles').select('id, name').in('id', leadIds)
-    : { data: [] as { id: string; name: string | null }[] }
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+  const sevenDaysAgoIso = new Date(sevenDaysAgo).toISOString()
+  const jobIdsForMilestones = [...new Set(projectJobId.values())]
+  const accessibleJobIds = [
+    ...new Set([
+      ...projectJobId.values(),
+      ...accessCtx.activeCompanyJobIds,
+      ...accessCtx.recentlyCompletedJobIds,
+    ]),
+  ].filter(Boolean)
+  const activeJobIdList = [...accessCtx.activeCompanyJobIds]
+  const completedJobIds = [...accessCtx.recentlyCompletedJobIds]
+
+  const activityCtx = {
+    supabase,
+    userId,
+    projectIds,
+    projectTitle,
+    projectJobId,
+    jobIdToProjectId,
+    accessibleJobIds,
+    sevenDaysAgoIso,
+  }
+
+  // Phase 3: fan out remaining sources in one wave.
+  const [
+    { data: leadProfiles },
+    { data: recentJobs },
+    { data: nativeMilestones },
+    jobMilestonesResult,
+    { data: projectMessages },
+    fileRows,
+    reviewLinkRows,
+    companyBundle,
+    freelancerBundle,
+    completedBundle,
+  ] = await Promise.all([
+    leadIds.length
+      ? supabase.from('profiles').select('id, name').in('id', leadIds)
+      : Promise.resolve({ data: [] as { id: string; name: string | null }[] }),
+    accessibleJobIds.length
+      ? supabase
+          .from('jobs')
+          .select('id, title, project_status, updated_at')
+          .in('id', accessibleJobIds)
+          .gte('updated_at', sevenDaysAgoIso)
+          .order('updated_at', { ascending: false })
+          .limit(60)
+      : Promise.resolve({
+          data: [] as Array<{
+            id: string
+            title: string | null
+            project_status: string | null
+            updated_at: string
+          }>,
+        }),
+    projectIds.length
+      ? supabase
+          .from('project_milestones')
+          .select('id, project_id, title, completed, created_at')
+          .in('project_id', projectIds)
+          .gte('created_at', sevenDaysAgoIso)
+          .order('created_at', { ascending: false })
+          .limit(60)
+      : Promise.resolve({
+          data: [] as Array<{
+            id: string
+            project_id: string
+            title: string
+            completed: boolean
+            created_at: string
+          }>,
+        }),
+    jobIdsForMilestones.length > 0
+      ? supabase
+          .from('milestones')
+          .select('id, job_id, title, status, created_at')
+          .in('job_id', jobIdsForMilestones)
+          .gte('created_at', sevenDaysAgoIso)
+          .order('created_at', { ascending: false })
+          .limit(60)
+      : Promise.resolve({ data: null as Array<{
+          id: string
+          job_id: string
+          title: string
+          status: string | null
+          created_at: string
+        }> | null, error: null }),
+    projectIds.length
+      ? supabase
+          .from('project_messages')
+          .select('id, project_id, sender_id, body, created_at')
+          .in('project_id', projectIds)
+          .neq('sender_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(80)
+      : Promise.resolve({
+          data: [] as Array<{
+            id: string
+            project_id: string
+            sender_id: string
+            body: string | null
+            created_at: string
+          }>,
+        }),
+    loadWorkspaceFileAlertRows(activityCtx),
+    loadWorkspaceReviewLinkAlertRows(activityCtx),
+    myRole === 'company'
+      ? Promise.all([
+          activeJobIdList.length > 0
+            ? supabase.from('jobs').select('id, title').in('id', activeJobIdList).limit(200)
+            : Promise.resolve({ data: [] as { id: string; title: string | null }[] }),
+          activeJobIdList.length
+            ? supabase
+                .from('job_applications')
+                .select('id, job_id, status, created_at')
+                .in('job_id', activeJobIdList)
+                .eq('status', 'pending')
+                .order('created_at', { ascending: false })
+                .limit(60)
+            : Promise.resolve({ data: [] as Array<{ id: string; job_id: string; created_at: string }> }),
+          supabase
+            .from('invoices')
+            .select('id, title, invoice_number, created_at, status')
+            .eq('company_id', userId)
+            .in('status', ['pending', 'overdue'])
+            .order('created_at', { ascending: false })
+            .limit(60),
+        ]).then(([jobs, apps, invoices]) => ({ jobs: jobs.data, apps: apps.data, invoices: invoices.data }))
+      : Promise.resolve(null),
+    myRole === 'freelancer'
+      ? Promise.all([
+          supabase
+            .from('invoices')
+            .select('id, title, invoice_number, status, created_at, updated_at')
+            .eq('freelancer_id', userId)
+            .order('updated_at', { ascending: false })
+            .limit(80),
+          accessCtx.accessibleProjectIds.size > 0
+            ? supabase
+                .from('projects')
+                .select('id, title, freelancer_id, created_at, job_id')
+                .in('id', [...accessCtx.accessibleProjectIds])
+                .not('job_id', 'is', null)
+                .order('created_at', { ascending: false })
+                .limit(40)
+            : Promise.resolve({
+                data: [] as Array<{
+                  id: string
+                  title: string | null
+                  job_id: string | null
+                  created_at: string | null
+                }>,
+              }),
+        ]).then(([finv, crewProjects]) => ({ finv: finv.data, crewProjects: crewProjects.data }))
+      : Promise.resolve(null),
+    myRole === 'freelancer' && completedJobIds.length > 0
+      ? Promise.all([
+          supabase
+            .from('jobs')
+            .select('id, title, updated_at, project_status, status')
+            .in('id', completedJobIds),
+          supabase.from('projects').select('id, title, job_id, updated_at').in('job_id', completedJobIds),
+        ]).then(([jobs, projs]) => ({ jobs: jobs.data, projs: projs.data }))
+      : Promise.resolve(null),
+  ])
+
   const leadNameById = new Map<string, string>()
   for (const lp of leadProfiles ?? []) {
     const n = String(lp.name ?? '').trim()
@@ -141,34 +310,6 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       }
     })
 
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-  const sevenDaysAgoIso = new Date(sevenDaysAgo).toISOString()
-
-  const jobIdToProjectId = new Map<string, string>()
-  for (const p of projects ?? []) {
-    const pid = String(p.id)
-    const jid = p.job_id != null ? String(p.job_id).trim() : ''
-    if (jid) jobIdToProjectId.set(jid, pid)
-  }
-
-  const accessibleJobIds = [
-    ...new Set([
-      ...projectJobId.values(),
-      ...accessCtx.activeCompanyJobIds,
-      ...accessCtx.recentlyCompletedJobIds,
-    ]),
-  ].filter(Boolean)
-
-  const { data: recentJobs } = accessibleJobIds.length
-    ? await supabase
-        .from('jobs')
-        .select('id, title, project_status, updated_at')
-        .in('id', accessibleJobIds)
-        .gte('updated_at', sevenDaysAgoIso)
-        .order('updated_at', { ascending: false })
-        .limit(60)
-    : { data: [] as Array<{ id: string; title: string | null; project_status: string | null; updated_at: string }> }
-
   const statusChangeRows: NotificationRow[] = (recentJobs ?? [])
     .filter((j) => String(j.project_status ?? '').toLowerCase() !== 'completed')
     .map((j) => {
@@ -186,16 +327,6 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       }
     })
 
-  const { data: nativeMilestones } = projectIds.length
-    ? await supabase
-        .from('project_milestones')
-        .select('id, project_id, title, completed, created_at')
-        .in('project_id', projectIds)
-        .gte('created_at', sevenDaysAgoIso)
-        .order('created_at', { ascending: false })
-        .limit(60)
-    : { data: [] as Array<{ id: string; project_id: string; title: string; completed: boolean; created_at: string }> }
-
   const nativeMilestoneRows: NotificationRow[] = (nativeMilestones ?? []).map((m) => {
     const pid = String(m.project_id)
     const title = String(m.title || 'Milestone').trim() || 'Milestone'
@@ -212,60 +343,25 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
   })
 
   let jobMilestoneRows: NotificationRow[] = []
-  const jobIdsForMilestones = [...new Set(projectJobId.values())]
-  if (jobIdsForMilestones.length > 0) {
-    const { data: jobMilestones, error: jobMsErr } = await supabase
-      .from('milestones')
-      .select('id, job_id, title, status, created_at')
-      .in('job_id', jobIdsForMilestones)
-      .gte('created_at', sevenDaysAgoIso)
-      .order('created_at', { ascending: false })
-      .limit(60)
-    if (!jobMsErr) {
-      jobMilestoneRows = (jobMilestones ?? []).map((m) => {
-        const jid = String(m.job_id)
-        const pid = jobIdToProjectId.get(jid) ?? jid
-        const title = String(m.title || 'Milestone').trim() || 'Milestone'
-        const completed = String(m.status ?? '').toLowerCase() === 'completed'
-        return {
-          id: `milestone-job-${m.id}-${completed ? 'done' : 'new'}`,
-          kind: 'project_update' as const,
-          projectId: pid,
-          jobId: jid,
-          title: projectTitle.get(pid) ?? 'Project',
-          body: completed ? `Milestone completed: ${title}` : `Milestone added: ${title}`,
-          at: String(m.created_at),
-        }
-      })
-    }
+  if (!jobMilestonesResult.error && jobMilestonesResult.data) {
+    jobMilestoneRows = jobMilestonesResult.data.map((m) => {
+      const jid = String(m.job_id)
+      const pid = jobIdToProjectId.get(jid) ?? jid
+      const title = String(m.title || 'Milestone').trim() || 'Milestone'
+      const completed = String(m.status ?? '').toLowerCase() === 'completed'
+      return {
+        id: `milestone-job-${m.id}-${completed ? 'done' : 'new'}`,
+        kind: 'project_update' as const,
+        projectId: pid,
+        jobId: jid,
+        title: projectTitle.get(pid) ?? 'Project',
+        body: completed ? `Milestone completed: ${title}` : `Milestone added: ${title}`,
+        at: String(m.created_at),
+      }
+    })
   }
 
   const milestoneRows = [...nativeMilestoneRows, ...jobMilestoneRows]
-
-  const activityCtx = {
-    supabase,
-    userId,
-    projectIds,
-    projectTitle,
-    projectJobId,
-    jobIdToProjectId,
-    accessibleJobIds,
-    sevenDaysAgoIso,
-  }
-  const [fileRows, reviewLinkRows] = await Promise.all([
-    loadWorkspaceFileAlertRows(activityCtx),
-    loadWorkspaceReviewLinkAlertRows(activityCtx),
-  ])
-
-  const { data: projectMessages } = projectIds.length
-    ? await supabase
-        .from('project_messages')
-        .select('id, project_id, sender_id, body, created_at')
-        .in('project_id', projectIds)
-        .neq('sender_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(80)
-    : { data: [] as Array<{ id: string; project_id: string; sender_id: string; body: string | null; created_at: string }> }
 
   const messageRows: NotificationRow[] = (projectMessages ?? []).map((m) => {
     const pid = String(m.project_id)
@@ -281,27 +377,10 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
   })
 
   let companyRows: NotificationRow[] = []
-  if (myRole === 'company') {
-    const activeJobIdList = [...accessCtx.activeCompanyJobIds]
-    const { data: myJobs } =
-      activeJobIdList.length > 0
-        ? await supabase.from('jobs').select('id, title').in('id', activeJobIdList).limit(200)
-        : { data: [] as { id: string; title: string | null }[] }
-    const jobIds = activeJobIdList
+  if (companyBundle) {
     const jobTitle = new Map<string, string>()
-    for (const j of myJobs ?? []) jobTitle.set(String(j.id), String(j.title || 'Project'))
-
-    const { data: apps } = jobIds.length
-      ? await supabase
-          .from('job_applications')
-          .select('id, job_id, status, created_at')
-          .in('job_id', jobIds)
-          .eq('status', 'pending')
-          .order('created_at', { ascending: false })
-          .limit(60)
-      : { data: [] as Array<{ id: string; job_id: string; created_at: string }> }
-
-    const applicationRows: NotificationRow[] = (apps ?? []).map((a) => ({
+    for (const j of companyBundle.jobs ?? []) jobTitle.set(String(j.id), String(j.title || 'Project'))
+    const applicationRows: NotificationRow[] = (companyBundle.apps ?? []).map((a) => ({
       id: `job-app-${a.id}`,
       kind: 'job_application' as const,
       projectId: '',
@@ -311,16 +390,7 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       body: 'New freelancer application received for your project.',
       at: String(a.created_at),
     }))
-
-    const { data: invoices } = await supabase
-      .from('invoices')
-      .select('id, title, invoice_number, created_at, status')
-      .eq('company_id', userId)
-      .in('status', ['pending', 'overdue'])
-      .order('created_at', { ascending: false })
-      .limit(60)
-
-    const invoiceRows: NotificationRow[] = (invoices ?? []).map((inv) => ({
+    const invoiceRows: NotificationRow[] = (companyBundle.invoices ?? []).map((inv) => ({
       id: `invoice-${inv.id}`,
       kind: 'invoice_incoming' as const,
       projectId: '',
@@ -329,20 +399,12 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       body: 'Invoice awaiting payment.',
       at: String(inv.created_at ?? new Date().toISOString()),
     }))
-
     companyRows = [...applicationRows, ...invoiceRows]
   }
 
   let freelancerRows: NotificationRow[] = []
-  if (myRole === 'freelancer') {
-    const { data: finv } = await supabase
-      .from('invoices')
-      .select('id, title, invoice_number, status, created_at, updated_at')
-      .eq('freelancer_id', userId)
-      .order('updated_at', { ascending: false })
-      .limit(80)
-
-    const invoiceFreelancerRows: NotificationRow[] = (finv ?? [])
+  if (freelancerBundle) {
+    const invoiceFreelancerRows: NotificationRow[] = (freelancerBundle.finv ?? [])
       .filter((inv) => {
         const st = String(inv.status ?? '').toLowerCase()
         return st === 'paid' || st === 'pending' || st === 'overdue'
@@ -360,19 +422,7 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
           at: String(inv.updated_at ?? inv.created_at ?? new Date().toISOString()),
         }
       })
-
-    const { data: crewProjects } =
-      accessCtx.accessibleProjectIds.size > 0
-        ? await supabase
-            .from('projects')
-            .select('id, title, freelancer_id, created_at, job_id')
-            .in('id', [...accessCtx.accessibleProjectIds])
-            .not('job_id', 'is', null)
-            .order('created_at', { ascending: false })
-            .limit(40)
-        : { data: [] as Array<{ id: string; title: string | null; job_id: string | null; created_at: string | null }> }
-
-    const workspaceRows: NotificationRow[] = (crewProjects ?? [])
+    const workspaceRows: NotificationRow[] = (freelancerBundle.crewProjects ?? [])
       .filter((p) => p.job_id)
       .filter((p) => {
         const created = supabaseTimestampMs(p.created_at)
@@ -387,19 +437,13 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
         body: 'Your project workspace is available.',
         at: String(p.created_at ?? new Date().toISOString()),
       }))
-
     freelancerRows = [...invoiceFreelancerRows, ...workspaceRows]
   }
 
   let completedRows: NotificationRow[] = []
-  if (myRole === 'freelancer' && accessCtx.recentlyCompletedJobIds.size > 0) {
-    const completedJobIds = [...accessCtx.recentlyCompletedJobIds]
-    const { data: completedJobs } = await supabase
-      .from('jobs')
-      .select('id, title, updated_at, project_status, status')
-      .in('id', completedJobIds)
+  if (completedBundle) {
     const jobMeta = new Map<string, { title: string; updated_at: string }>()
-    for (const j of completedJobs ?? []) {
+    for (const j of completedBundle.jobs ?? []) {
       const jid = String((j as { id?: string }).id ?? '').trim()
       if (!jid) continue
       jobMeta.set(jid, {
@@ -407,11 +451,7 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
         updated_at: String((j as { updated_at?: string | null }).updated_at ?? ''),
       })
     }
-    const { data: completedProjs } = await supabase
-      .from('projects')
-      .select('id, title, job_id, updated_at')
-      .in('job_id', completedJobIds)
-    completedRows = (completedProjs ?? [])
+    completedRows = (completedBundle.projs ?? [])
       .filter((p) => accessCtx.recentlyCompletedProjectIds.has(String(p.id)))
       .map((p) => {
         const pid = String(p.id)
@@ -430,10 +470,6 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       })
   }
 
-  // Pending crew invitations addressed to this user. These reference a project
-  // the user cannot access yet, so they bypass the access filter (see
-  // filterNotificationRowByAccess) and carry the invite id in `targetId`.
-  const myInvites = await listMyCrewInvites()
   const crewInviteRows: NotificationRow[] = myInvites.map((inv) => ({
     id: `crew-invite-${inv.id}`,
     kind: 'crew_invite' as const,

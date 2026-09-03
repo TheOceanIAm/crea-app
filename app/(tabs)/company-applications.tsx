@@ -16,6 +16,7 @@ import { getAuthUser } from '@/lib/getAuthUser'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import {
   readCachedCompanyApplications,
+  hydrateCompanyApplicationsFromDisk,
   loadCompanyApplicationsCache,
   cacheCompanyApplications,
   companyApplicationsCacheKey,
@@ -27,6 +28,7 @@ import {
 } from '@/lib/companyApplicantActions'
 import { deleteCache } from '@/lib/appCache'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 type Row = CompanyApplicationRow
 
@@ -198,8 +200,12 @@ export default function CompanyApplicationsScreen() {
       router.replace('/login')
       return
     }
-    const cached = readCachedCompanyApplications(user.id)
-    if (cached && loading) {
+    let cached = readCachedCompanyApplications(user.id)
+    if (!cached) {
+      await hydrateCompanyApplicationsFromDisk(user.id)
+      cached = readCachedCompanyApplications(user.id)
+    }
+    if (cached) {
       setAllowed(cached.allowed)
       setProRequired(cached.proRequired)
       setRows(cached.rows)
@@ -222,9 +228,11 @@ export default function CompanyApplicationsScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
+          <ScreenListSkeleton rows={6} />
+        </View>
+      </SafeAreaView>
     )
   }
 

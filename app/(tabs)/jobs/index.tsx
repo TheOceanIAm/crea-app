@@ -33,7 +33,7 @@ import { publishCeoExternalJob } from '@/lib/ceoExternalJobsApi'
 import { instagramUrl, linkedinUrl } from '@/lib/profilePublicLinks'
 import {
   cacheJobsFeed,
-  hydrateJobsFeedFromDisk,
+  hydrateJobsFeedBestEffort,
   loadJobsFeed,
   persistJobsFeedToDisk,
   prefetchJobsFeedTab,
@@ -88,7 +88,9 @@ function readInitialJobsFeed(): { jobs: Job[]; externalJobs: ExternalJob[]; load
   const uid = warmed?.userId
   if (!uid) return { jobs: [], externalJobs: [], loading: true }
   const companyOnly = isCompanyProfile(warmed?.role ?? readCachedDashboardOverview(uid)?.role ?? null)
-  const cached = readCachedJobsFeed(uid, 'crea', companyOnly)
+  const cached =
+    readCachedJobsFeed(uid, 'crea', companyOnly) ??
+    readCachedJobsFeed(uid, 'crea', !companyOnly)
   if (!cached) return { jobs: [], externalJobs: [], loading: true }
   return { jobs: cached.jobs, externalJobs: cached.externalJobs, loading: false }
 }
@@ -97,8 +99,8 @@ export default function JobsListScreen() {
   const router = useRouter()
   const bootJobs = useRef(readInitialJobsFeed()).current
   const hasLoadedRef = useRef(!bootJobs.loading)
-  const lastLoadedAtRef = useRef(0)
-  const RELOAD_COOLDOWN_MS = 15000
+  const lastLoadedAtRef = useRef(bootJobs.loading ? 0 : Date.now())
+  const RELOAD_COOLDOWN_MS = 60_000
   const [jobs, setJobs] = useState<Job[]>(bootJobs.jobs)
   const [loading, setLoading] = useState(bootJobs.loading)
   const [isCompanyUser, setIsCompanyUser] = useState(false)
@@ -107,6 +109,8 @@ export default function JobsListScreen() {
   const [feedTab, setFeedTab] = useState<'crea' | 'external'>('crea')
   const [search, setSearch] = useState('')
   const [externalJobs, setExternalJobs] = useState<ExternalJob[]>(bootJobs.externalJobs)
+  const jobsCountRef = useRef(bootJobs.jobs.length + bootJobs.externalJobs.length)
+  jobsCountRef.current = jobs.length + externalJobs.length
   const [activeExternalJob, setActiveExternalJob] = useState<ExternalJob | null>(null)
 
   /** CEO-only: manual external listing (parity with CREA web). */
@@ -153,32 +157,13 @@ export default function JobsListScreen() {
       let plan = overview?.freelancerPlan ?? null
 
       /** Paint cache immediately (memory, then disk) before any network. */
-      let companyOnlyGuess = Boolean(role && isCompanyProfile(role))
-      let hit = readCachedJobsFeed(user.id, feedTab, companyOnlyGuess)
-      if (!hit) {
-        const hydrated = await hydrateJobsFeedFromDisk(user.id, feedTab, companyOnlyGuess)
-        if (hydrated) hit = readCachedJobsFeed(user.id, feedTab, companyOnlyGuess)
-      }
-      /** Company users may have been warmed under the other key on first guess. */
-      if (!hit && role == null) {
-        const alt = readCachedJobsFeed(user.id, feedTab, !companyOnlyGuess)
-        if (alt) {
-          hit = alt
-          companyOnlyGuess = !companyOnlyGuess
-        } else {
-          const hydratedAlt = await hydrateJobsFeedFromDisk(user.id, feedTab, !companyOnlyGuess)
-          if (hydratedAlt) {
-            hit = readCachedJobsFeed(user.id, feedTab, !companyOnlyGuess)
-            if (hit) companyOnlyGuess = !companyOnlyGuess
-          }
-        }
-      }
-      if (hit) {
-        setJobs(hit.jobs)
-        setExternalJobs(hit.externalJobs)
+      const best = await hydrateJobsFeedBestEffort(user.id, feedTab)
+      if (best) {
+        setJobs(best.data.jobs)
+        setExternalJobs(best.data.externalJobs)
         setLoading(false)
         hasLoadedRef.current = true
-      } else if (!hasLoadedRef.current) {
+      } else if (!hasLoadedRef.current && jobsCountRef.current === 0) {
         setLoading(true)
       }
 

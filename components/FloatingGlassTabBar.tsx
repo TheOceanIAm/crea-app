@@ -6,6 +6,7 @@ import {
   FLOATING_TAB_BAR_BOTTOM_GAP,
   FLOATING_TAB_BAR_HORIZONTAL_INSET,
   FLOATING_TAB_BAR_PILL_HEIGHT,
+  focusedTabHasNestedDetail,
 } from '@/lib/floatingTabBarLayout'
 
 /** Only these routes may appear in the floating bar (expo-router hides others via tabBarItemStyle). */
@@ -34,6 +35,10 @@ function isTabVisible(
 
 export function FloatingGlassTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets()
+
+  if (focusedTabHasNestedDetail(state)) {
+    return null
+  }
 
   const visibleRoutes = state.routes
     .map((route) => ({ route, options: descriptors[route.key].options }))

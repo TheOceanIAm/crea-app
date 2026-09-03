@@ -3,6 +3,7 @@ import { getCache, setCache } from '@/lib/appCache'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { supabase } from '@/lib/supabase'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
+import { LIST_DISK_TTL_MS, LIST_MEM_TTL_MS } from '@/lib/cachePolicy'
 
 export type JobFeedRow = {
   id: string
@@ -42,8 +43,8 @@ export type JobsFeedCache = {
   externalJobs: ExternalJobRow[]
 }
 
-const DISK_TTL_MS = 24 * 60 * 60 * 1000
-const MEM_TTL_MS = 35_000
+const DISK_TTL_MS = LIST_DISK_TTL_MS
+const MEM_TTL_MS = LIST_MEM_TTL_MS
 
 export function jobsFeedCacheKey(userId: string, feedTab: 'crea' | 'external', companyOnly: boolean): string {
   return `jobs-feed:${userId}:${feedTab}:${companyOnly ? 'c' : 'f'}`
@@ -79,6 +80,27 @@ export async function hydrateJobsFeedFromDisk(
   if (!hit) return false
   cacheJobsFeed(userId, feedTab, companyOnly, hit)
   return true
+}
+
+/**
+ * Cold-start helper: try mem then disk for both company/freelancer cache keys.
+ * Role is often unknown before overview warms, so we must not skip jobs hydrate.
+ */
+export async function hydrateJobsFeedBestEffort(
+  userId: string,
+  feedTab: 'crea' | 'external' = 'crea'
+): Promise<{ data: JobsFeedCache; companyOnly: boolean } | null> {
+  for (const companyOnly of [false, true] as const) {
+    const mem = readCachedJobsFeed(userId, feedTab, companyOnly)
+    if (mem) return { data: mem, companyOnly }
+  }
+  for (const companyOnly of [false, true] as const) {
+    const ok = await hydrateJobsFeedFromDisk(userId, feedTab, companyOnly)
+    if (!ok) continue
+    const data = readCachedJobsFeed(userId, feedTab, companyOnly)
+    if (data) return { data, companyOnly }
+  }
+  return null
 }
 
 export async function persistJobsFeedToDisk(

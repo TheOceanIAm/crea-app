@@ -12,7 +12,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
+import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { queryClient } from '@/lib/queryClient'
+import { authUserIdKey, notificationsKey } from '@/lib/queryKeys'
 import {
   fetchAlertReadKeys,
   loadNotificationFeed,
@@ -20,200 +23,176 @@ import {
   type NotificationRow,
 } from '@/lib/notificationsFeed'
 import { respondToCrewInvite } from '@/lib/crewInvites'
-import { readCachedNotifications, cacheNotifications } from '@/lib/notificationsCache'
+import {
+  cacheNotifications,
+  hydrateNotificationsFromDisk,
+  persistNotificationsToDisk,
+  readCachedNotifications,
+  type NotificationsCache,
+} from '@/lib/notificationsCache'
 import { invalidateAlertsBadge, subscribeAlertsLivePatch } from '@/lib/invalidateAlerts'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
-import { runTimed } from '@/lib/perfMarks'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 import { TabScreenHeader } from '@/components/TabScreenHeader'
-import { resolveAppRole } from '@/lib/profileRole'
 import { formatTimeAgo } from '@/lib/formatTimeAgo'
+import { applyMilestoneInsertAlert } from '@/lib/alertsLivePatch'
+import { LIST_STALE_MS } from '@/lib/cachePolicy'
 
 const TIME_AGO_TICK_MS = 30_000
 
 /** Unique Supabase Realtime topic — reusing the same name returns an already-subscribed channel. */
 let alertsRealtimeTopicSeq = 0
 
-function readInitialNotifications(): {
-  rows: NotificationRow[]
-  readKeys: Set<string>
-  loading: boolean
-} {
-  const uid = peekWarmedOverview()?.userId
-  if (!uid) return { rows: [], readKeys: new Set(), loading: true }
-  const cached = readCachedNotifications(uid)
-  if (!cached) return { rows: [], readKeys: new Set(), loading: true }
-  return { rows: cached.rows, readKeys: new Set(cached.reads), loading: false }
-}
-
 export default function NotificationsScreen() {
   const router = useRouter()
-  const boot = useRef(readInitialNotifications()).current
-  const [rows, setRows] = useState<NotificationRow[]>(boot.rows)
-  const [readKeys, setReadKeys] = useState<Set<string>>(boot.readKeys)
-  const [loading, setLoading] = useState(boot.loading)
   const [refreshing, setRefreshing] = useState(false)
-  const [userId, setUserId] = useState<string | null>(null)
-  const [showMessages, setShowMessages] = useState(true)
   const [busyInviteId, setBusyInviteId] = useState<string | null>(null)
   const [nowTick, setNowTick] = useState(() => Date.now())
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const loadInFlight = useRef<Promise<void> | null>(null)
-  const needsReloadAfter = useRef(false)
-  const initialDone = useRef(!boot.loading)
-  const userIdRef = useRef<string | null>(null)
-  userIdRef.current = userId
 
-  const load = useCallback(async (_opts?: { silent?: boolean }) => {
-    if (loadInFlight.current) {
-      needsReloadAfter.current = true
-      return loadInFlight.current
-    }
-    loadInFlight.current = (async () => {
-      try {
-        const timed = await runTimed('notifications.load', async () => {
-          const {
-            data: { user },
-          } = await supabase.auth.getUser()
-          if (!user) {
-            setRows([])
-            setReadKeys(new Set())
-            setUserId(null)
-            return
-          }
-          setUserId(user.id)
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('role, subscription_tier')
-            .eq('id', user.id)
-            .maybeSingle()
-          const role = resolveAppRole(profile?.role, user)
-          setShowMessages(true)
-          const cached = readCachedNotifications(user.id)
-          if (!initialDone.current && cached) {
-            setRows(cached.rows)
-            setReadKeys(new Set(cached.reads))
-            setLoading(false)
-            initialDone.current = true
-          }
-          const [feed, reads] = await Promise.all([
-            loadNotificationFeed(user.id),
-            fetchAlertReadKeys(user.id),
-          ])
-          setRows(feed)
-          setReadKeys(reads)
-          cacheNotifications(user.id, { rows: feed, reads: Array.from(reads) })
-          return { feed: feed.length, reads: reads.size }
-        })
-        if (__DEV__ && timed.value) {
-          console.log(`[perf] notifications.rows: feed=${timed.value.feed} reads=${timed.value.reads}`)
-        }
-      } finally {
-        initialDone.current = true
-        setLoading(false)
-      }
-    })()
-    try {
-      await loadInFlight.current
-    } finally {
-      loadInFlight.current = null
-      if (needsReloadAfter.current) {
-        needsReloadAfter.current = false
-        void load()
-      }
-    }
-  }, [])
+  const authQuery = useQuery({
+    queryKey: authUserIdKey,
+    queryFn: async () => {
+      const { data } = await supabase.auth.getUser()
+      return data.user?.id ?? null
+    },
+    staleTime: 5 * 60_000,
+    initialData: () => peekWarmedOverview()?.userId ?? undefined,
+  })
+  const userId = authQuery.data ?? null
+  const enabled = Boolean(userId)
 
-  const scheduleReload = useCallback(() => {
+  const cachedBoot = userId ? readCachedNotifications(userId) : null
+
+  const alertsQuery = useQuery({
+    queryKey: notificationsKey(userId),
+    enabled,
+    staleTime: LIST_STALE_MS,
+    placeholderData: (prev) => prev,
+    initialData: (): NotificationsCache | undefined => cachedBoot ?? undefined,
+    // Fresh enough to paint instantly; background refetch after LIST_STALE_MS / focus.
+    initialDataUpdatedAt: cachedBoot ? Date.now() : undefined,
+    queryFn: async (): Promise<NotificationsCache> => {
+      const uid = userId as string
+      const [feed, reads] = await Promise.all([loadNotificationFeed(uid), fetchAlertReadKeys(uid)])
+      const data: NotificationsCache = { rows: feed, reads: Array.from(reads) }
+      cacheNotifications(uid, data)
+      void persistNotificationsToDisk(uid, data)
+      return data
+    },
+  })
+
+  // If mem cache missed (TTL), pull disk into QueryClient before network returns.
+  useEffect(() => {
+    if (!userId) return
+    if (alertsQuery.data?.rows?.length) return
+    let cancelled = false
+    void hydrateNotificationsFromDisk(userId).then((ok) => {
+      if (cancelled || !ok) return
+      const hit = readCachedNotifications(userId)
+      if (hit && !queryClient.getQueryData(notificationsKey(userId))) {
+        queryClient.setQueryData(notificationsKey(userId), hit)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [userId, alertsQuery.data?.rows?.length])
+
+  const rows = alertsQuery.data?.rows ?? []
+  const readKeys = useMemo(() => new Set(alertsQuery.data?.reads ?? []), [alertsQuery.data?.reads])
+  const loading = authQuery.isLoading || (enabled && alertsQuery.isLoading && rows.length === 0)
+
+  const scheduleInvalidate = useCallback(() => {
+    if (!userId) return
     if (reloadTimer.current) clearTimeout(reloadTimer.current)
     reloadTimer.current = setTimeout(() => {
-      void load({ silent: true })
+      void queryClient.invalidateQueries({ queryKey: notificationsKey(userId) })
       reloadTimer.current = null
-    }, 280)
-  }, [load])
+    }, 320)
+  }, [userId])
 
-  const scheduleReloadRef = useRef(scheduleReload)
-  scheduleReloadRef.current = scheduleReload
-
-  useEffect(() => {
-    const sub = supabase.auth.onAuthStateChange(() => void load())
-    return () => sub.data.subscription.unsubscribe()
-  }, [load])
-
+  // Live row patches from badge bridge (project messages) + local milestone inserts.
   useEffect(() => {
     return subscribeAlertsLivePatch((patch) => {
-      const uid = userIdRef.current
-      if (uid && patch.userId !== uid) return
-      if (!uid) setUserId(patch.userId)
-      setRows((prev) => {
-        const idx = prev.findIndex((r) => r.id === patch.row.id)
-        if (idx === -1) return [patch.row, ...prev]
-        if (prev[idx] === patch.row) return prev
-        const next = prev.slice()
-        next[idx] = patch.row
+      if (userId && patch.userId !== userId) return
+      queryClient.setQueryData<NotificationsCache>(notificationsKey(patch.userId), (prev) => {
+        const base = prev ?? readCachedNotifications(patch.userId) ?? { rows: [], reads: [] }
+        const idx = base.rows.findIndex((r) => r.id === patch.row.id)
+        let nextRows: NotificationRow[]
+        if (idx === -1) nextRows = [patch.row, ...base.rows]
+        else {
+          nextRows = base.rows.slice()
+          nextRows[idx] = patch.row
+        }
+        const next = { rows: nextRows, reads: base.reads }
+        cacheNotifications(patch.userId, next)
         return next
       })
     })
-  }, [])
+  }, [userId])
 
   useFocusEffect(
     useCallback(() => {
       setNowTick(Date.now())
       const tickId = setInterval(() => setNowTick(Date.now()), TIME_AGO_TICK_MS)
-      // Always silent-refresh on focus so Alerts stay live (no 30s stale skip).
-      void load({ silent: true }).finally(() => invalidateAlertsBadge())
+      invalidateAlertsBadge()
+      if (userId) {
+        void queryClient.refetchQueries({ queryKey: notificationsKey(userId), stale: true })
+      }
       return () => clearInterval(tickId)
-    }, [load])
+    }, [userId])
   )
 
   useEffect(() => {
-    let cancelled = false
-    let channel: ReturnType<typeof supabase.channel> | null = null
-
-    void (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (cancelled) return
-      const topic = `alerts-feed-refresh-${user?.id ?? 'anon'}-${++alertsRealtimeTopicSeq}`
-      const onChange = () => scheduleReloadRef.current()
-      channel = supabase
-        .channel(topic)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, onChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, onChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'project_messages' }, onChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, onChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, onChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, onChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'project_crew_invites' }, onChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'project_milestones' }, onChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'milestones' }, onChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'user_alert_reads' }, onChange)
-        .subscribe()
-    })()
+    if (!userId) return
+    const topic = `alerts-feed-refresh-${userId}-${++alertsRealtimeTopicSeq}`
+    const onSoftChange = () => scheduleInvalidate()
+    const channel = supabase
+      .channel(topic)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, onSoftChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, onSoftChange)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'project_messages' }, onSoftChange)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'project_messages' }, onSoftChange)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'project_messages' }, onSoftChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_applications' }, onSoftChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, onSoftChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, onSoftChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_crew_invites' }, onSoftChange)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'project_milestones' },
+        (payload) => {
+          applyMilestoneInsertAlert(userId, (payload.new ?? {}) as Record<string, unknown>)
+          scheduleInvalidate()
+        }
+      )
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'project_milestones' }, onSoftChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'milestones' }, onSoftChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_alert_reads' }, onSoftChange)
+      .subscribe()
 
     return () => {
-      cancelled = true
       if (reloadTimer.current) clearTimeout(reloadTimer.current)
-      if (channel) void supabase.removeChannel(channel)
+      void supabase.removeChannel(channel)
     }
-  }, [])
+  }, [userId, scheduleInvalidate])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
-      await load()
+      await alertsQuery.refetch()
     } finally {
       setRefreshing(false)
     }
-  }, [load])
+  }, [alertsQuery])
 
   const emptyText = useMemo(() => 'No alerts yet.', [])
 
   const respondInvite = useCallback(
     async (item: NotificationRow, action: 'accept' | 'decline') => {
       const inviteId = item.targetId
-      if (!inviteId || busyInviteId) return
+      if (!inviteId || busyInviteId || !userId) return
       setBusyInviteId(item.id)
       const res = await respondToCrewInvite(inviteId, action)
       setBusyInviteId(null)
@@ -221,33 +200,33 @@ export default function NotificationsScreen() {
         Alert.alert('Could not respond', res.error ?? 'Please try again.')
         return
       }
-      // Optimistically drop the invite row, then revalidate the feed.
-      setRows((prev) => prev.filter((r) => r.id !== item.id))
-      void load()
+      queryClient.setQueryData<NotificationsCache>(notificationsKey(userId), (prev) => {
+        if (!prev) return prev
+        const next = { ...prev, rows: prev.rows.filter((r) => r.id !== item.id) }
+        cacheNotifications(userId, next)
+        return next
+      })
+      void queryClient.invalidateQueries({ queryKey: notificationsKey(userId) })
       invalidateAlertsBadge()
       if (action === 'accept' && item.projectId) {
         router.push(`/project/${item.projectId}`)
       }
     },
-    [busyInviteId, load, router]
+    [busyInviteId, router, userId]
   )
 
   const onPressRow = useCallback(
     async (item: NotificationRow) => {
-      // Crew invitations are actioned via the inline Accept/Decline buttons and
-      // reference a project the user cannot open yet — don't navigate.
       if (item.kind === 'crew_invite') return
       if (userId) {
         await markAlertRead(userId, item.id)
-        let nextReadKeys: Set<string> = new Set()
-        setReadKeys((prev) => {
-          nextReadKeys = new Set(prev)
-          nextReadKeys.add(item.id)
-          return nextReadKeys
-        })
-        cacheNotifications(userId, {
-          rows,
-          reads: Array.from(nextReadKeys),
+        queryClient.setQueryData<NotificationsCache>(notificationsKey(userId), (prev) => {
+          const base = prev ?? { rows, reads: Array.from(readKeys) }
+          if (base.reads.includes(item.id)) return base
+          const next = { ...base, reads: [...base.reads, item.id] }
+          cacheNotifications(userId, next)
+          void persistNotificationsToDisk(userId, next)
+          return next
         })
         invalidateAlertsBadge()
       }
@@ -265,14 +244,12 @@ export default function NotificationsScreen() {
       }
       if (item.projectId) router.push(`/project/${item.projectId}`)
     },
-    [router, userId, rows]
+    [router, userId, rows, readKeys]
   )
-
-  const showInitialSkeleton = loading && rows.length === 0
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <TabScreenHeader title="Alerts" showMessages={showMessages} />
+      <TabScreenHeader title="Alerts" showMessages />
       <FlatList
         data={rows}
         keyExtractor={(r) => r.id}
@@ -340,7 +317,7 @@ export default function NotificationsScreen() {
           )
         }}
         ListEmptyComponent={
-          showInitialSkeleton ? (
+          loading ? (
             <ScreenListSkeleton rows={6} />
           ) : (
             <View style={styles.center}>

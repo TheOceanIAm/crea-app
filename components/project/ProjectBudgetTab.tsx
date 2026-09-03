@@ -359,16 +359,16 @@ export function ProjectBudgetTab({ projectId }: Props) {
         ) : (
           crew.lines.map((ln) => (
             <View key={ln.profileIdKey} style={styles.crewRow}>
-              <Text style={styles.crewName} numberOfLines={1}>
-                {ln.displayName}
-              </Text>
-              <Text style={styles.crewMeta}>
-                {(ln.dayUnits % 1 === 0 ? String(ln.dayUnits) : ln.dayUnits.toFixed(1)) + 'd equiv'}
-                {ln.halfDayRate != null && ln.halfDayRate > 0
-                  ? ` · day ${formatMoneyAmount(ln.dayRate, currency)} / half ${formatMoneyAmount(ln.halfDayRate, currency)}`
-                  : ` · ${formatMoneyAmount(ln.dayRate, currency)} day`}
-              </Text>
-              <Text style={styles.crewAmt}>{formatMoneyAmount(ln.subtotal, currency)}</Text>
+              <Text style={styles.crewName}>{ln.displayName}</Text>
+              <View style={styles.crewDetailRow}>
+                <Text style={styles.crewMeta}>
+                  {(ln.dayUnits % 1 === 0 ? String(ln.dayUnits) : ln.dayUnits.toFixed(1)) + 'd equiv'}
+                  {ln.halfDayRate != null && ln.halfDayRate > 0
+                    ? ` · day ${formatMoneyAmount(ln.dayRate, currency)} / half ${formatMoneyAmount(ln.halfDayRate, currency)}`
+                    : ` · ${formatMoneyAmount(ln.dayRate, currency)} day`}
+                </Text>
+                <Text style={styles.crewAmt}>{formatMoneyAmount(ln.subtotal, currency)}</Text>
+              </View>
             </View>
           ))
         )}
@@ -559,16 +559,20 @@ const styles = StyleSheet.create({
   muted: { fontSize: 12, color: 'rgba(255,255,255,0.38)', marginBottom: 8 },
   summaryBig: { fontSize: 22, fontWeight: '800', color: '#FFDC00', marginBottom: 6 },
   crewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
+    gap: 4,
+    paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
   },
-  crewName: { flex: 1, color: '#fff', fontWeight: '600', fontSize: 14 },
-  crewMeta: { color: 'rgba(255,255,255,0.45)', fontSize: 12 },
-  crewAmt: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  crewName: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  crewDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  crewMeta: { flex: 1, color: 'rgba(255,255,255,0.45)', fontSize: 12, lineHeight: 17 },
+  crewAmt: { color: '#fff', fontWeight: '700', fontSize: 14, flexShrink: 0 },
   snapRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

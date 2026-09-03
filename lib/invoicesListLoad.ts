@@ -5,6 +5,7 @@ import { getAuthUser } from '@/lib/getAuthUser'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { supabase } from '@/lib/supabase'
+import { LIST_DISK_TTL_MS, LIST_MEM_TTL_MS } from '@/lib/cachePolicy'
 
 export type InvoiceListRow = {
   id: string
@@ -69,8 +70,8 @@ export type InvoicesListCache = {
   error: string | null
 }
 
-const MEM_TTL_MS = 35_000
-const DISK_TTL_MS = 24 * 60 * 60 * 1000
+const MEM_TTL_MS = LIST_MEM_TTL_MS
+const DISK_TTL_MS = LIST_DISK_TTL_MS
 
 export function invoicesListCacheKey(userId: string): string {
   return `invoices-list:${userId}`

@@ -3,7 +3,7 @@ import type { User } from '@supabase/supabase-js'
 
 import { readBootstrapHints } from '@/lib/bootstrapHints'
 import { readCachedDashboardOverview } from '@/lib/dashboardOverview'
-import { hydrateJobsFeedFromDisk, prefetchJobsFeed } from '@/lib/jobsFeedLoad'
+import { hydrateJobsFeedBestEffort, hydrateJobsFeedFromDisk, prefetchJobsFeed } from '@/lib/jobsFeedLoad'
 import { prefetchMessages, hydrateMessagesFromDisk } from '@/lib/messagesCache'
 import {
   prefetchNotifications,
@@ -19,6 +19,7 @@ import {
   hydrateWorkspaceProjectsFromDisk,
   prefetchWorkspaceProjects,
 } from '@/lib/workspaceProjectsLoad'
+import { seedSecondaryQueriesFromMem } from '@/lib/seedQueryCaches'
 
 let idlePrefetchStarted = false
 let idleInflight: Promise<void> | null = null
@@ -49,6 +50,14 @@ export async function hydrateSecondaryTabsFromDisk(userId: string, role: string 
     hydrateMessagesFromDisk(userId),
     (() => {
       const companyOnly = isCompanyProfile(role)
+      // Role unknown on cold start: still hydrate jobs (both keys) so Browse Jobs paints.
+      if (role == null) {
+        return Promise.all([
+          hydrateJobsFeedBestEffort(userId, 'crea'),
+          hydrateJobsFeedBestEffort(userId, 'external'),
+          hydrateWorkspaceProjectsFromDisk(userId),
+        ]).then(() => true)
+      }
       if (isFreelancerProfile(role) || companyOnly) {
         const jobsHydrate: Promise<boolean>[] = [hydrateJobsFeedFromDisk(userId, 'crea', companyOnly)]
         if (!companyOnly) {
@@ -104,6 +113,7 @@ export function prefetchSecondaryTabsIdle(userId: string, role?: string | null):
       const resolvedRole = role ?? resolveRole(userId) ?? (await resolveRoleAsync(userId, user))
 
       await hydrateSecondaryTabsFromDisk(userId, resolvedRole)
+      seedSecondaryQueriesFromMem(userId)
       await runSecondaryTabPrefetch(userId, user, resolvedRole)
     })().finally(() => {
       idleInflight = null

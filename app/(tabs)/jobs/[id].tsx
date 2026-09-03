@@ -10,7 +10,7 @@ import {
   Image,
   Modal,
 } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useGlobalSearchParams, useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Share2, Lock } from 'lucide-react-native'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
@@ -34,6 +34,7 @@ import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWork
 import { applyToJobViaWebApi, fetchJobApplicationStatus, type JobApplicationStatus } from '@/lib/applyToJobApi'
 import { parseJobCategoryRoles } from '@/lib/jobCategoryRoles'
 import { resolveAppliedRoleForSubmit } from '@/lib/jobApplicationRole'
+import { prefetchProjectShell } from '@/lib/projectShellCache'
 
 type BookingDeepState =
   | { kind: 'none' }
@@ -95,6 +96,7 @@ export default function JobDetailScreen() {
     firstSearchParam(global.bookingMsg)
   const convIdParam = firstSearchParam(local.conv) ?? firstSearchParam(global.conv)
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const [loading, setLoading] = useState(true)
   const [job, setJob] = useState<JobRow | null>(null)
   const [uid, setUid] = useState<string | null>(null)
@@ -259,9 +261,10 @@ export default function JobDetailScreen() {
         return
       }
       setBookingDeep({ kind: 'loading' })
+      // DM `messages` table uses `content` only (no `body` column — selecting it 400s the query).
       const { data: msg, error: mErr } = await supabase
         .from('messages')
-        .select('id, sender_id, body, content')
+        .select('id, sender_id, content')
         .eq('id', bookingMsgId)
         .eq('conversation_id', convIdParam)
         .maybeSingle()
@@ -270,7 +273,7 @@ export default function JobDetailScreen() {
         setBookingDeep({ kind: 'invalid' })
         return
       }
-      const raw = msg.body ?? msg.content ?? ''
+      const raw = msg.content ?? ''
       const payload = parseBookingDm(typeof raw === 'string' ? raw : '')
       if (!payload || !bookingOpenDeepLinkMatchesJob(payload.openDeepLink, id)) {
         setBookingDeep({ kind: 'invalid' })
@@ -282,7 +285,7 @@ export default function JobDetailScreen() {
       }
       const { data: msgs } = await supabase
         .from('messages')
-        .select('id, sender_id, created_at, body, content')
+        .select('id, sender_id, created_at, content')
         .eq('conversation_id', convIdParam)
         .order('created_at', { ascending: true })
       if (cancelled) return
@@ -533,8 +536,14 @@ export default function JobDetailScreen() {
     void submitApplication(resolved.role)
   }
 
+  useEffect(() => {
+    if (projectId) prefetchProjectShell(projectId)
+  }, [projectId])
+
   const openWorkspace = () => {
-    if (projectId) router.push(`/project/${projectId}`)
+    if (!projectId) return
+    prefetchProjectShell(projectId)
+    router.push(`/project/${projectId}`)
   }
 
   if (loading || !detailReady) {
@@ -651,7 +660,11 @@ export default function JobDetailScreen() {
         mailSubject={`Crea ${listingWord.toLowerCase()}: ${job.title}`}
       />
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingBottom: 28 }]}
+        showsVerticalScrollIndicator={false}
+      >
         {bookingDeep.kind === 'loading' && freelancer && !isOwner && bookingMsgId && convIdParam ? (
           <View style={styles.bookingLoading}>
             <ActivityIndicator color="#FFDC00" />
@@ -751,38 +764,6 @@ export default function JobDetailScreen() {
           </View>
         ) : null}
 
-        {canShowApply ? (
-          <TouchableOpacity
-            style={[styles.primaryBtn, applyBusy && styles.btnDisabled]}
-            onPress={onApply}
-            disabled={applyBusy}
-          >
-            {applyBusy ? (
-              <ActivityIndicator color="#0a0a0a" />
-            ) : (
-              <Text style={styles.primaryBtnText}>Apply now</Text>
-            )}
-          </TouchableOpacity>
-        ) : null}
-
-        {showUpgradeForApply ? (
-          <>
-            <TouchableOpacity
-              style={[styles.primaryBtn, styles.lockedApplyBtn]}
-              onPress={() => router.push('/paywall')}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Apply now — Pro required"
-            >
-              <Lock size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
-              <Text style={styles.primaryBtnText}>Apply now</Text>
-            </TouchableOpacity>
-            <Text style={styles.lockedApplyHint}>
-              Browsing is free. Upgrade to Pro to apply and unlock production tools.
-            </Text>
-          </>
-        ) : null}
-
         {freelancer && !isOwner && applicationStatus === 'pending' ? (
           <View style={[styles.applicationStatusPill, styles.applicationStatusPillPending]}>
             <Text style={styles.applicationStatusPending}>Application pending</Text>
@@ -796,9 +777,66 @@ export default function JobDetailScreen() {
         ) : null}
 
         {company && isOwner && openedFromBooking ? (
-          <>
+          <Text style={styles.bookingCompanyExplainer}>
+            The freelancer taps Accept or Decline in this chat. Your project workspace is available below — they only get access after accepting or once you accept their application.
+          </Text>
+        ) : null}
+
+        {showWorkspace && webBase ? (
+          <TouchableOpacity
+            style={styles.linkBtn}
+            onPress={() => openProjectOnWeb(projectId, '?tool=brief')}
+          >
+            <Text style={styles.linkBtnText}>Full Brief AI on web →</Text>
+          </TouchableOpacity>
+        ) : null}
+        {showWorkspace && !webBase ? (
+          <Text style={styles.hint}>
+            Set EXPO_PUBLIC_CREA_WEB_URL in .env to open the web workspace (Brief AI, Frame.io, files).
+          </Text>
+        ) : null}
+      </ScrollView>
+
+      {canShowApply ||
+      showUpgradeForApply ||
+      (company && isOwner && openedFromBooking) ||
+      showWorkspace ? (
+        <View style={[styles.actionDock, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}>
+          {canShowApply ? (
             <TouchableOpacity
-              style={styles.primaryBtn}
+              style={[styles.primaryBtn, styles.dockBtn, applyBusy && styles.btnDisabled]}
+              onPress={onApply}
+              disabled={applyBusy}
+            >
+              {applyBusy ? (
+                <ActivityIndicator color="#0a0a0a" />
+              ) : (
+                <Text style={styles.primaryBtnText}>Apply now</Text>
+              )}
+            </TouchableOpacity>
+          ) : null}
+
+          {showUpgradeForApply ? (
+            <>
+              <TouchableOpacity
+                style={[styles.primaryBtn, styles.dockBtn, styles.lockedApplyBtn]}
+                onPress={() => router.push('/paywall')}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Apply now — Pro required"
+              >
+                <Lock size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+                <Text style={styles.primaryBtnText}>Apply now</Text>
+              </TouchableOpacity>
+              <Text style={styles.lockedApplyHint}>
+                Browsing is free. Upgrade to Pro to apply and unlock production tools.
+              </Text>
+            </>
+          ) : null}
+
+          {company && isOwner && openedFromBooking ? (
+            <TouchableOpacity
+              style={[styles.primaryBtn, styles.dockBtn]}
               onPress={() => {
                 if (convIdParam) router.push(`/conversation/${convIdParam}`)
               }}
@@ -807,32 +845,15 @@ export default function JobDetailScreen() {
             >
               <Text style={styles.primaryBtnText}>Open Messages</Text>
             </TouchableOpacity>
-            <Text style={styles.bookingCompanyExplainer}>
-              The freelancer taps Accept or Decline in this chat. Your project workspace is available below — they only get access after accepting or once you accept their application.
-            </Text>
-          </>
-        ) : null}
+          ) : null}
 
-        {showWorkspace ? (
-          <>
-            <TouchableOpacity style={styles.primaryBtn} onPress={openWorkspace}>
+          {showWorkspace ? (
+            <TouchableOpacity style={[styles.primaryBtn, styles.dockBtn]} onPress={openWorkspace}>
               <Text style={styles.primaryBtnText}>Open project workspace</Text>
             </TouchableOpacity>
-            {webBase ? (
-              <TouchableOpacity
-                style={styles.linkBtn}
-                onPress={() => openProjectOnWeb(projectId, '?tool=brief')}
-              >
-                <Text style={styles.linkBtnText}>Full Brief AI on web →</Text>
-              </TouchableOpacity>
-            ) : (
-              <Text style={styles.hint}>
-                Set EXPO_PUBLIC_CREA_WEB_URL in .env to open the web workspace (Brief AI, Frame.io, files).
-              </Text>
-            )}
-          </>
-        ) : null}
-      </ScrollView>
+          ) : null}
+        </View>
+      ) : null}
     </SafeAreaView>
   )
 }
@@ -862,7 +883,18 @@ const styles = StyleSheet.create({
   },
   backLabel: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },
   scroll: { flex: 1 },
-  content: { paddingHorizontal: 20, paddingBottom: 48 },
+  content: { paddingHorizontal: 20, paddingBottom: 28 },
+  actionDock: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#0a0a0a',
+    gap: 10,
+  },
+  dockBtn: {
+    marginTop: 0,
+  },
   companyRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -941,6 +973,7 @@ const styles = StyleSheet.create({
   },
   lockedApplyHint: {
     marginTop: 10,
+    marginBottom: 4,
     fontSize: 12,
     color: 'rgba(255,255,255,0.4)',
     lineHeight: 18,

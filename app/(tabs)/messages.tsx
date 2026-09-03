@@ -21,6 +21,7 @@ import { queryClient } from '@/lib/queryClient'
 import { loadDirectMessageInbox, type ConvoRow } from '@/lib/messagesInboxLoad'
 import {
   cacheMessages,
+  hydrateMessagesFromDisk,
   messagesCacheKey,
   persistMessagesToDisk,
   readCachedMessages,
@@ -29,15 +30,14 @@ import { invalidateDmBadge } from '@/lib/invalidateDmBadge'
 import { deleteCache } from '@/lib/appCache'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
-
-const MESSAGES_STALE_MS = 30_000
+import { messagesKey } from '@/lib/queryKeys'
+import { prefetchConversation } from '@/lib/conversationCache'
+import { LIST_STALE_MS } from '@/lib/cachePolicy'
 
 /** Unique Supabase Realtime topic — reusing the same name returns an already-subscribed channel. */
 let messagesRealtimeTopicSeq = 0
 
 type MessagesData = { inbox: ConvoRow[]; archived: ConvoRow[] }
-
-const messagesKey = (userId: string | null) => ['messages', userId ?? 'anon'] as const
 
 /** Move one conversation between inbox/archived lists (optimistic archive/unarchive). */
 function moveConversation(
@@ -89,33 +89,47 @@ export default function MessagesScreen() {
   const userId = authQuery.data ?? null
   const enabled = Boolean(userId)
 
+  const cachedBoot = userId ? readCachedMessages(userId) : null
+
   const inboxQuery = useQuery({
     queryKey: messagesKey(userId),
     enabled,
-    staleTime: MESSAGES_STALE_MS,
+    staleTime: LIST_STALE_MS,
     placeholderData: (prev) => prev,
-    // Show the cached inbox instantly, but mark it stale (updatedAt: 0) so it
-    // revalidates in the background — same stale-while-revalidate as before.
-    initialData: (): MessagesData | undefined => {
-      if (!userId) return undefined
-      return readCachedMessages(userId) ?? undefined
-    },
-    initialDataUpdatedAt: 0,
+    initialData: (): MessagesData | undefined => cachedBoot ?? undefined,
+    initialDataUpdatedAt: cachedBoot ? Date.now() : undefined,
     queryFn: async (): Promise<MessagesData> => {
       const result = await loadDirectMessageInbox(userId as string)
       if (result.ok === false) throw new Error(result.error)
       const data: MessagesData = { inbox: result.inbox, archived: result.archived }
-      // Keep the legacy mem/disk caches warm so the prefetch pipeline stays consistent.
       cacheMessages(userId as string, data)
       void persistMessagesToDisk(userId as string, data)
       return data
     },
   })
 
+  useEffect(() => {
+    if (!userId) return
+    if ((inboxQuery.data?.inbox.length ?? 0) + (inboxQuery.data?.archived.length ?? 0) > 0) return
+    let cancelled = false
+    void hydrateMessagesFromDisk(userId).then((ok) => {
+      if (cancelled || !ok) return
+      const hit = readCachedMessages(userId)
+      if (hit && !queryClient.getQueryData(messagesKey(userId))) {
+        queryClient.setQueryData(messagesKey(userId), hit)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [userId, inboxQuery.data?.inbox.length, inboxQuery.data?.archived.length])
+
   const convos = inboxQuery.data?.inbox ?? []
   const archived = inboxQuery.data?.archived ?? []
   const loadError = inboxQuery.error ? (inboxQuery.error as Error).message : null
-  const loading = authQuery.isLoading || (enabled && inboxQuery.isLoading)
+  const loading =
+    authQuery.isLoading ||
+    (enabled && inboxQuery.isLoading && convos.length === 0 && archived.length === 0)
   const signedIn = !(authQuery.isSuccess && userId === null)
 
   // Live updates: a DB change marks the inbox stale and refetches (debounced to avoid storms).
@@ -302,6 +316,9 @@ export default function MessagesScreen() {
         <TouchableOpacity
           style={[styles.card, !isArchived && item.unread && styles.cardUnread]}
           activeOpacity={0.7}
+          onPressIn={() => {
+            if (userId) prefetchConversation(item.id, userId)
+          }}
           onPress={() => router.push(`/conversation/${item.id}`)}
         >
           <View style={styles.avatarWrap}>
@@ -326,7 +343,7 @@ export default function MessagesScreen() {
         </TouchableOpacity>
       </Swipeable>
     ),
-    [archiveConversation, deleteConversation, router],
+    [archiveConversation, deleteConversation, router, userId],
   )
 
   if (loading) {

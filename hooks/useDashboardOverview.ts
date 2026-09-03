@@ -62,7 +62,7 @@ export function useDashboardOverview() {
       if (warmed && warmed.userId === userId) return warmed
       return readCachedDashboardOverview(userId) ?? undefined
     },
-    initialDataUpdatedAt: 0,
+    initialDataUpdatedAt: initial ? Date.now() : undefined,
     queryFn: async (): Promise<DashboardOverviewData | null> => {
       const next = await loadDashboardOverview(userId as string)
       if (next) {
@@ -109,7 +109,7 @@ export function useDashboardOverview() {
   )
 
   const overview = overviewQuery.data ?? null
-  const loading = authQuery.isLoading || (enabled && overviewQuery.isLoading)
+  const loading = authQuery.isLoading || (enabled && overviewQuery.isLoading && !overview)
 
   return { overview, loading, refresh }
 }

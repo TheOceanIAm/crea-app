@@ -11,6 +11,7 @@ import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } f
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { CREA_API_TAB_TIMEOUT_MS, fetchCreaApi } from '@/lib/creaApiFetch'
 import { supabase } from '@/lib/supabase'
+import { LIST_DISK_TTL_MS, LIST_MEM_TTL_MS } from '@/lib/cachePolicy'
 
 export type ListingKind = 'private' | 'customer'
 
@@ -53,8 +54,8 @@ type JobRow = {
   created_at?: string | null
 }
 
-const DISK_TTL_MS = 24 * 60 * 60 * 1000
-const MEM_TTL_MS = 35_000
+const DISK_TTL_MS = LIST_DISK_TTL_MS
+const MEM_TTL_MS = LIST_MEM_TTL_MS
 
 export function mapProjectStatusLabel(project: {
   status: string | null | undefined

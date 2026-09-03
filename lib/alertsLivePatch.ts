@@ -6,6 +6,12 @@ import {
 import type { NotificationRow } from '@/lib/notificationsFeed'
 import { publishAlertsLivePatch } from '@/lib/invalidateAlerts'
 import { supabase } from '@/lib/supabase'
+import { queryClient } from '@/lib/queryClient'
+import { notificationsKey } from '@/lib/queryKeys'
+
+function syncNotificationsQuery(userId: string, next: NotificationsCache): void {
+  queryClient.setQueryData(notificationsKey(userId), next)
+}
 
 export type ProjectMessageInsertRow = {
   id?: unknown
@@ -69,12 +75,69 @@ export function patchAlertsCacheWithProjectMessage(
     reads: prev.reads,
   }
   cacheNotifications(userId, next)
+  syncNotificationsQuery(userId, next)
   const wasUnread = !prev.reads.includes(row.id)
   return {
     inserted: true,
     badgeDelta: wasUnread ? 1 : 0,
     unreadCount: countUnreadFromNotificationsCache(next),
   }
+}
+
+export type MilestoneInsertRow = {
+  id?: unknown
+  project_id?: unknown
+  title?: unknown
+  completed?: unknown
+  created_at?: unknown
+}
+
+export function notificationRowFromMilestone(opts: {
+  milestoneId: string
+  projectId: string
+  title: string
+  completed: boolean
+  createdAt?: string | null
+  projectTitle?: string
+  jobId?: string
+}): NotificationRow {
+  const title = opts.title.trim() || 'Milestone'
+  return {
+    id: `milestone-native-${opts.milestoneId}-${opts.completed ? 'done' : 'new'}`,
+    kind: 'project_update',
+    projectId: opts.projectId,
+    jobId: opts.jobId,
+    title: opts.projectTitle?.trim() || 'Project',
+    body: opts.completed ? `Milestone completed: ${title}` : `Milestone added: ${title}`,
+    at: opts.createdAt?.trim() || new Date().toISOString(),
+  }
+}
+
+/** Apply a Realtime project_milestones INSERT into cache + QueryClient. */
+export function applyMilestoneInsertAlert(
+  userId: string,
+  raw: MilestoneInsertRow
+): { inserted: boolean; badgeDelta: number; unreadCount: number; row: NotificationRow | null } {
+  const milestoneId = typeof raw.id === 'string' ? raw.id.trim() : ''
+  const projectId = typeof raw.project_id === 'string' ? raw.project_id.trim() : ''
+  if (!milestoneId || !projectId) {
+    return { inserted: false, badgeDelta: 0, unreadCount: countUnreadAlertsCached(userId) ?? 0, row: null }
+  }
+
+  const row = notificationRowFromMilestone({
+    milestoneId,
+    projectId,
+    title: typeof raw.title === 'string' ? raw.title : 'Milestone',
+    completed: Boolean(raw.completed),
+    createdAt: typeof raw.created_at === 'string' ? raw.created_at : null,
+    projectTitle: titleFromCache(userId, projectId),
+    jobId: jobIdFromCache(userId, projectId),
+  })
+  const result = patchAlertsCacheWithProjectMessage(userId, row)
+  if (result.inserted) {
+    publishAlertsLivePatch({ userId, row })
+  }
+  return { ...result, row: result.inserted ? row : null }
 }
 
 function titleFromCache(userId: string, projectId: string): string | undefined {
@@ -146,7 +209,9 @@ export async function enrichProjectMessageAlertTitle(
     return next
   })
   if (!changed) return
-  cacheNotifications(userId, { rows, reads: prev.reads })
+  const next = { rows, reads: prev.reads }
+  cacheNotifications(userId, next)
+  syncNotificationsQuery(userId, next)
   const row = rows.find((r) => r.id === alertKey)
   if (row) publishAlertsLivePatch({ userId, row })
 }

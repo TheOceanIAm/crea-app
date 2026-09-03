@@ -7,8 +7,8 @@ const API_TIMEOUT_MS = 20_000
  * local multi-query fallback. 8s still fails closed, but keeps the aggregate path primary.
  */
 export const CREA_API_TAB_TIMEOUT_MS = 8_000
-/** Slightly longer for heavy workspace shell (Manage Job / project open). */
-export const CREA_API_WORKSPACE_TIMEOUT_MS = 12_000
+/** Workspace shell budget (shared across www/apex host retries — not per host). */
+export const CREA_API_WORKSPACE_TIMEOUT_MS = 8_000
 
 export function creaApiBaseCandidates(): string[] {
   const base = getCreaWebBaseUrl()
@@ -39,9 +39,15 @@ export async function fetchCreaApi<T>(
 
   const timeoutMs = typeof init?.timeoutMs === 'number' ? init.timeoutMs : API_TIMEOUT_MS
   const { timeoutMs: _omit, ...fetchInit } = init ?? {}
+  const startedAt = Date.now()
 
   let lastError = 'network_error'
   for (const base of candidates) {
+    const remaining = timeoutMs - (Date.now() - startedAt)
+    if (remaining <= 0) {
+      lastError = 'timeout'
+      break
+    }
     try {
       const res = (await Promise.race([
         fetch(`${base}${path.startsWith('/') ? path : `/${path}`}`, {
@@ -52,11 +58,12 @@ export async function fetchCreaApi<T>(
             ...(fetchInit.headers ?? {}),
           },
         }),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), remaining)),
       ])) as Response | null
 
       if (!res) {
         lastError = 'timeout'
+        // Only try the alternate host if we still have budget left.
         continue
       }
 

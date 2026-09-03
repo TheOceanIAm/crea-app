@@ -14,11 +14,13 @@ import {
 } from '@/lib/invoicesListLoad'
 import { isCompanyProfile, isFreelancerProfile } from '@/lib/profileRole'
 import { hydrateTalentPoolFromDisk, prefetchTalentPoolData } from '@/lib/talentPoolPrefetch'
+import { prefetchSettingsProfileShell } from '@/lib/settingsProfileCache'
 
 export async function hydrateDashboardFeaturesFromDisk(userId: string, role: string | null): Promise<void> {
-  const tasks: Promise<boolean>[] = [
+  const tasks: Promise<boolean | void>[] = [
     hydrateInvoicesListFromDisk(userId),
     hydrateAvailabilityFromDisk(userId),
+    prefetchSettingsProfileShell(userId),
   ]
   if (isCompanyProfile(role)) {
     tasks.push(hydrateCompanyApplicationsFromDisk(userId))

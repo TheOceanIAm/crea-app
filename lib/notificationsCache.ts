@@ -5,6 +5,9 @@ import {
   type NotificationRow,
 } from '@/lib/notificationsFeed'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
+import { queryClient } from '@/lib/queryClient'
+import { notificationsKey } from '@/lib/queryKeys'
+import { LIST_DISK_TTL_MS, LIST_MEM_TTL_MS } from '@/lib/cachePolicy'
 
 export type NotificationsCache = {
   rows: NotificationRow[]
@@ -40,6 +43,9 @@ export async function hydrateNotificationsFromDisk(userId: string): Promise<bool
   const hit = await readPersistedCache<NotificationsCache>(notificationsDiskKey(userId))
   if (!hit) return false
   cacheNotifications(userId, hit)
+  if (!queryClient.getQueryData(notificationsKey(userId))) {
+    queryClient.setQueryData(notificationsKey(userId), hit)
+  }
   return true
 }
 
@@ -58,6 +64,7 @@ export async function refreshNotificationsAndCount(userId: string): Promise<numb
   ])
   const data: NotificationsCache = { rows: feed, reads: Array.from(reads) }
   cacheNotifications(userId, data)
+  queryClient.setQueryData(notificationsKey(userId), data)
   void persistNotificationsToDisk(userId, data)
   return feed.filter((r) => !reads.has(r.id)).length
 }

@@ -4,15 +4,17 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   TextInput,
   ActivityIndicator,
   Alert,
   Platform,
+  Linking,
 } from 'react-native'
 import { useFocusEffect } from 'expo-router'
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker'
-import { Check, Plus, Trash2, CalendarClock } from 'lucide-react-native'
+import { Check, Plus, Trash2, CalendarClock, ChevronDown } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -22,9 +24,12 @@ import {
   fetchWorkspaceMilestones,
   insertWorkspaceMilestone,
   MILESTONE_PRIORITY_CONFIG,
+  MILESTONE_STATUS_CONFIG,
   setWorkspaceMilestoneCompleted,
   setWorkspaceMilestonePriority,
+  setWorkspaceMilestoneStatus,
   type WorkspaceMilestonePriority,
+  type WorkspaceMilestoneStatus,
   type WorkspaceMilestoneUi,
 } from '@/lib/workspaceMilestones'
 
@@ -37,6 +42,7 @@ type Props = {
 }
 
 const PRIORITIES: WorkspaceMilestonePriority[] = ['p1', 'p2', 'p3']
+const STATUSES: WorkspaceMilestoneStatus[] = ['pending', 'in_progress', 'completed']
 
 function defaultScheduleDate(): Date {
   const d = new Date()
@@ -45,11 +51,24 @@ function defaultScheduleDate(): Date {
   return d
 }
 
+function openReviewUrl(raw: string) {
+  const withProto = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+  Linking.openURL(withProto).catch(() => {
+    Alert.alert('Could not open link', withProto)
+  })
+}
+
 export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canManage }: Props) {
   const [rows, setRows] = useState<WorkspaceMilestoneUi[]>([])
   const [loading, setLoading] = useState(true)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [newTitle, setNewTitle] = useState('')
+  const [newDescription, setNewDescription] = useState('')
   const [newPriority, setNewPriority] = useState<WorkspaceMilestonePriority>('p3')
+  const [newDeliverable, setNewDeliverable] = useState('')
+  const [newDeliverables, setNewDeliverables] = useState<string[]>([])
+  const [newFrameioUrl, setNewFrameioUrl] = useState('')
+  const [addDetailsOpen, setAddDetailsOpen] = useState(false)
   const [scheduleEnabled, setScheduleEnabled] = useState(false)
   const [scheduleDate, setScheduleDate] = useState(() => defaultScheduleDate())
   const [scheduleTime, setScheduleTime] = useState(() => defaultScheduleDate())
@@ -114,6 +133,13 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
 
   const scheduledIso = scheduleEnabled ? isoFromDateAndTime(scheduleDate, scheduleTime) : null
 
+  const addDeliverable = () => {
+    const next = newDeliverable.trim()
+    if (!next) return
+    setNewDeliverables((prev) => [...prev, next])
+    setNewDeliverable('')
+  }
+
   const add = async () => {
     const t = newTitle.trim()
     if (!t || busy || !jobId) return
@@ -125,6 +151,9 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       position: nextOrder,
       scheduledAt: scheduledIso,
       priority: newPriority,
+      description: newDescription,
+      deliverables: newDeliverables,
+      frameioUrl: newFrameioUrl,
     })
     setBusy(false)
     if (error || !row) {
@@ -132,11 +161,17 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       return
     }
     setNewTitle('')
+    setNewDescription('')
     setNewPriority('p3')
+    setNewDeliverable('')
+    setNewDeliverables([])
+    setNewFrameioUrl('')
+    setAddDetailsOpen(false)
     setScheduleEnabled(false)
     setScheduleDate(defaultScheduleDate())
     setScheduleTime(defaultScheduleDate())
     setRows((prev) => [...prev, row])
+    setExpandedId(row.id)
     onCountsChanged?.()
     void notifyExpoEvent({
       kind: 'workspace_activity',
@@ -148,12 +183,19 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
   }
 
   const toggle = async (m: WorkspaceMilestoneUi) => {
-    const { error } = await setWorkspaceMilestoneCompleted(supabase, m.id, !m.completed)
+    const nextCompleted = !m.completed
+    const { error } = await setWorkspaceMilestoneCompleted(supabase, m.id, nextCompleted)
     if (error) {
       Alert.alert('Update failed', error)
       return
     }
-    setRows((prev) => prev.map((r) => (r.id === m.id ? { ...r, completed: !r.completed } : r)))
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === m.id
+          ? { ...r, completed: nextCompleted, status: nextCompleted ? 'completed' : 'pending' }
+          : r
+      )
+    )
     onCountsChanged?.()
   }
 
@@ -165,6 +207,17 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       return
     }
     setRows((prev) => prev.map((r) => (r.id === m.id ? { ...r, priority } : r)))
+  }
+
+  const setStatus = async (m: WorkspaceMilestoneUi, status: WorkspaceMilestoneStatus) => {
+    if (!canManage || m.status === status) return
+    const { error } = await setWorkspaceMilestoneStatus(supabase, m.id, status)
+    if (error) {
+      Alert.alert('Update failed', error)
+      return
+    }
+    setRows((prev) => prev.map((r) => (r.id === m.id ? { ...r, status, completed: status === 'completed' } : r)))
+    onCountsChanged?.()
   }
 
   const remove = (m: WorkspaceMilestoneUi) => {
@@ -180,6 +233,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
             return
           }
           setRows((prev) => prev.filter((r) => r.id !== m.id))
+          setExpandedId((id) => (id === m.id ? null : id))
           onCountsChanged?.()
         },
       },
@@ -206,8 +260,8 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <Text style={styles.hint}>
         {canManage
-          ? 'Shared with the web workspace — add delivery steps with priority and an optional date and time.'
-          : 'Shared with the web workspace. Check off steps as you go; only the company or lead can edit the list.'}
+          ? 'Shared with the web workspace. Description, deliverables and Frame.io are on each card — tap to expand status and priority.'
+          : 'Shared with the web workspace. Description, deliverables and Frame.io are on each card — tap to expand more details.'}
       </Text>
 
       {canManage ? (
@@ -288,6 +342,71 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
             />
           ) : null}
 
+          <TouchableOpacity
+            style={styles.detailsToggle}
+            onPress={() => setAddDetailsOpen((v) => !v)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.detailsToggleText}>Description, deliverables & Frame.io</Text>
+            <ChevronDown
+              size={18}
+              color="rgba(255,255,255,0.4)"
+              strokeWidth={ICON_STROKE}
+              style={{ transform: [{ rotate: addDetailsOpen ? '180deg' : '0deg' }] }}
+            />
+          </TouchableOpacity>
+
+          {addDetailsOpen ? (
+            <View style={styles.addDetails}>
+              <TextInput
+                style={[styles.input, styles.inputMultiline]}
+                placeholder="What needs to happen..."
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={newDescription}
+                onChangeText={setNewDescription}
+                multiline
+              />
+              <View style={styles.deliverableAddRow}>
+                <TextInput
+                  style={[styles.input, styles.deliverableInput]}
+                  placeholder="Add a deliverable..."
+                  placeholderTextColor="rgba(255,255,255,0.25)"
+                  value={newDeliverable}
+                  onChangeText={setNewDeliverable}
+                  onSubmitEditing={addDeliverable}
+                  returnKeyType="done"
+                />
+                <TouchableOpacity style={styles.deliverableAddBtn} onPress={addDeliverable} activeOpacity={0.8}>
+                  <Plus size={18} color="rgba(255,255,255,0.7)" strokeWidth={ICON_STROKE} />
+                </TouchableOpacity>
+              </View>
+              {newDeliverables.length > 0 ? (
+                <View style={styles.deliverableChips}>
+                  {newDeliverables.map((d, i) => (
+                    <TouchableOpacity
+                      key={`${d}-${i}`}
+                      style={styles.deliverableChip}
+                      onPress={() => setNewDeliverables((prev) => prev.filter((_, j) => j !== i))}
+                    >
+                      <Text style={styles.deliverableChipText}>{d}</Text>
+                      <Text style={styles.deliverableChipRemove}>✕</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
+              <TextInput
+                style={styles.input}
+                placeholder="https://app.frame.io/reviews/..."
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={newFrameioUrl}
+                onChangeText={setNewFrameioUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+              />
+            </View>
+          ) : null}
+
           <TouchableOpacity style={[styles.addBtnWide, busy && styles.dim]} onPress={add} disabled={busy}>
             <Plus size={20} color="#0a0a0a" strokeWidth={ICON_STROKE} />
             <Text style={styles.addBtnWideText}>{busy ? 'Adding…' : 'Add milestone'}</Text>
@@ -303,75 +422,159 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
         rows.map((m) => {
           const when = formatMilestoneSchedule(m.scheduledAt)
           const cfg = MILESTONE_PRIORITY_CONFIG[m.priority]
+          const statusCfg = MILESTONE_STATUS_CONFIG[m.status]
+          const isExpanded = expandedId === m.id
           return (
-            <View
+            <Pressable
               key={m.id}
+              onPress={() => setExpandedId(isExpanded ? null : m.id)}
               style={[
-                styles.row,
+                styles.card,
                 {
                   backgroundColor: cfg.bg,
                   borderColor: cfg.border,
                 },
               ]}
             >
-              <TouchableOpacity style={styles.checkWrap} onPress={() => toggle(m)} hitSlop={8}>
-                {m.completed ? (
-                  <View style={styles.checkOn}>
-                    <Check size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+              <View style={styles.row}>
+                <TouchableOpacity style={styles.checkWrap} onPress={() => toggle(m)} hitSlop={8}>
+                  {m.completed ? (
+                    <View style={styles.checkOn}>
+                      <Check size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+                    </View>
+                  ) : (
+                    <View style={styles.checkOff} />
+                  )}
+                </TouchableOpacity>
+                <View style={styles.rowBody}>
+                  <View style={styles.summary}>
+                    <View style={styles.titleRow}>
+                      <Text style={[styles.title, m.completed && styles.titleDone]}>{m.title}</Text>
+                      <View style={[styles.badge, { borderColor: cfg.border, backgroundColor: cfg.bg }]}>
+                        <View style={[styles.priorityDot, { backgroundColor: cfg.color }]} />
+                        <Text style={[styles.badgeText, { color: cfg.color }]}>{cfg.short}</Text>
+                      </View>
+                      <View style={[styles.badge, { borderColor: statusCfg.border, backgroundColor: statusCfg.bg }]}>
+                        <Text style={[styles.badgeText, { color: statusCfg.color }]}>{statusCfg.label}</Text>
+                      </View>
+                    </View>
+                    {m.description ? (
+                      <Text style={styles.descriptionPreview} numberOfLines={isExpanded ? undefined : 3}>
+                        {m.description}
+                      </Text>
+                    ) : (
+                      <Text style={styles.expandedEmpty}>No description</Text>
+                    )}
+                    {when ? <Text style={styles.when}>Delivery: {when}</Text> : null}
                   </View>
+                  {m.frameioUrl ? (
+                    <TouchableOpacity
+                      style={styles.frameioChip}
+                      onPress={() => openReviewUrl(m.frameioUrl!)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.frameioChipText}>Open Frame.io</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {m.deliverables.length > 0 ? (
+                    <View style={styles.expandedBlock}>
+                      <Text style={styles.expandedLabel}>Deliverables</Text>
+                      {(isExpanded ? m.deliverables : m.deliverables.slice(0, 3)).map((d, i) => (
+                        <View key={`${m.id}-d-${i}`} style={styles.deliverableRow}>
+                          <View style={[styles.deliverableCheck, m.completed && styles.deliverableCheckOn]}>
+                            {m.completed ? <Check size={10} color="#4ade80" strokeWidth={ICON_STROKE} /> : null}
+                          </View>
+                          <Text style={[styles.deliverableText, m.completed && styles.titleDone]}>{d}</Text>
+                        </View>
+                      ))}
+                      {!isExpanded && m.deliverables.length > 3 ? (
+                        <Text style={styles.expandHint}>+{m.deliverables.length - 3} more · tap to expand</Text>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <Text style={styles.expandedEmpty}>No deliverables listed</Text>
+                  )}
+                  {!isExpanded ? <Text style={styles.expandHint}>Tap card to expand</Text> : null}
+                </View>
+                {canManage ? (
+                  <TouchableOpacity onPress={() => remove(m)} hitSlop={8}>
+                    <Trash2 size={18} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
+                  </TouchableOpacity>
                 ) : (
-                  <View style={styles.checkOff} />
+                  <View style={styles.trashSpacer} />
                 )}
-              </TouchableOpacity>
-              <View style={styles.rowBody}>
-                <View style={styles.titleRow}>
-                  <Text style={[styles.title, m.completed && styles.titleDone]}>{m.title}</Text>
-                  <View style={[styles.badge, { borderColor: cfg.border, backgroundColor: cfg.bg }]}>
-                    <View style={[styles.priorityDot, { backgroundColor: cfg.color }]} />
-                    <Text style={[styles.badgeText, { color: cfg.color }]}>{cfg.short}</Text>
+                <ChevronDown
+                  size={18}
+                  color="rgba(255,255,255,0.45)"
+                  strokeWidth={ICON_STROKE}
+                  style={{ transform: [{ rotate: isExpanded ? '180deg' : '0deg' }], marginTop: 4 }}
+                />
+              </View>
+
+              {isExpanded && canManage ? (
+                <View style={styles.expanded}>
+                  <View style={styles.expandedBlock}>
+                    <Text style={styles.expandedLabel}>Priority</Text>
+                    <View style={styles.priorityRowCompact}>
+                      {PRIORITIES.map((p) => {
+                        const pCfg = MILESTONE_PRIORITY_CONFIG[p]
+                        const active = m.priority === p
+                        return (
+                          <TouchableOpacity
+                            key={p}
+                            style={[
+                              styles.priorityChipCompact,
+                              {
+                                borderColor: active ? pCfg.border : 'rgba(255,255,255,0.08)',
+                                backgroundColor: active ? pCfg.bg : 'transparent',
+                              },
+                            ]}
+                            onPress={() => void setPriority(m, p)}
+                            activeOpacity={0.8}
+                          >
+                            <Text
+                              style={[
+                                styles.priorityChipCompactText,
+                                { color: active ? pCfg.color : 'rgba(255,255,255,0.3)' },
+                              ]}
+                            >
+                              {pCfg.short}
+                            </Text>
+                          </TouchableOpacity>
+                        )
+                      })}
+                    </View>
+                  </View>
+                  <View style={styles.expandedBlock}>
+                    <Text style={styles.expandedLabel}>Update status</Text>
+                    <View style={styles.statusColumn}>
+                      {STATUSES.map((s) => {
+                        const sCfg = MILESTONE_STATUS_CONFIG[s]
+                        const active = m.status === s
+                        return (
+                          <TouchableOpacity
+                            key={s}
+                            style={[
+                              styles.statusChip,
+                              {
+                                borderColor: active ? sCfg.border : 'rgba(255,255,255,0.08)',
+                                backgroundColor: active ? sCfg.bg : 'transparent',
+                              },
+                            ]}
+                            onPress={() => void setStatus(m, s)}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={[styles.statusChipText, { color: active ? sCfg.color : 'rgba(255,255,255,0.3)' }]}>
+                              {sCfg.label}
+                            </Text>
+                          </TouchableOpacity>
+                        )
+                      })}
+                    </View>
                   </View>
                 </View>
-                {when ? <Text style={styles.when}>Delivery: {when}</Text> : null}
-                {canManage ? (
-                  <View style={styles.priorityRowCompact}>
-                    {PRIORITIES.map((p) => {
-                      const pCfg = MILESTONE_PRIORITY_CONFIG[p]
-                      const active = m.priority === p
-                      return (
-                        <TouchableOpacity
-                          key={p}
-                          style={[
-                            styles.priorityChipCompact,
-                            {
-                              borderColor: active ? pCfg.border : 'rgba(255,255,255,0.08)',
-                              backgroundColor: active ? pCfg.bg : 'transparent',
-                            },
-                          ]}
-                          onPress={() => void setPriority(m, p)}
-                          activeOpacity={0.8}
-                        >
-                          <Text
-                            style={[
-                              styles.priorityChipCompactText,
-                              { color: active ? pCfg.color : 'rgba(255,255,255,0.3)' },
-                            ]}
-                          >
-                            {pCfg.short}
-                          </Text>
-                        </TouchableOpacity>
-                      )
-                    })}
-                  </View>
-                ) : null}
-              </View>
-              {canManage ? (
-                <TouchableOpacity onPress={() => remove(m)} hitSlop={8}>
-                  <Trash2 size={18} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
-                </TouchableOpacity>
-              ) : (
-                <View style={styles.trashSpacer} />
-              )}
-            </View>
+              ) : null}
+            </Pressable>
           )
         })
       )}
@@ -403,6 +606,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
   },
+  inputMultiline: { minHeight: 72, textAlignVertical: 'top' },
   priorityLabel: {
     fontSize: 11,
     fontWeight: '800',
@@ -449,6 +653,40 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,220,0,0.08)',
   },
   scheduleBtnText: { color: '#FFDC00', fontSize: 14, fontWeight: '600' },
+  detailsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  detailsToggleText: { fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: '600' },
+  addDetails: { gap: 10 },
+  deliverableAddRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  deliverableInput: { flex: 1 },
+  deliverableAddBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  deliverableChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  deliverableChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  deliverableChipText: { fontSize: 12, color: 'rgba(255,255,255,0.65)' },
+  deliverableChipRemove: { fontSize: 11, color: 'rgba(255,255,255,0.3)' },
   addBtnWide: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -461,15 +699,18 @@ const styles = StyleSheet.create({
   addBtnWideText: { color: '#0a0a0a', fontSize: 15, fontWeight: '800' },
   dim: { opacity: 0.5 },
   empty: { fontSize: 14, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic', textAlign: 'center' },
+  card: {
+    marginBottom: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
     paddingVertical: 12,
     paddingHorizontal: 12,
-    marginBottom: 10,
-    borderRadius: 14,
-    borderWidth: 1,
   },
   checkWrap: { padding: 4, marginTop: 2 },
   checkOff: {
@@ -487,7 +728,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowBody: { flex: 1, gap: 6 },
+  rowBody: { flex: 1, gap: 8 },
+  summary: { gap: 6 },
   titleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   title: { fontSize: 15, color: 'rgba(255,255,255,0.9)', flexShrink: 1 },
   titleDone: { textDecorationLine: 'line-through', color: 'rgba(255,255,255,0.35)' },
@@ -501,8 +743,48 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   badgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
+  descriptionPreview: { fontSize: 13, color: 'rgba(255,255,255,0.4)', lineHeight: 18 },
   when: { fontSize: 12, color: 'rgba(255,220,0,0.75)', fontWeight: '500' },
-  priorityRowCompact: { flexDirection: 'row', gap: 6, marginTop: 2 },
+  trashSpacer: { width: 18 },
+  expanded: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 14,
+    gap: 14,
+  },
+  expandedBlock: { gap: 8 },
+  expandedLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.4)',
+  },
+  expandedEmpty: { fontSize: 12, color: 'rgba(255,255,255,0.28)' },
+  expandHint: { fontSize: 11, color: 'rgba(255,220,0,0.65)', fontWeight: '600', marginTop: 2 },
+  frameioChip: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(91,68,255,0.4)',
+    backgroundColor: 'rgba(91,68,255,0.12)',
+  },
+  frameioChipText: { fontSize: 12, fontWeight: '700', color: '#8b7cff' },
+  deliverableRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  deliverableCheck: {
+    width: 16,
+    height: 16,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  deliverableCheckOn: { borderColor: 'rgba(74,222,128,0.4)', backgroundColor: 'rgba(34,197,94,0.12)' },
+  deliverableText: { fontSize: 14, color: 'rgba(255,255,255,0.7)', flex: 1 },
+  priorityRowCompact: { flexDirection: 'row', gap: 6 },
   priorityChipCompact: {
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -510,5 +792,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   priorityChipCompactText: { fontSize: 11, fontWeight: '700' },
-  trashSpacer: { width: 18 },
+  statusColumn: { gap: 6 },
+  statusChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  statusChipText: { fontSize: 12, fontWeight: '700' },
 })

@@ -59,6 +59,13 @@ import {
 } from '@/lib/sunPlannerWorkspaceTrial'
 import { runTimed } from '@/lib/perfMarks'
 import { CREA_API_WORKSPACE_TIMEOUT_MS, fetchCreaApi } from '@/lib/creaApiFetch'
+import {
+  cacheProjectShell,
+  hydrateProjectShellFromDisk,
+  persistProjectShellToDisk,
+  readCachedProjectShell,
+} from '@/lib/projectShellCache'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 type TabId =
   | 'overview'
@@ -186,11 +193,18 @@ const TOOLS: { id: string; title: string; sub: string; icon: LucideIcon }[] = [
 ]
 
 export default function ProjectWorkspaceScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const { id, tab: tabParam, tool: toolParam, day: dayParam } = useLocalSearchParams<{
+    id: string
+    tab?: string | string[]
+    tool?: string | string[]
+    day?: string | string[]
+  }>()
   const router = useRouter()
-  const [loading, setLoading] = useState(true)
+  const bootShell =
+    typeof id === 'string' && id ? readCachedProjectShell(id) : null
+  const [loading, setLoading] = useState(!bootShell)
   const [forbidden, setForbidden] = useState(false)
-  const [project, setProject] = useState<ProjectRow | null>(null)
+  const [project, setProject] = useState<ProjectRow | null>(bootShell?.project ?? null)
   const [userId, setUserId] = useState<string | null>(null)
   const [workspaceOnlyPlan, setWorkspaceOnlyPlan] = useState(false)
   const [starterFreelancerPlan, setStarterFreelancerPlan] = useState(false)
@@ -198,14 +212,35 @@ export default function ProjectWorkspaceScreen() {
   const [productionWeatherEnabled, setProductionWeatherEnabled] = useState(false)
   const [sunPlannerLockedHint, setSunPlannerLockedHint] = useState<string | null>(null)
   const [productionWeatherLockedHint, setProductionWeatherLockedHint] = useState<string | null>(null)
-  const [isPrivateWorkspace, setIsPrivateWorkspace] = useState(false)
+  const [isPrivateWorkspace, setIsPrivateWorkspace] = useState(Boolean(bootShell?.isPrivateWorkspace))
   /** `jobs.company_id` — same owner check as web ManageJobClient (`isOwner`). */
-  const [jobOwnerCompanyId, setJobOwnerCompanyId] = useState<string | null>(null)
+  const [jobOwnerCompanyId, setJobOwnerCompanyId] = useState<string | null>(
+    bootShell?.jobOwnerCompanyId ?? null
+  )
   const [pipelineStatCount, setPipelineStatCount] = useState(0)
-  const [tab, setTab] = useState<TabId>('overview')
-  const [tool, setTool] = useState<string>('tasks')
-  const [briefText, setBriefText] = useState('')
-  const [overviewSummary, setOverviewSummary] = useState('')
+  const initialTab = (Array.isArray(tabParam) ? tabParam[0] : tabParam) as TabId | undefined
+  const initialTool = Array.isArray(toolParam) ? toolParam[0] : toolParam
+  const initialDayRaw = Array.isArray(dayParam) ? dayParam[0] : dayParam
+  const initialDay =
+    typeof initialDayRaw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(initialDayRaw.trim())
+      ? initialDayRaw.trim().slice(0, 10)
+      : ''
+  const [tab, setTab] = useState<TabId>(
+    initialTab &&
+      ['overview', 'milestones', 'production', 'crew', 'budget', 'messages', 'files', 'review', 'brief'].includes(
+        initialTab
+      )
+      ? initialTab
+      : 'overview'
+  )
+  const [tool, setTool] = useState<string>(
+    initialTool && ['tasks', 'shotlist', 'callsheet', 'gear', 'sun', 'weather'].includes(initialTool)
+      ? initialTool
+      : ''
+  )
+  const [shootDayParam, setShootDayParam] = useState<string>(initialDay)
+  const [briefText, setBriefText] = useState(bootShell?.project.brief_ai_context ?? '')
+  const [overviewSummary, setOverviewSummary] = useState(bootShell?.overviewSummary ?? '')
   const [overviewBudgetAmount, setOverviewBudgetAmount] = useState('')
   const [overviewBudgetType, setOverviewBudgetType] = useState('')
   const [overviewStatus, setOverviewStatus] = useState('active')
@@ -303,7 +338,22 @@ export default function ProjectWorkspaceScreen() {
     }
     setUserId(user.id)
 
-    // Fast path: one crea-services aggregate (Bearer). Falls back to local waterfall.
+    // Instant paint from mem/disk shell while network revalidates.
+    let shellHit = readCachedProjectShell(id)
+    if (!shellHit) {
+      shellHit = await hydrateProjectShellFromDisk(id)
+    }
+    if (shellHit?.project) {
+      setProject(shellHit.project)
+      setOverviewSummary(shellHit.overviewSummary)
+      setIsPrivateWorkspace(shellHit.isPrivateWorkspace)
+      setJobOwnerCompanyId(shellHit.jobOwnerCompanyId)
+      setBriefText(shellHit.project.brief_ai_context ?? '')
+      setLoading(false)
+    }
+
+    // Aggregate + local in parallel: paint from Supabase ASAP, upgrade when API returns.
+    // (Awaiting the API first made cold opens feel stuck for up to ~timeout × host retries.)
     type ShellPayload = {
       access: string
       isOwner: boolean
@@ -318,116 +368,19 @@ export default function ProjectWorkspaceScreen() {
       counts?: { applicantsTotal?: number; acceptedCrew?: number }
       workspaceSummaryDraft?: string
     }
-    try {
-      const { data: shellJson, error: shellErr } = await fetchCreaApi<{ payload?: ShellPayload }>(
-        `/api/app/job-workspace/${encodeURIComponent(id)}`,
-        { timeoutMs: CREA_API_WORKSPACE_TIMEOUT_MS }
-      )
-      const shell = shellJson?.payload
-      if (!shellErr && shell?.access === 'allowed' && shell.project) {
-        const p = shell.project
-        const freelancerPlan = resolveFreelancerPlanFromUser(user)
-        const roleHint = shell.isOwner ? 'company' : 'freelancer'
-        const isStarterFreelancer =
-          roleHint !== 'company' && isFreelancerStarterPlan(freelancerPlan)
-        setStarterFreelancerPlan(isStarterFreelancer)
-        setWorkspaceOnlyPlan(
-          roleHint !== 'company' && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
+    const aggregatePromise = (async (): Promise<ShellPayload | null> => {
+      try {
+        const { data: shellJson, error: shellErr } = await fetchCreaApi<{ payload?: ShellPayload }>(
+          `/api/app/job-workspace/${encodeURIComponent(id)}`,
+          { timeoutMs: CREA_API_WORKSPACE_TIMEOUT_MS }
         )
-        setIsPrivateWorkspace(Boolean(shell.job?.is_solo_workspace && shell.isOwner))
-        setJobOwnerCompanyId(
-          typeof shell.job?.company_id === 'string' ? shell.job.company_id : p.company_id
-        )
-        setProject(p)
-        setBriefText(p.brief_ai_context ?? '')
-        setOverviewSummary(
-          (shell.workspaceSummaryDraft || '').trim() ||
-            (typeof shell.job?.description === 'string' ? shell.job.description.trim() : '') ||
-            (p.brief_ai_context ?? '').trim()
-        )
-        setOverviewBudgetAmount(typeof p.budget_amount === 'number' ? String(p.budget_amount) : '')
-        setOverviewBudgetType(p.budget_type ?? '')
-        setOverviewStatus(p.status)
-        setScheduleStart(
-          typeof p.scheduling_start_date === 'string' ? p.scheduling_start_date.slice(0, 10) : ''
-        )
-        setScheduleEnd(
-          typeof p.scheduling_end_date === 'string' ? p.scheduling_end_date.slice(0, 10) : ''
-        )
-        setPipelineStatCount(
-          shell.isOwner
-            ? shell.job?.is_solo_workspace
-              ? shell.counts?.acceptedCrew ?? 0
-              : shell.counts?.applicantsTotal ?? 0
-            : 0
-        )
-
-        // Plan gates (sun/weather) still need a light local resolve.
-        let sunTrialIso: string | null = null
-        const profileRes = await supabase
-          .from('profiles')
-          .select('role, subscription_tier')
-          .eq('id', user.id)
-          .maybeSingle()
-        const role = resolveAppRole(profileRes.data?.role, user)
-        if (
-          isFreelancerProfile(role) &&
-          (isFreelancerWorkspaceOnlyPlan(freelancerPlan) || isFreelancerStarterPlan(freelancerPlan))
-        ) {
-          const { data: trialData } = await supabase.rpc('touch_sun_planner_trial_start')
-          sunTrialIso = typeof trialData === 'string' ? trialData : null
-        }
-        let companyPlan: 'free' | 'pro' = 'free'
-        if (role === 'company') {
-          const { data: cp } = await supabase
-            .from('company_profiles')
-            .select('subscription_plan')
-            .eq('id', user.id)
-            .maybeSingle()
-          companyPlan = resolveCompanySubscriptionPlanFromSources(
-            user,
-            (profileRes.data as { subscription_tier?: string | null } | null)?.subscription_tier,
-            (cp as { subscription_plan?: string } | null)?.subscription_plan
-          )
-        }
-        const companySunAccess = role === 'company' && isCompanyPro(companyPlan)
-        let nextSun = false
-        let nextWeather = false
-        let nextSunHint: string | null = null
-        let nextWeatherHint: string | null = null
-        if (role === 'company') {
-          nextSun = companySunAccess
-          nextWeather = companySunAccess
-        } else if (isFreelancerProfile(role)) {
-          nextSun = freelancerProductionSunAllowed(freelancerPlan, sunTrialIso)
-          nextWeather = freelancerProductionWeatherAllowed(freelancerPlan, sunTrialIso)
-          if (!nextSun) {
-            if (isFreelancerStarterPlan(freelancerPlan)) {
-              nextSunHint =
-                'Sun Planner: your 14-day trial has ended. Upgrade to Pro for full access.'
-            } else if (isFreelancerWorkspaceOnlyPlan(freelancerPlan)) {
-              nextSunHint =
-                'Sun Planner is available on Pro. Upgrade to unlock production scheduling.'
-            } else {
-              nextSunHint = 'Sun Planner is not available on your current plan.'
-            }
-          }
-          if (!nextWeather) {
-            nextWeatherHint =
-              'Weather in production tools is available on Pro. Upgrade to unlock full access.'
-          }
-        }
-        setSunPlannerEnabled(nextSun)
-        setProductionWeatherEnabled(nextWeather)
-        setSunPlannerLockedHint(nextSunHint)
-        setProductionWeatherLockedHint(nextWeatherHint)
-        setForbidden(false)
-        setLoading(false)
-        return { hasJob: Boolean(p.job_id), via: 'aggregate' as const }
+        const shell = shellJson?.payload
+        if (!shellErr && shell?.access === 'allowed' && shell.project) return shell
+      } catch {
+        // fall through — local path paints / decides forbidden
       }
-    } catch {
-      // fall through
-    }
+      return null
+    })()
 
     const [profileRes, projectRes] = await Promise.all([
       supabase
@@ -502,6 +455,89 @@ export default function ProjectWorkspaceScreen() {
       }
     }
     if (projErr || !row) {
+      // Local miss — still wait for aggregate (may resolve job→project mapping).
+      const shellOnly = await aggregatePromise
+      if (shellOnly?.project) {
+        const ap = shellOnly.project
+        const freelancerPlanAgg = resolveFreelancerPlanFromUser(user)
+        const roleHint = shellOnly.isOwner ? 'company' : 'freelancer'
+        setStarterFreelancerPlan(roleHint !== 'company' && isFreelancerStarterPlan(freelancerPlanAgg))
+        setWorkspaceOnlyPlan(
+          roleHint !== 'company' && isFreelancerWorkspaceOnlyPlan(freelancerPlanAgg)
+        )
+        setIsPrivateWorkspace(Boolean(shellOnly.job?.is_solo_workspace && shellOnly.isOwner))
+        setJobOwnerCompanyId(
+          typeof shellOnly.job?.company_id === 'string' ? shellOnly.job.company_id : ap.company_id
+        )
+        setProject(ap)
+        setBriefText(ap.brief_ai_context ?? '')
+        const aggOverview =
+          (shellOnly.workspaceSummaryDraft || '').trim() ||
+          (typeof shellOnly.job?.description === 'string' ? shellOnly.job.description.trim() : '') ||
+          (ap.brief_ai_context ?? '').trim()
+        setOverviewSummary(aggOverview)
+        setOverviewBudgetAmount(typeof ap.budget_amount === 'number' ? String(ap.budget_amount) : '')
+        setOverviewBudgetType(ap.budget_type ?? '')
+        setOverviewStatus(ap.status)
+        setScheduleStart(
+          typeof ap.scheduling_start_date === 'string' ? ap.scheduling_start_date.slice(0, 10) : ''
+        )
+        setScheduleEnd(
+          typeof ap.scheduling_end_date === 'string' ? ap.scheduling_end_date.slice(0, 10) : ''
+        )
+        setPipelineStatCount(
+          shellOnly.isOwner
+            ? shellOnly.job?.is_solo_workspace
+              ? shellOnly.counts?.acceptedCrew ?? 0
+              : shellOnly.counts?.applicantsTotal ?? 0
+            : 0
+        )
+        {
+          let nextSun = false
+          let nextWeather = false
+          let nextSunHint: string | null = null
+          let nextWeatherHint: string | null = null
+          if (role === 'company') {
+            nextSun = companySunAccess
+            nextWeather = companySunAccess
+          } else if (isFreelancerProfile(role)) {
+            nextSun = freelancerProductionSunAllowed(freelancerPlan, sunTrialIso)
+            nextWeather = freelancerProductionWeatherAllowed(freelancerPlan, sunTrialIso)
+            if (!nextSun) {
+              nextSunHint = isFreelancerStarterPlan(freelancerPlan)
+                ? 'Sun Planner: your 14-day trial has ended. Upgrade to Pro for full access.'
+                : isFreelancerWorkspaceOnlyPlan(freelancerPlan)
+                  ? 'Sun Planner is available on Pro. Upgrade to unlock production scheduling.'
+                  : 'Sun Planner is not available on your current plan.'
+            }
+            if (!nextWeather) {
+              nextWeatherHint =
+                'Weather in production tools is available on Pro. Upgrade to unlock full access.'
+            }
+          }
+          setSunPlannerEnabled(nextSun)
+          setProductionWeatherEnabled(nextWeather)
+          setSunPlannerLockedHint(nextSunHint)
+          setProductionWeatherLockedHint(nextWeatherHint)
+        }
+        setForbidden(false)
+        setLoading(false)
+        cacheProjectShell(id, {
+          project: ap,
+          overviewSummary: aggOverview,
+          isPrivateWorkspace: Boolean(shellOnly.job?.is_solo_workspace && shellOnly.isOwner),
+          jobOwnerCompanyId:
+            typeof shellOnly.job?.company_id === 'string' ? shellOnly.job.company_id : ap.company_id,
+        })
+        void persistProjectShellToDisk(id, {
+          project: ap,
+          overviewSummary: aggOverview,
+          isPrivateWorkspace: Boolean(shellOnly.job?.is_solo_workspace && shellOnly.isOwner),
+          jobOwnerCompanyId:
+            typeof shellOnly.job?.company_id === 'string' ? shellOnly.job.company_id : ap.company_id,
+        })
+        return { hasJob: Boolean(ap.job_id), via: 'aggregate' as const }
+      }
       setForbidden(true)
       setProject(null)
       setSunPlannerEnabled(false)
@@ -606,8 +642,77 @@ export default function ProjectWorkspaceScreen() {
       setPipelineStatCount(0)
     }
 
+    // Paint immediately from local Supabase — don't wait on cold serverless.
     setLoading(false)
-    return { hasJob: Boolean(p.job_id) }
+    {
+      const shellCache = {
+        project: { ...p, status: mergedStatus },
+        overviewSummary: overviewText,
+        isPrivateWorkspace: soloPrivate,
+        jobOwnerCompanyId: jobCompanyId || null,
+      }
+      cacheProjectShell(id, shellCache)
+      void persistProjectShellToDisk(id, shellCache)
+    }
+
+    const shell = await aggregatePromise
+    if (shell?.project) {
+      const ap = shell.project
+      const freelancerPlanAgg = resolveFreelancerPlanFromUser(user)
+      const roleHint = shell.isOwner ? 'company' : 'freelancer'
+      const isStarterFreelancerAgg =
+        roleHint !== 'company' && isFreelancerStarterPlan(freelancerPlanAgg)
+      setStarterFreelancerPlan(isStarterFreelancerAgg)
+      setWorkspaceOnlyPlan(
+        roleHint !== 'company' && isFreelancerWorkspaceOnlyPlan(freelancerPlanAgg)
+      )
+      setIsPrivateWorkspace(Boolean(shell.job?.is_solo_workspace && shell.isOwner))
+      setJobOwnerCompanyId(
+        typeof shell.job?.company_id === 'string' ? shell.job.company_id : ap.company_id
+      )
+      setProject(ap)
+      setBriefText(ap.brief_ai_context ?? '')
+      const aggOverview =
+        (shell.workspaceSummaryDraft || '').trim() ||
+        (typeof shell.job?.description === 'string' ? shell.job.description.trim() : '') ||
+        (ap.brief_ai_context ?? '').trim()
+      setOverviewSummary(aggOverview)
+      setOverviewBudgetAmount(typeof ap.budget_amount === 'number' ? String(ap.budget_amount) : '')
+      setOverviewBudgetType(ap.budget_type ?? '')
+      setOverviewStatus(ap.status)
+      setScheduleStart(
+        typeof ap.scheduling_start_date === 'string' ? ap.scheduling_start_date.slice(0, 10) : ''
+      )
+      setScheduleEnd(
+        typeof ap.scheduling_end_date === 'string' ? ap.scheduling_end_date.slice(0, 10) : ''
+      )
+      setPipelineStatCount(
+        shell.isOwner
+          ? shell.job?.is_solo_workspace
+            ? shell.counts?.acceptedCrew ?? 0
+            : shell.counts?.applicantsTotal ?? 0
+          : 0
+      )
+      setForbidden(false)
+      setLoading(false)
+      cacheProjectShell(id, {
+        project: ap,
+        overviewSummary: aggOverview,
+        isPrivateWorkspace: Boolean(shell.job?.is_solo_workspace && shell.isOwner),
+        jobOwnerCompanyId:
+          typeof shell.job?.company_id === 'string' ? shell.job.company_id : ap.company_id,
+      })
+      void persistProjectShellToDisk(id, {
+        project: ap,
+        overviewSummary: aggOverview,
+        isPrivateWorkspace: Boolean(shell.job?.is_solo_workspace && shell.isOwner),
+        jobOwnerCompanyId:
+          typeof shell.job?.company_id === 'string' ? shell.job.company_id : ap.company_id,
+      })
+      return { hasJob: Boolean(ap.job_id), via: 'aggregate' as const }
+    }
+
+    return { hasJob: Boolean(p.job_id), via: 'local' as const }
     })
     if (__DEV__ && timed.value) {
       console.log(`[perf] project-workspace.meta: hasJob=${timed.value.hasJob}`)
@@ -656,6 +761,27 @@ export default function ProjectWorkspaceScreen() {
   useEffect(() => {
     if (tab === 'budget' && !viewerIsCompanyOnProject) setTab('overview')
   }, [tab, viewerIsCompanyOnProject])
+
+  // Deep-link capture: /project/[id]?tab=milestones&tool=shotlist&day=2026-09-15
+  useEffect(() => {
+    const nextTab = (Array.isArray(tabParam) ? tabParam[0] : tabParam) as TabId | undefined
+    if (
+      nextTab &&
+      ['overview', 'milestones', 'production', 'crew', 'budget', 'messages', 'files', 'review', 'brief'].includes(
+        nextTab
+      )
+    ) {
+      setTab(nextTab)
+    }
+    const nextTool = Array.isArray(toolParam) ? toolParam[0] : toolParam
+    if (nextTool && ['tasks', 'shotlist', 'callsheet', 'gear', 'sun', 'weather'].includes(nextTool)) {
+      setTool(nextTool)
+    }
+    const nextDay = Array.isArray(dayParam) ? dayParam[0] : dayParam
+    if (typeof nextDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(nextDay.trim())) {
+      setShootDayParam(nextDay.trim().slice(0, 10))
+    }
+  }, [tabParam, toolParam, dayParam])
 
   const canManageCrew = useMemo(() => {
     if (!project || !userId) return false
@@ -1108,15 +1234,7 @@ export default function ProjectWorkspaceScreen() {
     router.replace('/(tabs)/feed')
   }, [router])
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
-    )
-  }
-
-  if (forbidden || !project || !userId) {
+  if (forbidden || (!loading && !project)) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <TouchableOpacity style={styles.backBtn} onPress={exitProjectScreenFallbackHome}>
@@ -1125,6 +1243,26 @@ export default function ProjectWorkspaceScreen() {
         </TouchableOpacity>
         <View style={styles.center}>
           <Text style={styles.miss}>You don’t have access to this project.</Text>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  // Show shell as soon as we have a project (+ auth). Don't keep skeleton while API revalidates.
+  if (!userId || !project) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <TouchableOpacity style={styles.backBtn} onPress={exitProjectScreenFallbackHome}>
+          <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+          <Text style={styles.backLabel}>Close</Text>
+        </TouchableOpacity>
+        <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
+          {project?.title ? (
+            <Text style={{ color: '#fff', fontSize: 20, fontWeight: '800', marginBottom: 12 }}>
+              {project.title}
+            </Text>
+          ) : null}
+          <ScreenListSkeleton rows={6} />
         </View>
       </SafeAreaView>
     )
@@ -1259,6 +1397,22 @@ export default function ProjectWorkspaceScreen() {
                     sunPlannerLockedHint={sunPlannerLockedHint}
                     productionWindowStart={scheduleStart}
                     productionWindowEnd={scheduleEnd}
+                    initialFeature={
+                      tool === 'shotlist'
+                        ? 'shotlist'
+                        : tool === 'callsheet'
+                          ? 'call_sheet'
+                          : tool === 'gear'
+                            ? 'equipment'
+                            : tool === 'tasks'
+                              ? 'tasks'
+                              : tool === 'sun'
+                                ? 'sun'
+                                : tool === 'weather'
+                                  ? 'weather'
+                                  : null
+                    }
+                    initialShootDay={shootDayParam || null}
                   />
                 )}
                 {tab === 'crew' && (

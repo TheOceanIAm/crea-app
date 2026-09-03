@@ -17,6 +17,7 @@ import { ChevronLeft, Trash2 } from 'lucide-react-native'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { queryClient } from '@/lib/queryClient'
+import { authUserIdKey, conversationKey } from '@/lib/queryKeys'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { requestNotifyRecipientPush } from '@/lib/notifyMessagePush'
 import { invalidateDmBadge } from '@/lib/invalidateDmBadge'
@@ -29,15 +30,17 @@ import {
   parseBookingReply,
   type BookingReplyStatus,
 } from '@/lib/bookingDm'
+import {
+  cacheConversation,
+  hydrateConversationFromDisk,
+  persistConversationToDisk,
+  readCachedConversation,
+  type ConversationCache,
+  type ConversationMsgRow,
+} from '@/lib/conversationCache'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
-type MsgRow = {
-  id: string
-  sender_id: string
-  created_at: string
-  body?: string
-  content?: string
-  message?: string
-}
+type MsgRow = ConversationMsgRow
 
 function messageText(m: MsgRow): string {
   const raw = m.body ?? m.content ?? m.message
@@ -62,15 +65,9 @@ async function syncConversationPreviewAfterMessagesChange(conversationId: string
     .eq('id', conversationId)
 }
 
-type ThreadData = {
-  title: string
-  otherUserId: string | null
-  rows: MsgRow[]
-}
+type ThreadData = ConversationCache
 
 let conversationRealtimeTopicSeq = 0
-
-const conversationKey = (conversationId: string) => ['conversation', conversationId] as const
 
 export default function ConversationThreadScreen() {
   const router = useRouter()
@@ -80,7 +77,7 @@ export default function ConversationThreadScreen() {
   const [replyingId, setReplyingId] = useState<string | null>(null)
 
   const authQuery = useQuery({
-    queryKey: ['authUserId'],
+    queryKey: authUserIdKey,
     queryFn: async () => {
       const { data } = await supabase.auth.getUser()
       return data.user?.id ?? null
@@ -90,9 +87,33 @@ export default function ConversationThreadScreen() {
   const me = authQuery.data ?? null
   const enabled = Boolean(conversationId) && Boolean(me)
 
+  useEffect(() => {
+    if (!conversationId) return
+    if (readCachedConversation(conversationId) || queryClient.getQueryData(conversationKey(conversationId))) {
+      return
+    }
+    let cancelled = false
+    void hydrateConversationFromDisk(conversationId).then((disk) => {
+      if (cancelled || !disk) return
+      if (!queryClient.getQueryData(conversationKey(conversationId))) {
+        queryClient.setQueryData(conversationKey(conversationId), disk)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [conversationId])
+
   const threadQuery = useQuery({
     queryKey: conversationKey(conversationId),
     enabled,
+    staleTime: 20_000,
+    placeholderData: (prev) => prev,
+    initialData: (): ThreadData | undefined => {
+      if (!conversationId) return undefined
+      return readCachedConversation(conversationId) ?? undefined
+    },
+    initialDataUpdatedAt: 0,
     queryFn: async (): Promise<ThreadData> => {
       const { data: convo } = await supabase
         .from('conversations')
@@ -122,14 +143,17 @@ export default function ConversationThreadScreen() {
         .order('created_at', { ascending: true })
       if (error) throw new Error(error.message)
 
-      return { title, otherUserId, rows: (msgs ?? []) as MsgRow[] }
+      const data: ThreadData = { title, otherUserId, rows: (msgs ?? []) as MsgRow[] }
+      cacheConversation(conversationId, data)
+      void persistConversationToDisk(conversationId, data)
+      return data
     },
   })
 
   const rows = threadQuery.data?.rows ?? []
   const title = threadQuery.data?.title ?? 'Messages'
   const otherUserId = threadQuery.data?.otherUserId ?? null
-  const loading = authQuery.isLoading || (enabled && threadQuery.isLoading)
+  const loading = authQuery.isLoading || (enabled && threadQuery.isLoading && rows.length === 0)
   const rowCount = rows.length
 
   // Mark incoming unread messages as read (on open + whenever new ones arrive).
@@ -318,9 +342,21 @@ export default function ConversationThreadScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
+            <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+            <Text style={styles.backText}>Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            Messages
+          </Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+          <ScreenListSkeleton rows={8} />
+        </View>
+      </SafeAreaView>
     )
   }
 

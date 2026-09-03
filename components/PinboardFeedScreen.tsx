@@ -111,7 +111,7 @@ export function PinboardFeedScreen() {
       lastPage.length >= PINBOARD_PAGE_SIZE ? lastPage[lastPage.length - 1]?.created_at : undefined,
     initialData: (): InfiniteData<PinboardPost[]> | undefined =>
       userId ? readInitialFeedPages(userId) : undefined,
-    initialDataUpdatedAt: 0,
+    initialDataUpdatedAt: userId && readInitialFeedPages(userId) ? Date.now() : undefined,
   })
 
   // Flatten pages into a deduped list for the FlatList.
@@ -130,7 +130,7 @@ export function PinboardFeedScreen() {
     return out
   }, [feedQuery.data])
 
-  const loading = !userId || feedQuery.isLoading
+  const loading = !userId || (feedQuery.isLoading && posts.length === 0)
   const loadingMore = feedQuery.isFetchingNextPage
   const loadError = feedQuery.error ? (feedQuery.error as Error).message : null
 

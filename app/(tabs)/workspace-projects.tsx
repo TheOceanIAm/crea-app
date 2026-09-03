@@ -31,6 +31,7 @@ import {
 } from '@/lib/freelancerPlan'
 import {
   cacheWorkspaceProjects,
+  hydrateWorkspaceProjectsFromDisk,
   loadWorkspaceProjectsCache,
   persistWorkspaceProjectsToDisk,
   readCachedWorkspaceProjects,
@@ -39,6 +40,7 @@ import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { runTimed } from '@/lib/perfMarks'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 import { ResponsiveScreen } from '@/components/ResponsiveScreen'
+import { prefetchProjectShell } from '@/lib/projectShellCache'
 
 type ListingKind = 'private' | 'customer'
 
@@ -154,10 +156,14 @@ export default function WorkspaceProjectsScreen() {
         return { active: 0, archived: 0 }
       }
 
-      // Instant paint from the warm mem cache while we revalidate in the background.
+      // Instant paint from mem/disk while we revalidate in the background.
       let hydratedCache = false
       if (!opts?.force) {
-        const wc = readCachedWorkspaceProjects(user.id)
+        let wc = readCachedWorkspaceProjects(user.id)
+        if (!wc) {
+          await hydrateWorkspaceProjectsFromDisk(user.id)
+          wc = readCachedWorkspaceProjects(user.id)
+        }
         if (wc && Array.isArray(wc.listings) && Array.isArray(wc.archivedListings)) {
           setAllowed(true)
           setDenyKind(null)
@@ -295,8 +301,10 @@ export default function WorkspaceProjectsScreen() {
 
   const openListing = (item: ProjectListing) => {
     if (item.kind === 'private') {
+      prefetchProjectShell(item.id)
       router.push(`/project/${item.id}` as Href)
     } else if (item.workspaceProjectId) {
+      prefetchProjectShell(item.workspaceProjectId)
       router.push(`/project/${item.workspaceProjectId}` as Href)
     } else {
       router.push(`/(tabs)/jobs/${item.id}` as Href)

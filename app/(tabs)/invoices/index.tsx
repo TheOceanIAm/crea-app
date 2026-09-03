@@ -20,6 +20,7 @@ import { formatDate, invoiceStatusLabel, money, statusVariant } from '@/lib/invo
 import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
 import {
   cacheInvoicesList,
+  hydrateInvoicesListFromDisk,
   loadInvoicesListCache,
   readCachedInvoicesList,
   type InvoiceListRow,
@@ -28,6 +29,7 @@ import {
   type ReadyInvoiceJob,
 } from '@/lib/invoicesListLoad'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 type InvoiceRow = InvoiceListRow
 type BudgetOverview = InvoiceBudgetOverview
@@ -156,8 +158,12 @@ export default function InvoicesListScreen() {
       return
     }
 
-    const cached = readCachedInvoicesList(user.id)
-    if (cached && loading) {
+    let cached = readCachedInvoicesList(user.id)
+    if (!cached) {
+      await hydrateInvoicesListFromDisk(user.id)
+      cached = readCachedInvoicesList(user.id)
+    }
+    if (cached) {
       applyInvoicesCache(
         {
           loading: false,
@@ -186,6 +192,7 @@ export default function InvoicesListScreen() {
           setError,
         }
       )
+      setLoading(false)
     }
 
     const data = await loadInvoicesListCache(user)
@@ -292,9 +299,11 @@ export default function InvoicesListScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
+          <ScreenListSkeleton rows={6} />
+        </View>
+      </SafeAreaView>
     )
   }
 

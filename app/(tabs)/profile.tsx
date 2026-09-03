@@ -122,6 +122,14 @@ import {
   PLATFORM_TRIAL_DAYS,
   platformTrialDaysLeft,
 } from '@/lib/platformTrial'
+import {
+  cacheSettingsProfile,
+  hydrateSettingsProfileFromDisk,
+  persistSettingsProfileToDisk,
+  readCachedSettingsProfile,
+  type SettingsProfileCache,
+} from '@/lib/settingsProfileCache'
+import { peekWarmedOverview } from '@/lib/warmAppCaches'
 
 const SUPPORT_EMAIL = 'support@creaservices.com'
 const SUPPORT_MAILTO = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('CREA App Support')}`
@@ -281,20 +289,33 @@ function CurrentPlanSummary({
   )
 }
 
+function readInitialSettingsBoot(): {
+  loading: boolean
+  userId: string | null
+  cache: SettingsProfileCache | null
+} {
+  const uid = peekWarmedOverview()?.userId ?? null
+  if (!uid) return { loading: true, userId: null, cache: null }
+  const cache = readCachedSettingsProfile(uid)
+  if (!cache) return { loading: true, userId: uid, cache: null }
+  return { loading: false, userId: uid, cache }
+}
+
 export default function ProfileScreen() {
-  const [loading, setLoading] = useState(true)
+  const boot = useRef(readInitialSettingsBoot()).current
+  const [loading, setLoading] = useState(boot.loading)
   const [activeMenu, setActiveMenu] = useState<MenuId>('profile')
-  const [email, setEmail] = useState('')
-  const [role, setRole] = useState('')
+  const [email, setEmail] = useState(boot.cache?.email ?? '')
+  const [role, setRole] = useState(boot.cache?.role ?? '')
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const [editName, setEditName] = useState('')
-  const [headline, setHeadline] = useState('')
-  const [location, setLocation] = useState('')
-  const [bio, setBio] = useState('')
-  const [avatarUrl, setAvatarUrl] = useState('')
-  const [skillsList, setSkillsList] = useState<string[]>([])
-  const [equipmentList, setEquipmentList] = useState<string[]>([])
+  const [editName, setEditName] = useState(boot.cache?.editName ?? '')
+  const [headline, setHeadline] = useState(boot.cache?.headline ?? '')
+  const [location, setLocation] = useState(boot.cache?.location ?? '')
+  const [bio, setBio] = useState(boot.cache?.bio ?? '')
+  const [avatarUrl, setAvatarUrl] = useState(boot.cache?.avatarUrl ?? '')
+  const [skillsList, setSkillsList] = useState<string[]>(boot.cache?.skillsList ?? [])
+  const [equipmentList, setEquipmentList] = useState<string[]>(boot.cache?.equipmentList ?? [])
   const [customSkill, setCustomSkill] = useState('')
   const [customEquip, setCustomEquip] = useState('')
 
@@ -304,29 +325,33 @@ export default function ProfileScreen() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [savingPassword, setSavingPassword] = useState(false)
 
-  const [portfolioWebsite, setPortfolioWebsite] = useState('')
-  const [portfolioInstagram, setPortfolioInstagram] = useState('')
-  const [portfolioLinkedin, setPortfolioLinkedin] = useState('')
-  const [portfolioVimeo, setPortfolioVimeo] = useState('')
-  const [portfolioBehance, setPortfolioBehance] = useState('')
-  const [portfolioProjects, setPortfolioProjects] = useState<PortfolioProject[]>([])
+  const [portfolioWebsite, setPortfolioWebsite] = useState(boot.cache?.portfolioWebsite ?? '')
+  const [portfolioInstagram, setPortfolioInstagram] = useState(boot.cache?.portfolioInstagram ?? '')
+  const [portfolioLinkedin, setPortfolioLinkedin] = useState(boot.cache?.portfolioLinkedin ?? '')
+  const [portfolioVimeo, setPortfolioVimeo] = useState(boot.cache?.portfolioVimeo ?? '')
+  const [portfolioBehance, setPortfolioBehance] = useState(boot.cache?.portfolioBehance ?? '')
+  const [portfolioProjects, setPortfolioProjects] = useState<PortfolioProject[]>(
+    boot.cache?.portfolioProjects ?? []
+  )
   const [projTitle, setProjTitle] = useState('')
   const [projClient, setProjClient] = useState('')
   const [projLink, setProjLink] = useState('')
   const [savingPortfolio, setSavingPortfolio] = useState(false)
 
-  const [bankHolder, setBankHolder] = useState('')
-  const [bankIban, setBankIban] = useState('')
-  const [bankBic, setBankBic] = useState('')
-  const [paypalEmail, setPaypalEmail] = useState('')
-  const [invoiceAddress, setInvoiceAddress] = useState('')
-  const [taxNumber, setTaxNumber] = useState('')
-  const [vatRegistered, setVatRegistered] = useState(false)
+  const [bankHolder, setBankHolder] = useState(boot.cache?.bankHolder ?? '')
+  const [bankIban, setBankIban] = useState(boot.cache?.bankIban ?? '')
+  const [bankBic, setBankBic] = useState(boot.cache?.bankBic ?? '')
+  const [paypalEmail, setPaypalEmail] = useState(boot.cache?.paypalEmail ?? '')
+  const [invoiceAddress, setInvoiceAddress] = useState(boot.cache?.invoiceAddress ?? '')
+  const [taxNumber, setTaxNumber] = useState(boot.cache?.taxNumber ?? '')
+  const [vatRegistered, setVatRegistered] = useState(boot.cache?.vatRegistered ?? false)
   const [savingInvoice, setSavingInvoice] = useState(false)
 
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false)
 
-  const [notif, setNotif] = useState<NotificationSettings>({ ...DEFAULT_NOTIFICATION_SETTINGS })
+  const [notif, setNotif] = useState<NotificationSettings>(
+    boot.cache?.notif ?? { ...DEFAULT_NOTIFICATION_SETTINGS }
+  )
   const [savingNotif, setSavingNotif] = useState(false)
   const [registeringPush, setRegisteringPush] = useState(false)
 
@@ -335,26 +360,63 @@ export default function ProfileScreen() {
   const [connectStatus, setConnectStatus] = useState<FreelancerStripeConnectStatus | null>(null)
   const [connectBusy, setConnectBusy] = useState(false)
 
-  const [subscriptionTier, setSubscriptionTier] = useState<'free' | 'pro'>('free')
+  const [subscriptionTier, setSubscriptionTier] = useState<'free' | 'pro'>(
+    boot.cache?.subscriptionTier ?? 'free'
+  )
   /** ISO from `profiles.trial_ends_at` — platform exploration end (same as web). */
-  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null)
+  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(boot.cache?.trialEndsAt ?? null)
   const [accountCreatedAt, setAccountCreatedAt] = useState<string | null>(null)
   const [switchingTrialPlan, setSwitchingTrialPlan] = useState(false)
   const [stripeCheckoutBusy, setStripeCheckoutBusy] = useState(false)
   const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null)
 
-  const [dayRate, setDayRate] = useState('')
-  const [halfDayRate, setHalfDayRate] = useState('')
-  const [ratesCurrency, setRatesCurrency] = useState('EUR')
-  const [ratesNotes, setRatesNotes] = useState('')
+  const [dayRate, setDayRate] = useState(boot.cache?.dayRate ?? '')
+  const [halfDayRate, setHalfDayRate] = useState(boot.cache?.halfDayRate ?? '')
+  const [ratesCurrency, setRatesCurrency] = useState(boot.cache?.ratesCurrency ?? 'EUR')
+  const [ratesNotes, setRatesNotes] = useState(boot.cache?.ratesNotes ?? '')
   const [savingRates, setSavingRates] = useState(false)
 
-  const [authUserId, setAuthUserId] = useState<string | null>(null)
+  const [authUserId, setAuthUserId] = useState<string | null>(boot.userId)
   const [shareProfileOpen, setShareProfileOpen] = useState(false)
   /** Extra company_profiles columns for completion (industry, size, YouTube, etc.). */
-  const [companyCpExtras, setCompanyCpExtras] = useState<CompanyProfileCompletionRow | null>(null)
-  const profileLoadedAtRef = useRef(0)
-  const PROFILE_STALE_MS = 30_000
+  const [companyCpExtras, setCompanyCpExtras] = useState<CompanyProfileCompletionRow | null>(
+    boot.cache?.companyCpExtras ?? null
+  )
+  const profileLoadedAtRef = useRef(boot.cache ? Date.now() : 0)
+  const PROFILE_STALE_MS = 45_000
+
+  const applySettingsCache = useCallback((c: SettingsProfileCache) => {
+    setEmail(c.email)
+    setEditName(c.editName)
+    setRole(c.role)
+    setHeadline(c.headline)
+    setLocation(c.location)
+    setBio(c.bio)
+    setAvatarUrl(c.avatarUrl)
+    setSkillsList(c.skillsList)
+    setEquipmentList(c.equipmentList)
+    setPortfolioWebsite(c.portfolioWebsite)
+    setPortfolioInstagram(c.portfolioInstagram)
+    setPortfolioLinkedin(c.portfolioLinkedin)
+    setPortfolioVimeo(c.portfolioVimeo)
+    setPortfolioBehance(c.portfolioBehance)
+    setPortfolioProjects(c.portfolioProjects)
+    setBankHolder(c.bankHolder)
+    setBankIban(c.bankIban)
+    setBankBic(c.bankBic)
+    setPaypalEmail(c.paypalEmail)
+    setInvoiceAddress(c.invoiceAddress)
+    setTaxNumber(c.taxNumber)
+    setVatRegistered(c.vatRegistered)
+    setNotif(c.notif)
+    setSubscriptionTier(c.subscriptionTier)
+    setTrialEndsAt(c.trialEndsAt)
+    setDayRate(c.dayRate)
+    setHalfDayRate(c.halfDayRate)
+    setRatesCurrency(c.ratesCurrency)
+    setRatesNotes(c.ratesNotes)
+    setCompanyCpExtras(c.companyCpExtras)
+  }, [])
 
   const freelancer = isFreelancerProfile(role)
   const ceo = isCeoProfile(role)
@@ -556,14 +618,26 @@ export default function ProfileScreen() {
     const cid = user.user_metadata?.stripe_customer_id
     setStripeCustomerId(typeof cid === 'string' && cid.trim() ? cid.trim() : null)
 
-    // Instant paint from dashboard cache while full settings load.
-    const dash = readCachedDashboardOverview(user.id)
-    if (dash && !opts?.force) {
-      if (dash.name) setEditName(dash.name)
-      if (dash.role) setRole(dash.role)
-      if (dash.avatarUrl) setAvatarUrl(dash.avatarUrl)
-      if (dash.trialEndsAt) setTrialEndsAt(dash.trialEndsAt)
-      setLoading(false)
+    // Instant paint from settings disk/mem (or dashboard shell) while full load runs.
+    if (!opts?.force) {
+      let settings = readCachedSettingsProfile(user.id)
+      if (!settings) {
+        await hydrateSettingsProfileFromDisk(user.id)
+        settings = readCachedSettingsProfile(user.id)
+      }
+      if (settings) {
+        applySettingsCache({ ...settings, email: user.email ?? settings.email })
+        setLoading(false)
+      } else {
+        const dash = readCachedDashboardOverview(user.id)
+        if (dash) {
+          if (dash.name) setEditName(dash.name)
+          if (dash.role) setRole(dash.role)
+          if (dash.avatarUrl) setAvatarUrl(dash.avatarUrl)
+          if (dash.trialEndsAt) setTrialEndsAt(dash.trialEndsAt)
+          setLoading(false)
+        }
+      }
     }
 
     const [{ data, error }, { data: freelancerRates, data: freelancerMirror }] = await Promise.all([
@@ -700,11 +774,52 @@ export default function ProfileScreen() {
       if (isFreelancerProfile(resolveAppRole(data?.role, user))) {
         void mirrorProfilesToFreelancerProfiles(user.id)
       }
+
+      const snapshot: SettingsProfileCache = {
+        email: user.email ?? '',
+        editName: data?.name ?? '',
+        role: appRole,
+        headline: resolveCanonicalFreelancerHeadline(
+          typeof data?.headline === 'string' ? data.headline : null,
+          typeof fp?.job_title === 'string' ? fp.job_title : null
+        ),
+        location: String(data?.location ?? fp?.location ?? ''),
+        bio: String(data?.bio ?? fp?.bio ?? ''),
+        avatarUrl: data?.avatar_url ?? '',
+        skillsList: skillsFromProfiles.length > 0 ? skillsFromProfiles : skillsFromFp,
+        equipmentList: equipmentFromProfiles.length > 0 ? equipmentFromProfiles : essentialsFromFp,
+        portfolioWebsite: String(data?.portfolio_website ?? fp?.website ?? ''),
+        portfolioInstagram: String(data?.portfolio_instagram ?? fp?.instagram ?? ''),
+        portfolioLinkedin: String(data?.portfolio_linkedin ?? fp?.linkedin ?? ''),
+        portfolioVimeo: String(data?.portfolio_vimeo ?? fp?.vimeo ?? ''),
+        portfolioBehance: String(data?.portfolio_behance ?? fp?.behance ?? ''),
+        portfolioProjects: mergedPortfolio,
+        bankHolder: String(data?.bank_account_holder ?? fp?.bank_account_holder ?? ''),
+        bankIban: String(data?.bank_iban ?? fp?.bank_iban ?? ''),
+        bankBic: String(data?.bank_bic ?? fp?.bank_bic ?? ''),
+        paypalEmail: String(data?.paypal_email ?? fp?.paypal_email ?? ''),
+        invoiceAddress: String(data?.invoice_address ?? fp?.invoice_address ?? ''),
+        taxNumber: String(data?.tax_number ?? fp?.steuer_id ?? ''),
+        vatRegistered: Boolean(data?.vat_registered ?? fp?.vat_registered),
+        notif: parseNotificationSettings(data?.notification_settings),
+        subscriptionTier: effectiveTier,
+        trialEndsAt: typeof rawTrial === 'string' && rawTrial.trim() ? rawTrial.trim() : null,
+        dayRate: dayRateCanonical != null ? String(dayRateCanonical) : '',
+        halfDayRate: halfDayCanonical != null ? String(halfDayCanonical) : '',
+        ratesCurrency: (data?.rates_currency as string) || 'EUR',
+        ratesNotes: (data?.rates_notes as string) || '',
+        companyCpExtras:
+          appRole === 'company' && companyProfileResult.data && typeof companyProfileResult.data === 'object'
+            ? (companyProfileResult.data as CompanyProfileCompletionRow)
+            : null,
+      }
+      cacheSettingsProfile(user.id, snapshot)
+      void persistSettingsProfileToDisk(user.id, snapshot)
     }
 
     setLoading(false)
     profileLoadedAtRef.current = Date.now()
-  }, [])
+  }, [applySettingsCache])
 
   useFocusEffect(
     useCallback(() => {

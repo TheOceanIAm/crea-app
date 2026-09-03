@@ -34,6 +34,8 @@ import { CREA_API_TAB_TIMEOUT_MS, fetchCreaApi } from '@/lib/creaApiFetch'
 import { companySubscriptionPlanForDb } from '@/lib/companyPlanFromSession'
 import { normalizeFreelancerPlanKey } from '@/lib/billingDisplay'
 import { isCeoUserId } from '@/lib/ceo'
+import { queryClient } from '@/lib/queryClient'
+import { dashboardKey } from '@/lib/queryKeys'
 
 const DISK_OVERVIEW_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -467,6 +469,9 @@ export async function hydrateDashboardOverviewFromDisk(
   if (!hit) return null
   const data = { userId, ...hit, ceoRpcError: sanitizeCeoRpcError(hit.ceoRpcError) }
   cacheDashboardOverview(data)
+  if (!queryClient.getQueryData(dashboardKey(userId))) {
+    queryClient.setQueryData(dashboardKey(userId), data)
+  }
   return data
 }
 

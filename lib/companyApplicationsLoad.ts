@@ -10,6 +10,7 @@ import { isWithinPlatformTrialPeriod } from '@/lib/platformTrial'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { supabase } from '@/lib/supabase'
+import { LIST_DISK_TTL_MS, LIST_MEM_TTL_MS } from '@/lib/cachePolicy'
 
 export type CompanyApplicationRow = {
   id: string
@@ -30,8 +31,8 @@ export type CompanyApplicationsCache = {
   rows: CompanyApplicationRow[]
 }
 
-const MEM_TTL_MS = 35_000
-const DISK_TTL_MS = 24 * 60 * 60 * 1000
+const MEM_TTL_MS = LIST_MEM_TTL_MS
+const DISK_TTL_MS = LIST_DISK_TTL_MS
 
 export function companyApplicationsCacheKey(userId: string): string {
   return `company-applications:${userId}`

@@ -1,14 +1,17 @@
 import { getCache, setCache } from '@/lib/appCache'
 import { loadDirectMessageInbox, type ConvoRow } from '@/lib/messagesInboxLoad'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
+import { queryClient } from '@/lib/queryClient'
+import { messagesKey } from '@/lib/queryKeys'
+import { LIST_DISK_TTL_MS, LIST_MEM_TTL_MS } from '@/lib/cachePolicy'
 
 export type MessagesCache = {
   inbox: ConvoRow[]
   archived: ConvoRow[]
 }
 
-const DISK_TTL_MS = 24 * 60 * 60 * 1000
-const MEM_TTL_MS = 20_000
+const DISK_TTL_MS = LIST_DISK_TTL_MS
+const MEM_TTL_MS = LIST_MEM_TTL_MS
 
 export function messagesCacheKey(userId: string): string {
   return `messages:${userId}`
@@ -30,6 +33,9 @@ export async function hydrateMessagesFromDisk(userId: string): Promise<boolean> 
   const hit = await readPersistedCache<MessagesCache>(messagesDiskKey(userId))
   if (!hit) return false
   cacheMessages(userId, hit)
+  if (!queryClient.getQueryData(messagesKey(userId))) {
+    queryClient.setQueryData(messagesKey(userId), hit)
+  }
   return true
 }
 
@@ -49,6 +55,7 @@ export async function prefetchMessages(userId: string): Promise<void> {
     if (result.ok === false) return
     const data: MessagesCache = { inbox: result.inbox, archived: result.archived }
     cacheMessages(userId, data)
+    queryClient.setQueryData(messagesKey(userId), data)
     void persistMessagesToDisk(userId, data)
   })().finally(() => {
     inflight = null

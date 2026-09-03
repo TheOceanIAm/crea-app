@@ -205,6 +205,10 @@ type Props = {
   /** Inclusive production window from workspace Overview. */
   productionWindowStart?: string | null
   productionWindowEnd?: string | null
+  /** Deep-link / capture: open a production feature directly (hub when null). */
+  initialFeature?: 'sun' | 'weather' | 'shotlist' | 'call_sheet' | 'tasks' | 'equipment' | null
+  /** Deep-link / capture: YYYY-MM-DD shoot day to load. */
+  initialShootDay?: string | null
 }
 
 const PRODUCTION_SECTIONS = [
@@ -256,9 +260,15 @@ export function ProductionTab({
   sunPlannerLockedHint,
   productionWindowStart,
   productionWindowEnd,
+  initialFeature = null,
+  initialShootDay = null,
 }: Props) {
-  const [shootDay, setShootDay] = useState(() => todayLocalISODate())
-  const [dayInput, setDayInput] = useState(() => todayLocalISODate())
+  const bootDay =
+    typeof initialShootDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(initialShootDay.trim())
+      ? initialShootDay.trim().slice(0, 10)
+      : todayLocalISODate()
+  const [shootDay, setShootDay] = useState(bootDay)
+  const [dayInput, setDayInput] = useState(bootDay)
   const [dayPickerOpen, setDayPickerOpen] = useState(false)
   const [windowStart, setWindowStart] = useState(productionWindowStart?.trim().slice(0, 10) ?? '')
   const [windowEnd, setWindowEnd] = useState(productionWindowEnd?.trim().slice(0, 10) ?? '')
@@ -328,7 +338,20 @@ export function ProductionTab({
   const prevCallSheetOpenRef = useRef(false)
   const [exportingPdf, setExportingPdf] = useState(false)
   /** `null` = category hub; otherwise full-screen feature */
-  const [openFeature, setOpenFeature] = useState<ProductionSectionId | null>(null)
+  const [openFeature, setOpenFeature] = useState<ProductionSectionId | null>(initialFeature ?? null)
+
+  useEffect(() => {
+    if (!initialFeature) return
+    setOpenFeature(initialFeature)
+  }, [initialFeature])
+
+  useEffect(() => {
+    if (!initialShootDay) return
+    const v = initialShootDay.trim().slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return
+    setShootDay(v)
+    setDayInput(v)
+  }, [initialShootDay])
   const tasksOutput = (briefOutputs?.tasks ?? '').trim()
   const gearOutput = (briefOutputs?.gear ?? '').trim()
 

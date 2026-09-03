@@ -20,7 +20,7 @@ import { getAuthUser } from '@/lib/getAuthUser'
 import { formatProfileLocationEnglish } from '@/lib/formatProfileLocationEnglish'
 import { supabase } from '@/lib/supabase'
 import { getCache, setCache } from '@/lib/appCache'
-import { talentPoolCacheKey } from '@/lib/talentPoolPrefetch'
+import { hydrateTalentPoolFromDisk, talentPoolCacheKey } from '@/lib/talentPoolPrefetch'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { isFreelancerTalentPoolPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
@@ -28,6 +28,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { ResponsiveScreen } from '@/components/ResponsiveScreen'
 import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
 import { isFreelancerProPlanTier } from '@/lib/freelancerPlan'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 type TalentRow = {
   id: string
@@ -299,6 +300,24 @@ export default function TalentPoolScreen() {
       return
     }
     setMeId(user.id)
+
+    // Paint from mem/disk before role gate so the list isn't blocked on auth round-trips.
+    const cacheKey = talentPoolCacheKey(user.id)
+    if (!opts?.force) {
+      let cached = getCache<TalentPoolCache>(cacheKey)
+      if (!cached) {
+        await hydrateTalentPoolFromDisk(user.id)
+        cached = getCache<TalentPoolCache>(cacheKey)
+      }
+      if (cached) {
+        setRows(cached.rows)
+        setFavoriteProfileIds(cached.favoriteProfileIds)
+        setFolders(cached.folders)
+        setAllowed(true)
+        setLoading(false)
+      }
+    }
+
     const { data: p } = await supabase.from('profiles').select('role, subscription_tier').eq('id', user.id).single()
     const role = resolveAppRole(p?.role, user)
     const plan = resolveFreelancerPlanFromUserAndProfileTier(user, p?.subscription_tier)
@@ -325,17 +344,6 @@ export default function TalentPoolScreen() {
         ? 'freelancer'
         : null
     setFavoriteMode(mode)
-
-    const cacheKey = talentPoolCacheKey(user.id)
-    if (!opts?.force) {
-      const cached = getCache<TalentPoolCache>(cacheKey)
-      if (cached) {
-        setRows(cached.rows)
-        setFavoriteProfileIds(cached.favoriteProfileIds)
-        setFolders(cached.folders)
-        setLoading(false)
-      }
-    }
 
     const [{ rows: fpRows, error: fpErr }, favoritesPayload] = await Promise.all([
       loadFreelancerDirectoryRows({
@@ -577,9 +585,11 @@ export default function TalentPoolScreen() {
 
   if (allowed === null || loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
+          <ScreenListSkeleton rows={6} />
+        </View>
+      </SafeAreaView>
     )
   }
 

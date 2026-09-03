@@ -28,8 +28,14 @@ import {
   toJsonPayload,
 } from '@/lib/availabilityCalendar'
 import { addMonths, buildMonthSlotMatrix, formatMonthTitle } from '@/lib/calendarMonth'
-import { readCachedAvailability, loadAvailabilityCache, cacheAvailability } from '@/lib/availabilityCache'
+import {
+  readCachedAvailability,
+  hydrateAvailabilityFromDisk,
+  loadAvailabilityCache,
+  cacheAvailability,
+} from '@/lib/availabilityCache'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 
 function readInitialAvailability(): {
   loading: boolean
@@ -190,8 +196,12 @@ export default function AvailabilityScreen() {
       return
     }
 
-    const cached = readCachedAvailability(user.id)
-    if (cached && loading) {
+    let cached = readCachedAvailability(user.id)
+    if (!cached) {
+      await hydrateAvailabilityFromDisk(user.id)
+      cached = readCachedAvailability(user.id)
+    }
+    if (cached) {
       setRole(cached.role)
       if (isFreelancerProfile(cached.role)) {
         setDays(cached.days)
@@ -296,9 +306,11 @@ export default function AvailabilityScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FFDC00" size="large" />
-      </View>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
+          <ScreenListSkeleton rows={6} />
+        </View>
+      </SafeAreaView>
     )
   }
 
