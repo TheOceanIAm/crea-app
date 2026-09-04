@@ -14,6 +14,7 @@ import {
 } from 'react-native'
 import { useFocusEffect } from 'expo-router'
 import { Send, Trash2 } from 'lucide-react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
@@ -72,6 +73,8 @@ function mapMergedToRows(
 }
 
 export function ProjectMessagesTab({ projectId, userId }: Props) {
+  const insets = useSafeAreaInsets()
+  const composerPadBottom = Math.max(insets.bottom, 8) + 10
   const [rows, setRows] = useState<Row[]>([])
   const [jobId, setJobId] = useState<string | null>(null)
   const [companyId, setCompanyId] = useState<string | null>(null)
@@ -322,7 +325,7 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
         }}
         ListEmptyComponent={<Text style={styles.empty}>No messages yet — start the thread.</Text>}
       />
-      <View style={styles.composer}>
+      <View style={[styles.composer, { paddingBottom: composerPadBottom }]}>
         <TextInput
           style={styles.input}
           placeholder="Message the crew…"
@@ -380,7 +383,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
-    paddingTop: 8,
+    paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
   },
