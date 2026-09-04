@@ -6,7 +6,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SubscriptionPaywallGate } from '@/components/SubscriptionPaywallGate'
 import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
 import * as Notifications from 'expo-notifications'
-import * as Updates from 'expo-updates'
 import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
@@ -138,16 +137,18 @@ function PushNotificationRouter() {
 function EasUpdateBootstrap() {
   useEffect(() => {
     if (__DEV__ || Platform.OS === 'web') return
-    if (!Updates.isEnabled) return
     let cancelled = false
     void (async () => {
       try {
+        // Lazy require: simulator/dev clients may not ship ExpoUpdates.
+        const Updates = require('expo-updates') as typeof import('expo-updates')
+        if (!Updates.isEnabled) return
         const check = await Updates.checkForUpdateAsync()
         if (cancelled || !check.isAvailable) return
         await Updates.fetchUpdateAsync()
         if (!cancelled) await Updates.reloadAsync()
       } catch {
-        // Offline / misconfigured — keep embedded bundle.
+        // Native module missing, offline, or misconfigured — keep embedded bundle.
       }
     })()
     return () => {

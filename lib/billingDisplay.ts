@@ -17,7 +17,7 @@ export function freelancerPlanLabel(plan: NormalizedFreelancerPlan): string {
 
 export function freelancerPlanDescription(plan: NormalizedFreelancerPlan): string {
   if (plan === 'pro') {
-    return 'Full access: apply to jobs, get invited, post jobs, Sun Planner, Brief AI, Invoicing, and full Workspace.'
+    return 'Full access: apply to jobs, get invited, post jobs, Sun Planner, Invoicing, and full Workspace.'
   }
   return 'Browse all job listings and use Workspace (Call Sheet + Shot List only). Upgrade to Pro to apply, post jobs, and unlock production tools.'
 }

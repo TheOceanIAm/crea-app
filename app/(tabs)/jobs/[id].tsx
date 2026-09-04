@@ -17,7 +17,7 @@ import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
-import { getCreaWebBaseUrl, openProjectOnWeb } from '@/lib/creaWeb'
+import { getCreaWebBaseUrl, openCreaWebPath } from '@/lib/creaWeb'
 import { jobShareUrl } from '@/lib/shareLinks'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 import { freelancerCanApplyToJobs, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
@@ -785,14 +785,14 @@ export default function JobDetailScreen() {
         {showWorkspace && webBase ? (
           <TouchableOpacity
             style={styles.linkBtn}
-            onPress={() => openProjectOnWeb(projectId, '?tool=brief')}
+            onPress={() => void openCreaWebPath(`/jobs/${id}/manage?tab=production`)}
           >
-            <Text style={styles.linkBtnText}>Full Brief AI on web →</Text>
+            <Text style={styles.linkBtnText}>Open workspace on web →</Text>
           </TouchableOpacity>
         ) : null}
         {showWorkspace && !webBase ? (
           <Text style={styles.hint}>
-            Set EXPO_PUBLIC_CREA_WEB_URL in .env to open the web workspace (Brief AI, Frame.io, files).
+            Set EXPO_PUBLIC_CREA_WEB_URL in .env to open the web workspace (Frame.io, files).
           </Text>
         ) : null}
       </ScrollView>

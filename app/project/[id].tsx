@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   TextInput,
   Alert,
   KeyboardAvoidingView,
@@ -13,15 +12,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import {
-  ChevronLeft,
-  Clapperboard,
-  ClipboardList,
-  Phone,
-  Video,
-  Sparkles,
-} from 'lucide-react-native'
-import type { LucideIcon } from 'lucide-react-native'
+import { ChevronLeft } from 'lucide-react-native'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { ensureSoloWorkspaceProjectRow } from '@/lib/ensureSoloWorkspaceProject'
@@ -37,7 +28,6 @@ import { ProjectReviewTab } from '@/components/project/ProjectReviewTab'
 import { ProductionTab } from '@/app/components/project/[projectId]/ProductionTab'
 import { ProjectOverviewAbout } from '@/components/project/ProjectOverviewAbout'
 import { ProjectOverviewProductionWindow } from '@/components/project/ProjectOverviewProductionWindow'
-import { BriefAiFormattedOutput } from '@/components/project/BriefAiFormattedOutput'
 import { countProjectCrewMembers, crewMembersSubLabel } from '@/lib/projectCrewCount'
 import { formatProjectBudgetLine } from '@/lib/budgetFormatting'
 import {
@@ -76,7 +66,6 @@ type TabId =
   | 'messages'
   | 'files'
   | 'review'
-  | 'brief'
 
 type ProjectRow = {
   id: string
@@ -99,45 +88,6 @@ type ProjectRow = {
   scheduling_end_date: string | null
 }
 
-type ApplyBriefProdResult = {
-  ok?: boolean
-  error?: string
-  hint?: string
-  shotsInserted?: number
-  crewUpdated?: number
-  createdDay?: boolean
-}
-
-async function readFunctionErrorDetails(error: unknown): Promise<{ message: string; hint?: string } | null> {
-  const e = error as { context?: { json?: () => Promise<unknown>; text?: () => Promise<string> } } | null
-  const ctx = e?.context
-  if (!ctx) return null
-  try {
-    if (typeof ctx.json === 'function') {
-      const body = (await ctx.json()) as { error?: unknown; hint?: unknown; details?: unknown } | null
-      const msg =
-        typeof body?.error === 'string'
-          ? body.error
-          : typeof body?.details === 'string'
-            ? body.details
-            : null
-      if (msg) {
-        return {
-          message: msg,
-          hint: typeof body?.hint === 'string' ? body.hint : undefined,
-        }
-      }
-    }
-    if (typeof ctx.text === 'function') {
-      const t = await ctx.text()
-      if (t.trim()) return { message: t.trim() }
-    }
-  } catch {
-    // no-op: fall back to generic error below
-  }
-  return null
-}
-
 function parseIsoDateInput(raw: string): string | null {
   const t = raw.trim()
   if (!t) return null
@@ -145,14 +95,6 @@ function parseIsoDateInput(raw: string): string | null {
   const d = new Date(`${t}T12:00:00`)
   if (Number.isNaN(d.getTime())) return null
   return t
-}
-
-function todayLocalISODate(): string {
-  const t = new Date()
-  const y = t.getFullYear()
-  const m = String(t.getMonth() + 1).padStart(2, '0')
-  const d = String(t.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
 }
 
 const BASE_TABS: { id: TabId; label: string }[] = [
@@ -163,34 +105,11 @@ const BASE_TABS: { id: TabId; label: string }[] = [
   { id: 'messages', label: 'Messages' },
   { id: 'files', label: 'Files' },
   { id: 'review', label: 'Review' },
-  { id: 'brief', label: 'Brief AI' },
 ]
 
 /** Same phase labels as web job workspace (`jobs.project_status`). */
 const JOB_PROJECT_PHASES = ['recruiting', 'active', 'completed'] as const
 type JobProjectPhase = (typeof JOB_PROJECT_PHASES)[number]
-
-const TOOLS: { id: string; title: string; sub: string; icon: LucideIcon }[] = [
-  { id: 'shotlist', title: 'Shotlist', sub: 'Shot-by-shot breakdown.', icon: Clapperboard },
-  {
-    id: 'tasks',
-    title: 'Task breakdown',
-    sub: 'Phases, RACI-style tables & checklists.',
-    icon: ClipboardList,
-  },
-  {
-    id: 'callsheet',
-    title: 'Call sheet',
-    sub: 'Timeline, travel legs, distances & crew calls.',
-    icon: Phone,
-  },
-  {
-    id: 'gear',
-    title: 'Equipment list',
-    sub: 'Qty, specs, tables by department.',
-    icon: Video,
-  },
-]
 
 export default function ProjectWorkspaceScreen() {
   const { id, tab: tabParam, tool: toolParam, day: dayParam } = useLocalSearchParams<{
@@ -218,7 +137,7 @@ export default function ProjectWorkspaceScreen() {
     bootShell?.jobOwnerCompanyId ?? null
   )
   const [pipelineStatCount, setPipelineStatCount] = useState(0)
-  const initialTab = (Array.isArray(tabParam) ? tabParam[0] : tabParam) as TabId | undefined
+  const initialTabRaw = Array.isArray(tabParam) ? tabParam[0] : tabParam
   const initialTool = Array.isArray(toolParam) ? toolParam[0] : toolParam
   const initialDayRaw = Array.isArray(dayParam) ? dayParam[0] : dayParam
   const initialDay =
@@ -226,12 +145,14 @@ export default function ProjectWorkspaceScreen() {
       ? initialDayRaw.trim().slice(0, 10)
       : ''
   const [tab, setTab] = useState<TabId>(
-    initialTab &&
-      ['overview', 'milestones', 'production', 'crew', 'budget', 'messages', 'files', 'review', 'brief'].includes(
-        initialTab
-      )
-      ? initialTab
-      : 'overview'
+    initialTabRaw === 'brief'
+      ? 'production'
+      : initialTabRaw &&
+          ['overview', 'milestones', 'production', 'crew', 'budget', 'messages', 'files', 'review'].includes(
+            initialTabRaw
+          )
+        ? (initialTabRaw as TabId)
+        : 'overview'
   )
   const [tool, setTool] = useState<string>(
     initialTool && ['tasks', 'shotlist', 'callsheet', 'gear', 'sun', 'weather'].includes(initialTool)
@@ -239,22 +160,17 @@ export default function ProjectWorkspaceScreen() {
       : ''
   )
   const [shootDayParam, setShootDayParam] = useState<string>(initialDay)
-  const [briefText, setBriefText] = useState(bootShell?.project.brief_ai_context ?? '')
   const [overviewSummary, setOverviewSummary] = useState(bootShell?.overviewSummary ?? '')
   const [overviewBudgetAmount, setOverviewBudgetAmount] = useState('')
   const [overviewBudgetType, setOverviewBudgetType] = useState('')
   const [overviewStatus, setOverviewStatus] = useState('active')
   const [overviewEditOpen, setOverviewEditOpen] = useState(false)
-  const [savingBrief, setSavingBrief] = useState(false)
   const [savingOverview, setSavingOverview] = useState(false)
   const [savingProjectSummary, setSavingProjectSummary] = useState(false)
   const [savingJobPhaseStatus, setSavingJobPhaseStatus] = useState(false)
-  const [generating, setGenerating] = useState(false)
   const [scheduleStart, setScheduleStart] = useState('')
   const [scheduleEnd, setScheduleEnd] = useState('')
   const [savingSchedule, setSavingSchedule] = useState(false)
-  const [productionApplyDate, setProductionApplyDate] = useState('')
-  const [applyingProd, setApplyingProd] = useState(false)
   const bodyScrollRef = useRef<ScrollView | null>(null)
 
   const refreshProjectCounts = useCallback(async () => {
@@ -348,7 +264,6 @@ export default function ProjectWorkspaceScreen() {
       setOverviewSummary(shellHit.overviewSummary)
       setIsPrivateWorkspace(shellHit.isPrivateWorkspace)
       setJobOwnerCompanyId(shellHit.jobOwnerCompanyId)
-      setBriefText(shellHit.project.brief_ai_context ?? '')
       setLoading(false)
     }
 
@@ -470,7 +385,6 @@ export default function ProjectWorkspaceScreen() {
           typeof shellOnly.job?.company_id === 'string' ? shellOnly.job.company_id : ap.company_id
         )
         setProject(ap)
-        setBriefText(ap.brief_ai_context ?? '')
         const aggOverview =
           (shellOnly.workspaceSummaryDraft || '').trim() ||
           (typeof shellOnly.job?.description === 'string' ? shellOnly.job.description.trim() : '') ||
@@ -607,7 +521,6 @@ export default function ProjectWorkspaceScreen() {
     setSunPlannerLockedHint(nextSunHint)
     setProductionWeatherLockedHint(nextWeatherHint)
     setProject({ ...p, status: mergedStatus })
-    setBriefText(p.brief_ai_context ?? '')
     const workspaceSummary =
       p.brief_ai_outputs && typeof p.brief_ai_outputs.workspace_summary === 'string'
         ? p.brief_ai_outputs.workspace_summary.trim()
@@ -671,7 +584,6 @@ export default function ProjectWorkspaceScreen() {
         typeof shell.job?.company_id === 'string' ? shell.job.company_id : ap.company_id
       )
       setProject(ap)
-      setBriefText(ap.brief_ai_context ?? '')
       const aggOverview =
         (shell.workspaceSummaryDraft || '').trim() ||
         (typeof shell.job?.description === 'string' ? shell.job.description.trim() : '') ||
@@ -727,13 +639,6 @@ export default function ProjectWorkspaceScreen() {
     if (tab === 'overview') void refreshProjectCounts()
   }, [tab, refreshProjectCounts])
 
-
-  useEffect(() => {
-    if (!project) return
-    // Match Production tab default (shoot list loads "today" until user changes the day there).
-    setProductionApplyDate(todayLocalISODate())
-  }, [project?.id])
-
   const viewerIsCompanyOnProject = Boolean(project && userId && project.company_id === userId)
 
   const linkedJobId = useMemo(() => {
@@ -764,14 +669,17 @@ export default function ProjectWorkspaceScreen() {
 
   // Deep-link capture: /project/[id]?tab=milestones&tool=shotlist&day=2026-09-15
   useEffect(() => {
-    const nextTab = (Array.isArray(tabParam) ? tabParam[0] : tabParam) as TabId | undefined
-    if (
-      nextTab &&
-      ['overview', 'milestones', 'production', 'crew', 'budget', 'messages', 'files', 'review', 'brief'].includes(
-        nextTab
-      )
-    ) {
-      setTab(nextTab)
+    const nextTabRaw = Array.isArray(tabParam) ? tabParam[0] : tabParam
+    if (nextTabRaw === 'brief') {
+      setTab('production')
+    } else {
+      const nextTab = nextTabRaw as TabId | undefined
+      if (
+        nextTab &&
+        ['overview', 'milestones', 'production', 'crew', 'budget', 'messages', 'files', 'review'].includes(nextTab)
+      ) {
+        setTab(nextTab)
+      }
     }
     const nextTool = Array.isArray(toolParam) ? toolParam[0] : toolParam
     if (nextTool && ['tasks', 'shotlist', 'callsheet', 'gear', 'sun', 'weather'].includes(nextTool)) {
@@ -811,99 +719,6 @@ export default function ProjectWorkspaceScreen() {
       budget_currency: project.budget_currency,
     })
   }, [project])
-
-  const currentOutput = project?.brief_ai_outputs?.[tool] ?? ''
-  const canSyncProductionTool = tool === 'shotlist' || tool === 'callsheet'
-
-  const invokeApplyBriefProduction = async (
-    replaceShots: boolean,
-    opts?: { date?: string; silentSuccess?: boolean }
-  ) => {
-    if (!project || !canSyncProductionTool) return
-    const d = parseIsoDateInput((opts?.date ?? productionApplyDate).trim())
-    if (!d) {
-      Alert.alert('Date', 'Enter the shoot / production day as YYYY-MM-DD.')
-      return
-    }
-    setApplyingProd(true)
-    const { data, error } = await supabase.functions.invoke<ApplyBriefProdResult>('apply-brief-to-production', {
-      body: { projectId: project.id, tool, shootDate: d, replaceShots },
-    })
-    setApplyingProd(false)
-    if (error) {
-      const details = await readFunctionErrorDetails(error)
-      Alert.alert(
-        'Apply failed',
-        details
-          ? [details.message, details.hint].filter(Boolean).join('\n\n')
-          : `${error.message}\n\nDeploy the apply-brief-to-production Edge Function (see deploy-supabase.sh) and set ANTHROPIC_API_KEY.`
-      )
-      return
-    }
-    if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
-      const o = data as { error?: string; hint?: string }
-      Alert.alert('Apply', [o.error, o.hint].filter(Boolean).join('\n\n'))
-      return
-    }
-    if (data?.ok && tool === 'shotlist' && typeof data.shotsInserted === 'number') {
-      if (!opts?.silentSuccess) {
-        Alert.alert(
-          'Shot list',
-          `${data.shotsInserted} shot(s) for ${d}. Open the Production tab → Shotlist (same calendar day).`
-        )
-      }
-      return
-    }
-    if (data?.ok && tool === 'callsheet') {
-      const parts = [`Saved for ${d}.`]
-      if (data.createdDay) parts.push('A production day was created.')
-      parts.push(`${data.crewUpdated ?? 0} crew row(s) updated in the call sheet.`)
-      if (!opts?.silentSuccess) Alert.alert('Call sheet', parts.join(' '))
-      return
-    }
-    if (!opts?.silentSuccess) Alert.alert('Apply', 'Unexpected response from server.')
-  }
-
-  const onApplyShotlistChoices = () => {
-    if (!currentOutput.trim()) {
-      Alert.alert('Nothing to apply', 'Generate and save a shot list first.')
-      return
-    }
-    const d = parseIsoDateInput(productionApplyDate.trim())
-    if (!d) {
-      Alert.alert('Date', 'Enter YYYY-MM-DD.')
-      return
-    }
-    Alert.alert(
-      'Apply to Production',
-      `Add Brief AI shots to the Production shot list for ${d}. Append keeps existing rows for that day; Replace clears them first.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Append', onPress: () => void invokeApplyBriefProduction(false) },
-        { text: 'Replace day', style: 'destructive', onPress: () => void invokeApplyBriefProduction(true) },
-      ]
-    )
-  }
-
-  const onApplyCallsheet = () => {
-    if (!currentOutput.trim()) {
-      Alert.alert('Nothing to apply', 'Generate and save a call sheet first.')
-      return
-    }
-    const d = parseIsoDateInput(productionApplyDate.trim())
-    if (!d) {
-      Alert.alert('Date', 'Enter YYYY-MM-DD.')
-      return
-    }
-    Alert.alert(
-      'Apply to Production',
-      `Merges call times into the production day for ${d}. If no day exists yet, it is created when you are the company on this project.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Apply', onPress: () => void invokeApplyBriefProduction(false) },
-      ]
-    )
-  }
 
   const saveSchedule = async () => {
     if (!project) return
@@ -971,21 +786,6 @@ export default function ProjectWorkspaceScreen() {
       prev ? { ...prev, scheduling_start_date: null, scheduling_end_date: null } : prev
     )
     Alert.alert('Cleared', 'Production dates removed.')
-  }
-
-  const saveBrief = async () => {
-    if (!project) return
-    setSavingBrief(true)
-    const { error } = await supabase.rpc('project_update_brief', {
-      p_project_id: project.id,
-      p_context: briefText,
-    })
-    setSavingBrief(false)
-    if (error) {
-      Alert.alert('Save failed', error.message)
-      return
-    }
-    setProject((prev) => (prev ? { ...prev, brief_ai_context: briefText.trim() || null } : prev))
   }
 
   const persistJobProjectPhase = async (next: JobProjectPhase) => {
@@ -1141,70 +941,6 @@ export default function ProjectWorkspaceScreen() {
     return true
   }
 
-  const onGenerate = async () => {
-    if (!project) return
-    setGenerating(true)
-    const { error: saveErr } = await supabase.rpc('project_update_brief', {
-      p_project_id: project.id,
-      p_context: briefText,
-    })
-    if (saveErr) {
-      setGenerating(false)
-      Alert.alert('Save failed', saveErr.message)
-      return
-    }
-    setProject((prev) => (prev ? { ...prev, brief_ai_context: briefText.trim() || null } : prev))
-
-    const { data, error } = await supabase.functions.invoke<{ content?: string; error?: string; hint?: string }>(
-      'brief-ai',
-      { body: { projectId: project.id, tool, context: briefText } }
-    )
-    setGenerating(false)
-
-    if (error) {
-      const details = await readFunctionErrorDetails(error)
-      Alert.alert(
-        'Generation failed',
-        details
-          ? [details.message, details.hint].filter(Boolean).join('\n\n')
-          : `${error.message}\n\nDeploy the brief-ai Edge Function and set ANTHROPIC_API_KEY if you have not yet.`
-      )
-      return
-    }
-
-    if (data && typeof data === 'object' && 'error' in data && data.error) {
-      Alert.alert('Brief AI', String(data.error))
-      return
-    }
-
-    const content = data?.content
-    if (typeof content !== 'string' || !content.trim()) {
-      Alert.alert('Brief AI', 'No content returned. Check function logs and Anthropic billing.')
-      return
-    }
-
-    const { error: mergeErr } = await supabase.rpc('project_merge_brief_output', {
-      p_project_id: project.id,
-      p_tool: tool,
-      p_content: content,
-    })
-    if (mergeErr) {
-      Alert.alert('Could not save output', mergeErr.message)
-      return
-    }
-
-    setProject((prev) =>
-      prev
-        ? {
-            ...prev,
-            brief_ai_outputs: { ...(prev.brief_ai_outputs ?? {}), [tool]: content },
-          }
-        : prev
-    )
-    if (workspaceOnlyPlan && (tool === 'shotlist' || tool === 'callsheet')) {
-      await invokeApplyBriefProduction(false)
-    }
-  }
   const focusOverviewSummary = useCallback(() => {
     if (tab !== 'overview') return
     // Wait a tick so keyboard animation starts before we reposition the form.
@@ -1344,25 +1080,13 @@ export default function ProjectWorkspaceScreen() {
           <View style={styles.tabRow}>
             {tabs.map((t) => {
               const active = tab === t.id
-              const isBrief = t.id === 'brief'
               return (
                 <TouchableOpacity
                   key={t.id}
                   onPress={() => setTab(t.id)}
                   style={[styles.tab, active && styles.tabActive]}
                 >
-                  {isBrief ? (
-                    <View style={styles.tabInner}>
-                      <Sparkles
-                        size={12}
-                        color={active ? '#FFDC00' : 'rgba(255,220,0,0.45)'}
-                        strokeWidth={ICON_STROKE}
-                      />
-                      <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
-                    </View>
-                  ) : (
-                    <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
-                  )}
+                  <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
                 </TouchableOpacity>
               )
             })}
@@ -1389,14 +1113,13 @@ export default function ProjectWorkspaceScreen() {
                     projectTitle={project.title}
                     projectLocation={project.location}
                     companyId={project.company_id}
-                    briefContext={project.brief_ai_context}
-                    briefOutputs={project.brief_ai_outputs}
                     canUseProductionWeather={productionWeatherEnabled}
                     canUseSunPlanner={sunPlannerEnabled}
                     productionWeatherLockedHint={productionWeatherLockedHint}
                     sunPlannerLockedHint={sunPlannerLockedHint}
                     productionWindowStart={scheduleStart}
                     productionWindowEnd={scheduleEnd}
+                    jobId={project.job_id}
                     initialFeature={
                       tool === 'shotlist'
                         ? 'shotlist'
@@ -1601,130 +1324,6 @@ export default function ProjectWorkspaceScreen() {
               />
             )}
 
-            {tab === 'brief' && (
-              <>
-                <Text style={styles.sectionLabel}>Production documents</Text>
-                <View style={styles.toolGrid}>
-                  {TOOLS.map((x) => {
-                    const Icon = x.icon
-                    const active = tool === x.id
-                    return (
-                      <TouchableOpacity
-                        key={x.id}
-                        style={[styles.toolCard, active && styles.toolCardActive]}
-                        onPress={() => setTool(x.id)}
-                      >
-                        <Icon size={26} color="#ffffff" strokeWidth={ICON_STROKE} />
-                        <Text style={styles.toolTitle}>{x.title}</Text>
-                        <Text style={styles.toolSub}>{x.sub}</Text>
-                      </TouchableOpacity>
-                    )
-                  })}
-                </View>
-
-                <View style={styles.contextCard}>
-                  <Text style={styles.contextLabel}>
-                    ADDITIONAL CONTEXT <Text style={styles.optional}>(optional)</Text>
-                  </Text>
-                  <TextInput
-                    style={[styles.briefInput, styles.briefInputInCard]}
-                    multiline
-                    placeholder="Describe creative direction, references, deliverables, schedule…"
-                    placeholderTextColor="rgba(255,255,255,0.25)"
-                    value={briefText}
-                    onChangeText={setBriefText}
-                    textAlignVertical="top"
-                  />
-                </View>
-                <View style={styles.briefActions}>
-                  <TouchableOpacity
-                    style={[styles.saveBtn, savingBrief && styles.btnDim]}
-                    onPress={saveBrief}
-                    disabled={savingBrief}
-                  >
-                    <Text style={styles.saveBtnText}>{savingBrief ? 'Saving…' : 'Save context'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.genBtn, generating && styles.btnDim]}
-                    onPress={onGenerate}
-                    disabled={generating}
-                  >
-                    {generating ? (
-                      <ActivityIndicator color="#0a0a0a" />
-                    ) : (
-                      <Text style={styles.genBtnText}>Generate in app</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-
-                {!!currentOutput && (
-                  <View style={styles.outputBox}>
-                    <View style={styles.outputBoxHead}>
-                      <View style={styles.outputIconWrap}>
-                        <Sparkles size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
-                      </View>
-                      <View style={styles.outputBoxHeadText}>
-                        <Text style={styles.outputLabel}>Generated</Text>
-                        <Text style={styles.outputToolName}>{TOOLS.find((t) => t.id === tool)?.title}</Text>
-                      </View>
-                    </View>
-                    <BriefAiFormattedOutput
-                      content={currentOutput}
-                      renderMode={tool === 'shotlist' ? 'shot-cards' : 'default'}
-                    />
-                  </View>
-                )}
-
-                {canSyncProductionTool ? (
-                  <View style={styles.prodSyncCard}>
-                    <View style={styles.prodSyncHead}>
-                      <View style={styles.prodSyncIconWrap}>
-                        <Sparkles size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-                      </View>
-                      <View style={styles.prodSyncHeadText}>
-                        <Text style={styles.prodSyncKicker}>Production sync</Text>
-                        <Text style={styles.prodSyncLead}>
-                          Push this tool into the same Production tables as the app.
-                        </Text>
-                      </View>
-                    </View>
-                    <Text style={styles.prodSyncSub}>
-                      Use the same date as Production → Shotlist / Call sheet (Load day). After Generate, tap Apply —
-                      nothing copies by itself.
-                    </Text>
-                    <TextInput
-                      style={styles.scheduleInput}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor="rgba(255,255,255,0.25)"
-                      value={productionApplyDate}
-                      onChangeText={setProductionApplyDate}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      editable={!applyingProd}
-                    />
-                    <TouchableOpacity
-                      style={[
-                        styles.prodSyncBtn,
-                        (!currentOutput.trim() || applyingProd) && styles.btnDim,
-                      ]}
-                      onPress={tool === 'shotlist' ? onApplyShotlistChoices : onApplyCallsheet}
-                      disabled={!currentOutput.trim() || applyingProd}
-                    >
-                      {applyingProd ? (
-                        <ActivityIndicator color="#FFDC00" />
-                      ) : (
-                        <Text style={styles.prodSyncBtnText}>
-                          {tool === 'shotlist' ? 'Apply shot list to Production…' : 'Apply call sheet to Production…'}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                    {!currentOutput.trim() ? (
-                      <Text style={styles.prodSyncHint}>Generate first — then Apply appears here.</Text>
-                    ) : null}
-                  </View>
-                ) : null}
-              </>
-            )}
             </ScrollView>
           )}
         </View>

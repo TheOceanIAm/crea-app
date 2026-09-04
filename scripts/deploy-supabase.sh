@@ -58,6 +58,9 @@ SQL_FILES=(
   ceo_dashboard_rpc.sql
   ceo_admin_rpcs.sql
   production_workspace.sql
+  production_tasks_equipment.sql
+  production_tasks_assignee.sql
+  production_equipment_price.sql
   ceo_project_workspace_access.sql
   ceo_list_rpc_hide_login_emails.sql
   extend_profile_public_features.sql

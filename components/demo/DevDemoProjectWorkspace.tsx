@@ -14,16 +14,10 @@ import { useRouter } from 'expo-router'
 import {
   ChevronLeft,
   ChevronRight,
-  Clapperboard,
-  ClipboardList,
-  Phone,
-  Video,
-  Sparkles,
   Check,
   Plus,
   Trash2,
 } from 'lucide-react-native'
-import type { LucideIcon } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import {
   PROJECT_STATUS_PILL,
@@ -33,7 +27,6 @@ import {
 import { ProductionWeatherSection } from '@/components/project/ProductionWeatherSection'
 import { ProjectOverviewAbout } from '@/components/project/ProjectOverviewAbout'
 import { formatProjectBudgetLine } from '@/lib/budgetFormatting'
-import { BriefAiFormattedOutput } from '@/components/project/BriefAiFormattedOutput'
 
 type TabId =
   | 'overview'
@@ -43,7 +36,6 @@ type TabId =
   | 'messages'
   | 'files'
   | 'review'
-  | 'brief'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -53,24 +45,6 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'messages', label: 'Messages' },
   { id: 'files', label: 'Files' },
   { id: 'review', label: 'Review' },
-  { id: 'brief', label: 'Brief AI' },
-]
-
-const TOOLS: { id: string; title: string; sub: string; icon: LucideIcon }[] = [
-  { id: 'shotlist', title: 'Shotlist', sub: 'Shot-by-shot breakdown.', icon: Clapperboard },
-  {
-    id: 'tasks',
-    title: 'Task breakdown',
-    sub: 'Phases, RACI-style tables & checklists.',
-    icon: ClipboardList,
-  },
-  { id: 'callsheet', title: 'Call sheet', sub: 'Timeline, travel legs, distances & crew calls.', icon: Phone },
-  {
-    id: 'gear',
-    title: 'Equipment list',
-    sub: 'Qty, specs, tables by department.',
-    icon: Video,
-  },
 ]
 
 type ShotDemo = { id: string; scene: string; desc: string; lens: string; status: string }
@@ -97,11 +71,15 @@ export function DevDemoProjectWorkspace() {
     { id: 's1', scene: '1', desc: 'Establishing wide', lens: '24mm', status: 'done' },
     { id: 's2', scene: '2A', desc: 'Product hero', lens: '50mm', status: 'rolling' },
   ])
-  const [tool, setTool] = useState('tasks')
-  const [briefText, setBriefText] = useState('Key visual: warm, high contrast. Deliver 16:9 master.')
-  const [briefOut, setBriefOut] = useState<Record<string, string>>({})
+  const briefText = 'Key visual: warm, high contrast. Deliver 16:9 master.'
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('')
-  const [prodFeature, setProdFeature] = useState<null | 'weather' | 'shotlist' | 'call'>(null)
+  const [prodFeature, setProdFeature] = useState<null | 'weather' | 'shotlist' | 'call' | 'tasks' | 'equipment'>(null)
+  const [demoTasks, setDemoTasks] = useState([
+    { id: 't1', title: 'Confirm location access', notes: '', done: false },
+  ])
+  const [demoGear, setDemoGear] = useState([{ id: 'g1', name: 'Alexa Mini', qty: '1', notes: '' }])
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newGearName, setNewGearName] = useState('')
 
   useEffect(() => {
     if (tab !== 'production') setProdFeature(null)
@@ -155,69 +133,6 @@ export function DevDemoProjectWorkspace() {
   const demoProjectStatus = 'in_progress'
   const demoPillTheme = PROJECT_STATUS_PILL[projectStatusVariant(demoProjectStatus)]
 
-  const genBrief = () => {
-    const samples: Record<string, string> = {
-      shotlist: `## Demo shotlist (rich preview — real app uses Brief AI + your context)
-
-### Back street — pre-dawn
-1. WS — Empty canyon of buildings, sodium + blue hour, talent as small silhouette downstage, 24mm, nat sound city hum
-2. MS — Walk-up from behind, coat collar + breath visible, 35mm handheld, lav rustle check
-3. CU — Laces hitting wet pavement, macro / 85mm close, foley-ready
-4. MCU — Profile, available light only, catch car pass bokeh BG
-
-### Subway entrance — morning rush building
-5. WS — Wide chart of stairs + signage geometry, talent paused mid-stride, 18mm distortion intentional
-6. MS — Turnstile push, hands + card, 35mm, nat sound turnstile beep
-7. CU — Metro card texture + thumb pressure, insert
-8. MS — Over-shoulder into dark mouth of tunnel, exposure hold for grade
-
-### Rooftop — skyline
-9. WS — Talent at parapet, skyline read, golden rim, 24mm on sticks, wind in mics note
-10. MS — Hair + fabric whip, 50mm, high shutter for crisp motion
-11. CU — Eyes searching frame R, catchlight from rising sun
-12. ECU — Jewelry / watch glint (if in brief), macro
-13. WS — Silhouette step-off frame as beat to black, music drop placeholder`,
-      tasks: `## Prep & permits
-| Task | Owner | Due |
-|------|-------|-----|
-| Location agreements | PM | TBD |
-| COI upload | LP | TBD |
-
-- [ ] Tech scout confirmed
-- [ ] Call sheet v1
-
-## Shoot
-- **Camera** — check media twice
-  - Spare batteries charged`,
-      callsheet: `## Demo call sheet
-### Day timeline
-| Time | What |
-|------|------|
-| 07:00 | General crew call — Studio A |
-| 08:30 | Camera blocking |
-| 12:30–13:15 | Lunch |
-| 17:30 | Est. wrap |
-
-### Locations
-- **Studio A** — Address TBD; crew parking Gate 2.
-
-### Travel legs
-| From | To | Dist. | Drive | Suggested depart |
-|------|----|-------|-------|------------------|
-| Studio A | City ext. | ~12 km (approx.) | 25 min (40 rush) | 14:05 for 14:40 block |`,
-      gear: `## Camera & media
-| Item | Qty | Notes |
-|------|-----|-------|
-| FX6 body | 1 | TBD backup |
-| CFexpress Type A | 6 | spare |
-
-## Lenses & filters
-- 24mm / 50mm / 85mm — **PL mount** (confirm)
-  - ND **0.6–1.2** slip-in`,
-    }
-    setBriefOut((o) => ({ ...o, [tool]: samples[tool] ?? samples.tasks }))
-  }
-
   const statsRow = (
     <View style={styles.statsRow}>
       <View style={styles.statCard}>
@@ -266,7 +181,7 @@ export function DevDemoProjectWorkspace() {
   const banner = (
     <View style={styles.devBanner}>
       <Text style={styles.devBannerText}>
-        DEV demo workspace — local UI only, nothing is saved to Supabase. To test Brief AI + Production against your
+        DEV demo workspace — local UI only, nothing is saved to Supabase. To test Production against your
         database, set EXPO_PUBLIC_DEMO_PROJECT_ID to a real project UUID in .env.local and open /project/demo again.
       </Text>
     </View>
@@ -290,21 +205,13 @@ export function DevDemoProjectWorkspace() {
         <View style={styles.tabRow}>
           {TABS.map((t) => {
             const active = tab === t.id
-            const isBrief = t.id === 'brief'
             return (
               <TouchableOpacity
                 key={t.id}
                 onPress={() => setTab(t.id)}
                 style={[styles.tab, active && styles.tabActive]}
               >
-                {isBrief ? (
-                  <View style={styles.tabInner}>
-                    <Sparkles size={12} color={active ? '#0a0a0a' : '#FFDC00'} strokeWidth={ICON_STROKE} />
-                    <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
-                  </View>
-                ) : (
-                  <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
-                )}
+                <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
               </TouchableOpacity>
             )
           })}
@@ -438,6 +345,28 @@ export function DevDemoProjectWorkspace() {
                         </View>
                         <ChevronRight size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
                       </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.prodCategoryCard}
+                        onPress={() => setProdFeature('tasks')}
+                        activeOpacity={0.88}
+                      >
+                        <View style={styles.prodCategoryText}>
+                          <Text style={styles.prodCategoryTitle}>Tasks</Text>
+                          <Text style={styles.prodCategorySub}>Manual checklist (demo)</Text>
+                        </View>
+                        <ChevronRight size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.prodCategoryCard}
+                        onPress={() => setProdFeature('equipment')}
+                        activeOpacity={0.88}
+                      >
+                        <View style={styles.prodCategoryText}>
+                          <Text style={styles.prodCategoryTitle}>Equipment</Text>
+                          <Text style={styles.prodCategorySub}>Manual kit list (demo)</Text>
+                        </View>
+                        <ChevronRight size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                      </TouchableOpacity>
                     </ScrollView>
                   ) : (
                     <View style={styles.prodDetailRoot}>
@@ -447,7 +376,15 @@ export function DevDemoProjectWorkspace() {
                           <Text style={styles.prodBackText}>Categories</Text>
                         </TouchableOpacity>
                         <Text style={styles.prodDetailTitle} numberOfLines={1}>
-                          {prodFeature === 'weather' ? 'Weather' : prodFeature === 'shotlist' ? 'Shotlist' : 'Call Sheet'}
+                          {prodFeature === 'weather'
+                            ? 'Weather'
+                            : prodFeature === 'shotlist'
+                              ? 'Shotlist'
+                              : prodFeature === 'call'
+                                ? 'Call Sheet'
+                                : prodFeature === 'tasks'
+                                  ? 'Tasks'
+                                  : 'Equipment'}
                         </Text>
                       </View>
                       <ScrollView style={styles.scroll} contentContainerStyle={styles.pad} showsVerticalScrollIndicator={false}>
@@ -484,6 +421,64 @@ export function DevDemoProjectWorkspace() {
                             ))}
                           </>
                         ) : null}
+                        {prodFeature === 'tasks' ? (
+                          <>
+                            <Text style={styles.hint}>Checklist for this production. Shared with the whole team.</Text>
+                            <TextInput
+                              style={styles.briefInput}
+                              placeholder="Task"
+                              placeholderTextColor="rgba(255,255,255,0.25)"
+                              value={newTaskTitle}
+                              onChangeText={setNewTaskTitle}
+                              onSubmitEditing={() => {
+                                const t = newTaskTitle.trim()
+                                if (!t) return
+                                setDemoTasks((prev) => [...prev, { id: `t-${Date.now()}`, title: t, notes: '', done: false }])
+                                setNewTaskTitle('')
+                              }}
+                            />
+                            {demoTasks.map((row) => (
+                              <TouchableOpacity
+                                key={row.id}
+                                style={styles.shotRow}
+                                onPress={() =>
+                                  setDemoTasks((prev) =>
+                                    prev.map((r) => (r.id === row.id ? { ...r, done: !r.done } : r))
+                                  )
+                                }
+                              >
+                                <Text style={[styles.shotLine, row.done && { textDecorationLine: 'line-through', opacity: 0.45 }]}>
+                                  {row.done ? '✓  ' : '○  '}
+                                  {row.title}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </>
+                        ) : null}
+                        {prodFeature === 'equipment' ? (
+                          <>
+                            <Text style={styles.hint}>Kit list for this production. Shared with the whole team.</Text>
+                            <TextInput
+                              style={styles.briefInput}
+                              placeholder="Item"
+                              placeholderTextColor="rgba(255,255,255,0.25)"
+                              value={newGearName}
+                              onChangeText={setNewGearName}
+                              onSubmitEditing={() => {
+                                const t = newGearName.trim()
+                                if (!t) return
+                                setDemoGear((prev) => [...prev, { id: `g-${Date.now()}`, name: t, qty: '', notes: '' }])
+                                setNewGearName('')
+                              }}
+                            />
+                            {demoGear.map((row) => (
+                              <Text key={row.id} style={styles.line}>
+                                {row.name}
+                                {row.qty ? ` · ${row.qty}` : ''}
+                              </Text>
+                            ))}
+                          </>
+                        ) : null}
                       </ScrollView>
                     </View>
                   )}
@@ -510,59 +505,7 @@ export function DevDemoProjectWorkspace() {
                 </Text>
               </View>
             )}
-            {tab === 'brief' && (
-              <>
-                <Text style={styles.sectionLabel}>Production documents</Text>
-                <View style={styles.toolGrid}>
-                  {TOOLS.map((x) => {
-                    const Icon = x.icon
-                    const active = tool === x.id
-                    return (
-                      <TouchableOpacity
-                        key={x.id}
-                        style={[styles.toolCard, active && styles.toolCardActive]}
-                        onPress={() => setTool(x.id)}
-                      >
-                        <Icon size={26} color="#ffffff" strokeWidth={ICON_STROKE} />
-                        <Text style={styles.toolTitle}>{x.title}</Text>
-                        <Text style={styles.toolSub}>{x.sub}</Text>
-                      </TouchableOpacity>
-                    )
-                  })}
-                </View>
-                {!!briefOut[tool] && (
-                  <View style={styles.outputBox}>
-                    <Text style={styles.outputLabel}>Generated (demo) · {TOOLS.find((t) => t.id === tool)?.title}</Text>
-                    <BriefAiFormattedOutput content={briefOut[tool]} />
-                  </View>
-                )}
-                <Text style={styles.contextLabel}>
-                  ADDITIONAL CONTEXT <Text style={styles.optional}>(optional)</Text>
-                </Text>
-                <TextInput
-                  style={styles.briefInput}
-                  multiline
-                  placeholder="Demo text only — not saved."
-                  placeholderTextColor="rgba(255,255,255,0.25)"
-                  value={briefText}
-                  onChangeText={setBriefText}
-                  textAlignVertical="top"
-                />
-                <TouchableOpacity style={styles.genBtn} onPress={genBrief}>
-                  <Text style={styles.genBtnText}>Generate demo output</Text>
-                </TouchableOpacity>
-                {(tool === 'shotlist' || tool === 'callsheet') && (
-                  <View style={styles.demoSyncBox}>
-                    <Text style={styles.demoSyncTitle}>Production sync</Text>
-                    <Text style={styles.demoSyncText}>
-                      In this mock workspace there is no Apply — nothing is saved to Supabase. To use Apply like the
-                      real app, set EXPO_PUBLIC_DEMO_PROJECT_ID in .env.local to a project UUID and reopen Demo
-                      workspace (or open a real /project/[id] link).
-                    </Text>
-                  </View>
-                )}
-              </>
-            )}
+
           </ScrollView>
         )}
       </View>

@@ -32,6 +32,16 @@ import {
 } from '@/lib/memberBookedDates'
 import { CrewMemberBookedDaysCalendar } from '@/components/project/CrewMemberBookedDaysCalendar'
 import { crewDisplayRole } from '@/lib/jobApplicationRole'
+import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
+import {
+  OFFLINE_READ_ONLY_MESSAGE,
+  OFFLINE_READ_ONLY_TITLE,
+  isOfflineFetchError,
+  readOfflinePack,
+  resolveOfflineRead,
+  subscribeOfflinePack,
+  type OfflineCrewMember,
+} from '@/lib/offlinePack'
 
 type Member = {
   id: string
@@ -151,6 +161,46 @@ function crewAvatarUri(raw: string | null | undefined): string | null {
   return u && /^https?:\/\//i.test(u) ? u : null
 }
 
+function crewRowFromPack(m: OfflineCrewMember): CrewRow {
+  if (m.source === 'registered') {
+    return {
+      source: 'registered',
+      id: m.id,
+      profile_id: m.profile_id || m.id,
+      member_role: m.member_role,
+      avatar_url: m.avatar_url ?? null,
+      name: m.name,
+      subtitle: m.subtitle,
+      role_display: m.role_display,
+      email: m.email,
+      phone: m.phone,
+      scheduling_start_date: m.scheduling_start_date,
+      scheduling_end_date: m.scheduling_end_date,
+      contact_email: m.contact_email,
+      contact_phone: m.contact_phone,
+      contact_label: m.contact_label,
+      bookingDates: m.bookingDates ?? [],
+      bookingSlots: m.bookingSlots ?? [],
+    }
+  }
+  return {
+    source: 'manual',
+    id: m.id,
+    member_role: m.member_role,
+    name: m.name,
+    subtitle: m.subtitle,
+    role_display: m.role_display,
+    email: m.email,
+    phone: m.phone,
+    bookingDates: m.bookingDates ?? [],
+    bookingSlots: m.bookingSlots ?? [],
+    day_rate_amount: m.day_rate_amount ?? null,
+    half_day_rate_amount: m.half_day_rate_amount ?? null,
+    inviteStatus: m.inviteStatus ?? 'none',
+    pendingInviteId: m.pendingInviteId ?? null,
+  }
+}
+
 export function ProjectCrewTab({
   projectId,
   canManage,
@@ -197,6 +247,8 @@ export function ProjectCrewTab({
   const [projectContactEmail, setProjectContactEmail] = useState('')
   const [projectContactPhone, setProjectContactPhone] = useState('')
   const [projectContactLabel, setProjectContactLabel] = useState('')
+  const [usingOfflinePack, setUsingOfflinePack] = useState(false)
+  const [packDownloadedAt, setPackDownloadedAt] = useState<string | null>(null)
 
   useEffect(() => {
     if (viewerIdProp) {
@@ -212,6 +264,16 @@ export function ProjectCrewTab({
   }, [viewerIdProp])
 
   const load = useCallback(async () => {
+    const offline = await resolveOfflineRead(projectId)
+    if (offline) {
+      setRows(offline.pack.crew.map(crewRowFromPack))
+      setPendingInvites([])
+      setUsingOfflinePack(true)
+      setPackDownloadedAt(offline.pack.downloadedAt)
+      setLoading(false)
+      return
+    }
+
     const { data: projRow } = await supabase.from('projects').select('job_id').eq('id', projectId).maybeSingle()
     const jobId = (projRow as { job_id?: string | null } | null)?.job_id?.trim() || ''
     let appliedRoleByProfile = new Map<string, string>()
@@ -246,6 +308,17 @@ export function ProjectCrewTab({
     ])
 
     if (registeredRes.error) {
+      if (isOfflineFetchError(registeredRes.error)) {
+        const pack = await readOfflinePack(projectId)
+        if (pack) {
+          setRows(pack.crew.map(crewRowFromPack))
+          setPendingInvites([])
+          setUsingOfflinePack(true)
+          setPackDownloadedAt(pack.downloadedAt)
+          setLoading(false)
+          return
+        }
+      }
       Alert.alert('Crew', registeredRes.error.message)
       setRows([])
       setLoading(false)
@@ -386,6 +459,8 @@ export function ProjectCrewTab({
     } else {
       setPendingInvites([])
     }
+    setUsingOfflinePack(false)
+    setPackDownloadedAt(null)
     setLoading(false)
   }, [projectId, canManage, viewerIsCompany])
 
@@ -395,7 +470,15 @@ export function ProjectCrewTab({
   }, [load])
 
   useEffect(() => {
-    if (!proFeaturesEnabled || !canManage) {
+    return subscribeOfflinePack((id) => {
+      if (id !== projectId) return
+      setLoading(true)
+      void load()
+    })
+  }, [projectId, load])
+
+  useEffect(() => {
+    if (!proFeaturesEnabled || !canManage || usingOfflinePack) {
       setCrewSearchResults([])
       return
     }
@@ -428,7 +511,7 @@ export function ProjectCrewTab({
       })()
     }, 320)
     return () => clearTimeout(t)
-  }, [crewSearch, projectId, proFeaturesEnabled, canManage])
+  }, [crewSearch, projectId, proFeaturesEnabled, canManage, usingOfflinePack])
 
   const clearCrewBlurTimer = () => {
     if (crewBlurTimerRef.current) {
@@ -443,6 +526,10 @@ export function ProjectCrewTab({
   }
 
   const addByProfileId = async (profileId: string) => {
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
     if (!proFeaturesEnabled) {
       Alert.alert('Crew invite', 'Only available for Pro users.')
       return
@@ -530,6 +617,10 @@ export function ProjectCrewTab({
 
   const addManualCrew = async () => {
     if (busy) return
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
     if (!viewerIsCompany) {
       Alert.alert('Add crew', 'Only the project client can add external crew.')
       return
@@ -591,6 +682,10 @@ export function ProjectCrewTab({
   }
 
   const removeCrew = (m: CrewRow) => {
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
     if (m.member_role === 'company') {
       Alert.alert('Remove crew member', 'The client cannot be removed from the project.')
       return
@@ -641,7 +736,7 @@ export function ProjectCrewTab({
   }
 
   const canRemoveMember = (m: CrewRow | null) => {
-    if (!m) return false
+    if (!m || usingOfflinePack) return false
     return viewerIsCompany && m.member_role !== 'company'
   }
 
@@ -684,6 +779,10 @@ export function ProjectCrewTab({
   )
 
   const saveMemberProductionDates = async () => {
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
     if (!selectedCrew || !canEditSelectedShootDays) return
     if (selectedCrew.source === 'registered' && selectedCrew.member_role === 'company') return
     const ws = productionWindowStart.trim().slice(0, 10)
@@ -749,6 +848,10 @@ export function ProjectCrewTab({
   }
 
   const savePersonInfo = async () => {
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
     if (!selectedCrew) return
 
     if (selectedCrew.source === 'manual') {
@@ -887,7 +990,8 @@ export function ProjectCrewTab({
   return (
     <>
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      {canManage && (
+      {usingOfflinePack ? <OfflinePackBanner downloadedAt={packDownloadedAt} /> : null}
+      {canManage && !usingOfflinePack && (
         <>
           {workspaceOnly ? (
             viewerIsCompany ? (

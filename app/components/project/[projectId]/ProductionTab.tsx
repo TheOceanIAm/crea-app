@@ -11,6 +11,7 @@ import {
   Modal,
   Pressable,
   FlatList,
+  AppState,
 } from 'react-native'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
@@ -32,7 +33,24 @@ import { formatShootDayOptionLabel, listProductionWindowYmd } from '@/lib/projec
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProductionWeatherSection } from '@/components/project/ProductionWeatherSection'
 import { ProductionSunPlannerSection } from '@/components/project/ProductionSunPlannerSection'
-import { BriefAiFormattedOutput } from '@/components/project/BriefAiFormattedOutput'
+import { ProductionEquipmentSection, ProductionTasksSection } from '@/components/project/ProductionManualLists'
+import type { ProductionEquipmentItem, ProductionTask } from '@/lib/productionLists'
+import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
+import { OfflinePackCard } from '@/components/project/OfflinePackCard'
+import {
+  OFFLINE_READ_ONLY_MESSAGE,
+  OFFLINE_READ_ONLY_TITLE,
+  getPackedCallSheetPdfUri,
+  isNetworkAvailable,
+  isOfflineFetchError,
+  patchShotStatusInPack,
+  productionFromPack,
+  readOfflinePack,
+  resolveOfflineRead,
+  subscribeOfflinePack,
+} from '@/lib/offlinePack'
+import { overlayPendingStatuses, queueShotStatus, flushShotStatusOutbox, pendingShotStatusCount } from '@/lib/offlineShotOutbox'
+import { buildCallSheetHtml } from '@/lib/offlineCallSheetPdf'
 
 type ShotStatus = 'open' | 'rolling' | 'done' | 'pick'
 
@@ -150,14 +168,6 @@ function roleLabel(r: string) {
   return 'Crew'
 }
 
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
 function normalizeShotRow(raw: Record<string, unknown>): ProductionShot {
   return {
     id: String(raw.id),
@@ -194,8 +204,6 @@ type Props = {
   projectTitle: string
   projectLocation: string | null
   companyId: string
-  briefContext: string | null
-  briefOutputs?: Record<string, string> | null
   canUseProductionWeather?: boolean
   canUseSunPlanner?: boolean
   /** When Weather (Production) is gated (e.g. Workspace trial ended). */
@@ -205,6 +213,7 @@ type Props = {
   /** Inclusive production window from workspace Overview. */
   productionWindowStart?: string | null
   productionWindowEnd?: string | null
+  jobId?: string | null
   /** Deep-link / capture: open a production feature directly (hub when null). */
   initialFeature?: 'sun' | 'weather' | 'shotlist' | 'call_sheet' | 'tasks' | 'equipment' | null
   /** Deep-link / capture: YYYY-MM-DD shoot day to load. */
@@ -235,12 +244,12 @@ const PRODUCTION_SECTIONS = [
   {
     id: 'tasks' as const,
     label: 'Tasks',
-    sub: 'Brief AI task breakdown synced to production context',
+    sub: 'Manual checklist for prep, shoot, and wrap',
   },
   {
     id: 'equipment' as const,
     label: 'Equipment',
-    sub: 'Brief AI equipment list synced to production context',
+    sub: 'Manual kit list for this production',
   },
 ]
 
@@ -252,14 +261,13 @@ export function ProductionTab({
   projectTitle,
   projectLocation,
   companyId,
-  briefContext,
-  briefOutputs,
   canUseProductionWeather = false,
   canUseSunPlanner = false,
   productionWeatherLockedHint,
   sunPlannerLockedHint,
   productionWindowStart,
   productionWindowEnd,
+  jobId = null,
   initialFeature = null,
   initialShootDay = null,
 }: Props) {
@@ -339,6 +347,11 @@ export function ProductionTab({
   const [exportingPdf, setExportingPdf] = useState(false)
   /** `null` = category hub; otherwise full-screen feature */
   const [openFeature, setOpenFeature] = useState<ProductionSectionId | null>(initialFeature ?? null)
+  const [usingOfflinePack, setUsingOfflinePack] = useState(false)
+  const [packDownloadedAt, setPackDownloadedAt] = useState<string | null>(null)
+  const [pendingStatuses, setPendingStatuses] = useState(0)
+  const [packTasks, setPackTasks] = useState<ProductionTask[] | null>(null)
+  const [packEquipment, setPackEquipment] = useState<ProductionEquipmentItem[] | null>(null)
 
   useEffect(() => {
     if (!initialFeature) return
@@ -352,10 +365,40 @@ export function ProductionTab({
     setShootDay(v)
     setDayInput(v)
   }, [initialShootDay])
-  const tasksOutput = (briefOutputs?.tasks ?? '').trim()
-  const gearOutput = (briefOutputs?.gear ?? '').trim()
+
+  const applyPack = useCallback(
+    async (pack: Parameters<typeof productionFromPack>[0]) => {
+      const sliced = productionFromPack(pack, shootDay)
+      const overlaid = await overlayPendingStatuses(projectId, sliced.shots)
+      setShots(overlaid.map((row) => normalizeShotRow(row as unknown as Record<string, unknown>)))
+      setCrew(sliced.crew)
+      setProdDay(sliced.prodDay)
+      setUsingOfflinePack(true)
+      setPackDownloadedAt(pack.downloadedAt)
+      setPackTasks(pack.tasks ?? [])
+      setPackEquipment(pack.equipment ?? [])
+      setPendingStatuses(await pendingShotStatusCount(projectId))
+    },
+    [projectId, shootDay]
+  )
+
+  const requireOnlineEdits = useCallback(() => {
+    if (!usingOfflinePack) return true
+    Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+    return false
+  }, [usingOfflinePack])
 
   const load = useCallback(async () => {
+    const offline = await resolveOfflineRead(projectId)
+    if (offline) {
+      await applyPack(offline.pack)
+      setLoading(false)
+      return
+    }
+
+    await flushShotStatusOutbox(projectId)
+    setPendingStatuses(await pendingShotStatusCount(projectId))
+
     const [shRes, crRes, dayRes, manualRes] = await Promise.all([
       supabase
         .from('production_shots')
@@ -381,11 +424,24 @@ export function ProductionTab({
         .order('created_at', { ascending: true }),
     ])
 
+    const networkFail =
+      (shRes.error && isOfflineFetchError(shRes.error)) ||
+      (crRes.error && isOfflineFetchError(crRes.error)) ||
+      (dayRes.error && isOfflineFetchError(dayRes.error))
+    if (networkFail) {
+      const pack = await readOfflinePack(projectId)
+      if (pack) {
+        await applyPack(pack)
+        setLoading(false)
+        return
+      }
+    }
+
     if (shRes.error) Alert.alert('Shot list', shRes.error.message)
-    else
-      setShots(
-        (shRes.data ?? []).map((row) => normalizeShotRow(row as Record<string, unknown>))
-      )
+    else {
+      const mapped = (shRes.data ?? []).map((row) => normalizeShotRow(row as Record<string, unknown>))
+      setShots(await overlayPendingStatuses(projectId, mapped))
+    }
 
     let members: CallSheetCrewRow[] = []
     if (crRes.error) {
@@ -488,8 +544,12 @@ export function ProductionTab({
     }
     setCrew([...byKey.values()])
 
+    setUsingOfflinePack(false)
+    setPackDownloadedAt(null)
+    setPackTasks(null)
+    setPackEquipment(null)
     setLoading(false)
-  }, [projectId, shootDay])
+  }, [projectId, shootDay, applyPack])
 
   const applyProdDayToDrafts = useCallback((row: ProductionDayRow) => {
     setProdDay(row)
@@ -534,6 +594,7 @@ export function ProductionTab({
 
   const fetchProdDayOnly = useCallback(async () => {
     if (!projectId || !shootDay) return
+    if (usingOfflinePack) return
     const { data, error } = await supabase
       .from('production_days')
       .select('*')
@@ -550,7 +611,7 @@ export function ProductionTab({
     }
     const row = parseProdDayRow(data as Record<string, unknown>)
     if (row) applyProdDayToDrafts(row)
-  }, [projectId, shootDay, applyProdDayToDrafts])
+  }, [projectId, shootDay, applyProdDayToDrafts, usingOfflinePack])
 
   useEffect(() => {
     const open = openFeature === 'call_sheet'
@@ -567,7 +628,7 @@ export function ProductionTab({
   }, [openFeature, load])
 
   useEffect(() => {
-    if (openFeature !== 'call_sheet' || !projectId || !shootDay) return
+    if (openFeature !== 'call_sheet' || !projectId || !shootDay || usingOfflinePack) return
 
     const channel = supabase
       .channel(`production-day-${projectId}-${shootDay}`)
@@ -593,12 +654,31 @@ export function ProductionTab({
     return () => {
       void supabase.removeChannel(channel)
     }
-  }, [openFeature, projectId, shootDay, applyProdDayToDrafts])
+  }, [openFeature, projectId, shootDay, applyProdDayToDrafts, usingOfflinePack])
 
   useEffect(() => {
     setLoading(true)
     load()
   }, [load])
+
+  useEffect(() => {
+    return subscribeOfflinePack((id) => {
+      if (id !== projectId) return
+      setLoading(true)
+      void load()
+    })
+  }, [projectId, load])
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return
+      void (async () => {
+        await flushShotStatusOutbox(projectId)
+        setPendingStatuses(await pendingShotStatusCount(projectId))
+      })()
+    })
+    return () => sub.remove()
+  }, [projectId])
 
   const doneToday = useMemo(
     () => shots.filter((s) => s.status === 'done' || s.status === 'pick').length,
@@ -608,6 +688,7 @@ export function ProductionTab({
   const progressPct = totalToday ? Math.round((doneToday / totalToday) * 100) : 0
 
   const upsertShotField = async (id: string, patch: Partial<ProductionShot>) => {
+    if (!requireOnlineEdits()) return false
     setBusyShot(id)
     const { error } = await supabase
       .from('production_shots')
@@ -624,6 +705,7 @@ export function ProductionTab({
   }
 
   const beginEditShot = (s: ProductionShot) => {
+    if (!requireOnlineEdits()) return
     setShotDrafts((prev) => ({
       ...prev,
       [s.id]: {
@@ -655,6 +737,7 @@ export function ProductionTab({
   }
 
   const openAddShotModal = () => {
+    if (!requireOnlineEdits()) return
     setNewShotDraft(EMPTY_SHOT_DRAFT)
     setAddShotOpen(true)
   }
@@ -666,6 +749,7 @@ export function ProductionTab({
   }
 
   const saveNewShot = async () => {
+    if (!requireOnlineEdits()) return
     setSavingNewShot(true)
     const framing = expandFramingAbbreviations(newShotDraft.framing)
     const { data, error } = await supabase
@@ -697,6 +781,7 @@ export function ProductionTab({
   }
 
   const deleteShot = (s: ProductionShot) => {
+    if (!requireOnlineEdits()) return
     const label = s.scene_nr?.trim() ? ` “${s.scene_nr.trim()}”` : ''
     Alert.alert('Delete shot', `Remove this shot${label}? This cannot be undone.`, [
       { text: 'Cancel', style: 'cancel' },
@@ -725,10 +810,26 @@ export function ProductionTab({
   }
 
   const cycleStatus = (s: ProductionShot) => {
-    void upsertShotField(s.id, { status: nextStatus(s.status) })
+    const next = nextStatus(s.status)
+    if (usingOfflinePack) {
+      void (async () => {
+        setBusyShot(s.id)
+        setShots((prev) => prev.map((row) => (row.id === s.id ? { ...row, status: next } : row)))
+        await queueShotStatus({ projectId, shotId: s.id, status: next })
+        await patchShotStatusInPack(projectId, s.id, next)
+        if (await isNetworkAvailable()) {
+          await flushShotStatusOutbox(projectId)
+        }
+        setPendingStatuses(await pendingShotStatusCount(projectId))
+        setBusyShot(null)
+      })()
+      return
+    }
+    void upsertShotField(s.id, { status: next })
   }
 
   const createToday = async () => {
+    if (!requireOnlineEdits()) return
     setCreatingDay(true)
     const { data, error } = await supabase
       .from('production_days')
@@ -759,6 +860,7 @@ export function ProductionTab({
 
   const saveCallSheet = async () => {
     if (!prodDay) return
+    if (!requireOnlineEdits()) return
     setSavingCallSheet(true)
     const wrap_time = wrapDraft.trim() || null
     const { error } = await supabase
@@ -783,6 +885,7 @@ export function ProductionTab({
 
   const addManualToCallSheet = async () => {
     if (!isCompany || addingManual) return
+    if (!requireOnlineEdits()) return
     const name = manualName.trim()
     if (name.length < 2) {
       Alert.alert('Add person', 'Please enter at least 2 characters for the name.')
@@ -811,39 +914,24 @@ export function ProductionTab({
   const exportCallSheetPdf = async () => {
     setExportingPdf(true)
     try {
-      const rowsHtml = crew
-        .map((m) => {
-          const name = escapeHtml(m.name || 'Member')
-          const role = escapeHtml(m.roleLabel)
-          const ov = callDraft[m.key]
-          const call = escapeHtml(ov?.call_time?.trim() || '—')
-          const loc = escapeHtml(ov?.location?.trim() || projectLocation || '—')
-          return `<tr><td>${name}</td><td>${role}</td><td>${call}</td><td>${loc}</td></tr>`
-        })
-        .join('')
+      if (usingOfflinePack) {
+        const packed = await getPackedCallSheetPdfUri(projectId, shootDay)
+        if (packed && (await Sharing.isAvailableAsync())) {
+          await Sharing.shareAsync(packed, { mimeType: 'application/pdf', dialogTitle: 'Call Sheet' })
+          setExportingPdf(false)
+          return
+        }
+      }
 
-      const notesBlock =
-        prodDay?.notes?.trim() ?
-          `<h2 style="font-size:16px;margin-top:28px;margin-bottom:10px;">Schedule &amp; travel</h2>
-        <pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;line-height:1.45;color:#222;border:1px solid #ddd;padding:12px;border-radius:8px;background:#fafafa;">${escapeHtml(prodDay.notes.trim())}</pre>`
-          : ''
-
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
-        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; color:#111; padding:24px; }
-        h1 { font-size:22px; margin-bottom:8px; }
-        .sub { color:#555; margin-bottom:20px; font-size:13px; }
-        table { width:100%; border-collapse:collapse; font-size:13px; }
-        th, td { border:1px solid #ccc; padding:8px 10px; text-align:left; }
-        th { background:#f4f4f4; }
-      </style></head><body>
-        <h1>Call Sheet</h1>
-        <div class="sub">${escapeHtml(projectTitle)} · ${shootDay}</div>
-        ${notesBlock}
-        <table>
-          <thead><tr><th>Name</th><th>Role</th><th>Call</th><th>Location</th></tr></thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-      </body></html>`
+      const html = buildCallSheetHtml({
+        projectTitle,
+        shootDay,
+        notes: prodDay?.notes ?? notesDraft,
+        wrapTime: wrapDraft || prodDay?.wrap_time,
+        locationFallback: projectLocation,
+        crew,
+        callSheet: callDraft,
+      })
 
       const { uri } = await Print.printToFileAsync({ html })
       if (await Sharing.isAvailableAsync()) {
@@ -863,6 +951,16 @@ export function ProductionTab({
   if (openFeature === null) {
     return (
       <ScrollView style={styles.scroll} contentContainerStyle={styles.hubContent} showsVerticalScrollIndicator={false}>
+        <OfflinePackCard
+          projectId={projectId}
+          projectTitle={projectTitle}
+          jobId={jobId}
+          shootDates={productionDays}
+          projectLocation={projectLocation}
+        />
+        {usingOfflinePack ? (
+          <OfflinePackBanner downloadedAt={packDownloadedAt} pendingStatuses={pendingStatuses} />
+        ) : null}
         <Text style={styles.hint}>
           Choose a category to open weather, shotlist, call sheet, tasks, or equipment. Visible to the whole team.
         </Text>
@@ -897,6 +995,9 @@ export function ProductionTab({
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      {usingOfflinePack && (openFeature === 'shotlist' || openFeature === 'call_sheet') ? (
+        <OfflinePackBanner downloadedAt={packDownloadedAt} pendingStatuses={pendingStatuses} />
+      ) : null}
       {openFeature === 'shotlist' || openFeature === 'call_sheet' ? (
         <View style={styles.shootDayRow}>
           <Text style={styles.shootDayLabel}>Shoot day</Text>
@@ -1011,24 +1112,18 @@ export function ProductionTab({
         )
       ) : null}
       {openFeature === 'tasks' ? (
-        <View style={styles.aiDocCard}>
-          <Text style={styles.aiDocTitle}>Task breakdown</Text>
-          {tasksOutput ? (
-            <BriefAiFormattedOutput content={tasksOutput} embedded />
-          ) : (
-            <Text style={styles.muted}>Generate “Task breakdown” in Brief AI first. It will appear here automatically.</Text>
-          )}
-        </View>
+        <ProductionTasksSection
+          projectId={projectId}
+          readOnly={usingOfflinePack}
+          offlineTasks={usingOfflinePack ? packTasks : null}
+        />
       ) : null}
       {openFeature === 'equipment' ? (
-        <View style={styles.aiDocCard}>
-          <Text style={styles.aiDocTitle}>Equipment list</Text>
-          {gearOutput ? (
-            <BriefAiFormattedOutput content={gearOutput} embedded />
-          ) : (
-            <Text style={styles.muted}>Generate “Equipment list” in Brief AI first. It will appear here automatically.</Text>
-          )}
-        </View>
+        <ProductionEquipmentSection
+          projectId={projectId}
+          readOnly={usingOfflinePack}
+          offlineEquipment={usingOfflinePack ? packEquipment : null}
+        />
       ) : null}
 
       {showDataLoading ? (
@@ -1057,7 +1152,6 @@ export function ProductionTab({
           <View style={styles.shotCardTop}>
             <View style={styles.shotCardTopLeft}>
               <Text style={styles.shotCardIndex}>Shot {idx + 1}</Text>
-              {s.brief_ai_synced ? <Text style={styles.syncedBadge}>Gesetzt (Brief AI)</Text> : null}
             </View>
             <View style={styles.shotCardTopActions}>
               <TouchableOpacity
@@ -1233,11 +1327,11 @@ export function ProductionTab({
               <Text style={styles.csLogisticsKicker}>Day logistics</Text>
               <Text style={styles.csLogisticsTitle}>Schedule & travel</Text>
               <Text style={styles.csLogisticsHint}>
-                Synced with Daily wrap → Notes (Brief AI apply or manual edits).
+                Synced with Daily wrap → Notes.
               </Text>
             </View>
           </View>
-          <BriefAiFormattedOutput content={(notesDraft || prodDay.notes || '').trim()} embedded />
+          <Text style={styles.muted}>{(notesDraft || prodDay.notes || '').trim()}</Text>
         </View>
       ) : null}
 

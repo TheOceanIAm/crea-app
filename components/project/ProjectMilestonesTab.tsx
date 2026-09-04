@@ -32,6 +32,15 @@ import {
   type WorkspaceMilestoneStatus,
   type WorkspaceMilestoneUi,
 } from '@/lib/workspaceMilestones'
+import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
+import {
+  OFFLINE_READ_ONLY_MESSAGE,
+  OFFLINE_READ_ONLY_TITLE,
+  isOfflineFetchError,
+  readOfflinePack,
+  resolveOfflineRead,
+  subscribeOfflinePack,
+} from '@/lib/offlinePack'
 
 type Props = {
   projectId: string
@@ -74,27 +83,59 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
   const [scheduleTime, setScheduleTime] = useState(() => defaultScheduleDate())
   const [pickerMode, setPickerMode] = useState<'date' | 'time' | null>(null)
   const [busy, setBusy] = useState(false)
+  const [usingOfflinePack, setUsingOfflinePack] = useState(false)
+  const [packDownloadedAt, setPackDownloadedAt] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    const offline = await resolveOfflineRead(projectId)
+    if (offline) {
+      setRows(offline.pack.milestones)
+      setUsingOfflinePack(true)
+      setPackDownloadedAt(offline.pack.downloadedAt)
+      setLoading(false)
+      return
+    }
     if (!jobId) {
       setRows([])
+      setUsingOfflinePack(false)
+      setPackDownloadedAt(null)
       setLoading(false)
       return
     }
     const { rows: next, error } = await fetchWorkspaceMilestones(supabase, jobId)
     if (error) {
+      if (isOfflineFetchError({ message: error })) {
+        const pack = await readOfflinePack(projectId)
+        if (pack) {
+          setRows(pack.milestones)
+          setUsingOfflinePack(true)
+          setPackDownloadedAt(pack.downloadedAt)
+          setLoading(false)
+          return
+        }
+      }
       Alert.alert('Milestones', error)
       setRows([])
     } else {
       setRows(next)
+      setUsingOfflinePack(false)
+      setPackDownloadedAt(null)
     }
     setLoading(false)
-  }, [jobId])
+  }, [jobId, projectId])
 
   useEffect(() => {
     setLoading(true)
     void load()
   }, [load])
+
+  useEffect(() => {
+    return subscribeOfflinePack((id) => {
+      if (id !== projectId) return
+      setLoading(true)
+      void load()
+    })
+  }, [projectId, load])
 
   useFocusEffect(
     useCallback(() => {
@@ -103,7 +144,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
   )
 
   useEffect(() => {
-    if (!jobId) return
+    if (!jobId || usingOfflinePack) return
     const channel = supabase
       .channel(`workspace-milestones-${jobId}`)
       .on(
@@ -118,7 +159,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
     return () => {
       void supabase.removeChannel(channel)
     }
-  }, [jobId, load, onCountsChanged])
+  }, [jobId, load, onCountsChanged, usingOfflinePack])
 
   const onPickerChange = (event: DateTimePickerEvent, value?: Date) => {
     if (event.type === 'dismissed') {
@@ -143,6 +184,10 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
   const add = async () => {
     const t = newTitle.trim()
     if (!t || busy || !jobId) return
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
     setBusy(true)
     const nextOrder = rows.length ? Math.max(...rows.map((r) => r.sortOrder)) + 1 : 0
     const { row, error } = await insertWorkspaceMilestone(supabase, {
@@ -183,6 +228,10 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
   }
 
   const toggle = async (m: WorkspaceMilestoneUi) => {
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
     const nextCompleted = !m.completed
     const { error } = await setWorkspaceMilestoneCompleted(supabase, m.id, nextCompleted)
     if (error) {
@@ -201,6 +250,10 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
 
   const setPriority = async (m: WorkspaceMilestoneUi, priority: WorkspaceMilestonePriority) => {
     if (!canManage || m.priority === priority) return
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
     const { error } = await setWorkspaceMilestonePriority(supabase, m.id, priority)
     if (error) {
       Alert.alert('Update failed', error)
@@ -211,6 +264,10 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
 
   const setStatus = async (m: WorkspaceMilestoneUi, status: WorkspaceMilestoneStatus) => {
     if (!canManage || m.status === status) return
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
     const { error } = await setWorkspaceMilestoneStatus(supabase, m.id, status)
     if (error) {
       Alert.alert('Update failed', error)
@@ -221,6 +278,10 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
   }
 
   const remove = (m: WorkspaceMilestoneUi) => {
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
     Alert.alert('Remove milestone', m.title, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -248,7 +309,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
     )
   }
 
-  if (!jobId) {
+  if (!jobId && !usingOfflinePack) {
     return (
       <View style={styles.center}>
         <Text style={styles.empty}>This project is not linked to a job workspace yet.</Text>
@@ -258,13 +319,14 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      {usingOfflinePack ? <OfflinePackBanner downloadedAt={packDownloadedAt} /> : null}
       <Text style={styles.hint}>
         {canManage
           ? 'Shared with the web workspace. Description, deliverables and Frame.io are on each card — tap to expand status and priority.'
           : 'Shared with the web workspace. Description, deliverables and Frame.io are on each card — tap to expand more details.'}
       </Text>
 
-      {canManage ? (
+      {canManage && !usingOfflinePack ? (
         <View style={styles.addCard}>
           <TextInput
             style={styles.input}

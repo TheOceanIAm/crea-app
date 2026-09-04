@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native'
+import { NativeModules, UIManager, View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native'
 import Slider from '@react-native-community/slider'
-import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import { getMapboxAccessToken, canShowShadowMap } from '@/lib/mapboxConfig'
 import { buildSunPlannerMapHtml } from '@/lib/sunPlannerMapHtml'
 import {
@@ -13,6 +12,47 @@ import type { ProductionShadowMapSectionProps } from '@/components/project/produ
 export type { ProductionShadowMapSectionProps } from '@/components/project/productionShadowMapTypes'
 
 const MAP_HEIGHT = 280
+
+type WebViewMessageEvent = { nativeEvent: { data: string } }
+type NativeWebViewComponent = React.ComponentType<{
+  ref?: React.Ref<{ injectJavaScript: (js: string) => void } | null>
+  originWhitelist?: string[]
+  source?: { html: string; baseUrl?: string }
+  style?: object | object[]
+  onMessage?: (event: WebViewMessageEvent) => void
+  onLoadStart?: () => void
+  onLoadEnd?: () => void
+  onError?: () => void
+  onHttpError?: () => void
+  javaScriptEnabled?: boolean
+  domStorageEnabled?: boolean
+  allowFileAccess?: boolean
+  mixedContentMode?: string
+  setSupportMultipleWindows?: boolean
+  scrollEnabled?: boolean
+  bounces?: boolean
+  overScrollMode?: string
+  nestedScrollEnabled?: boolean
+  androidLayerType?: string
+}>
+
+function loadNativeWebView(): NativeWebViewComponent | null {
+  try {
+    const natives = NativeModules as Record<string, unknown>
+    const hasNative =
+      !!natives.RNCWebView ||
+      !!natives.RNCWebViewModule ||
+      !!UIManager.getViewManagerConfig?.('RNCWebView') ||
+      !!UIManager.getViewManagerConfig?.('RNCWebViewModule')
+    if (!hasNative) return null
+    // Only require JS after the native binary is confirmed — otherwise TurboModuleRegistry throws.
+    return require('react-native-webview').WebView as NativeWebViewComponent
+  } catch {
+    return null
+  }
+}
+
+const WebView = loadNativeWebView()
 
 function injectJson(fnName: string, value: unknown): string {
   // JSON is safe inside a single-quoted JS string when we escape quotes/newlines via stringify twice.
@@ -35,7 +75,7 @@ export function ProductionShadowMapSection({
 }: ProductionShadowMapSectionProps) {
   const token = getMapboxAccessToken()
   const ready = canShowShadowMap()
-  const webRef = useRef<WebView>(null)
+  const webRef = useRef<{ injectJavaScript: (js: string) => void } | null>(null)
   const mapReadyRef = useRef(false)
   const [mapError, setMapError] = useState<string | null>(null)
   const [realism, setRealism] = useState<ShadowRealism>('subtle')
@@ -104,6 +144,17 @@ export function ProductionShadowMapSection({
     },
     [bootMap, onSubjectChange, pushUpdate]
   )
+
+  if (!WebView) {
+    return (
+      <View style={styles.fallback}>
+        <Text style={styles.fallbackTitle}>Sun Planner</Text>
+        <Text style={styles.fallbackText}>
+          The shadow map needs a current iOS build with WebView. Shot list, call sheet, crew and sun metrics still work.
+        </Text>
+      </View>
+    )
+  }
 
   if (!ready || !token) {
     return (

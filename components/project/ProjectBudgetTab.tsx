@@ -13,12 +13,15 @@ import { supabase } from '@/lib/supabase'
 import {
   budgetVarianceTone,
   computeCrewSpendLines,
+  computeEquipmentSpend,
   computeForecastRemaining,
   computeWrapUpVariance,
   formatMoneyAmount,
   sumBudgetLineSpent,
   type CrewSpendMemberRow,
+  type EquipmentSpendRow,
 } from '@/lib/projectInternalBudget'
+import { fetchProductionEquipment } from '@/lib/productionLists'
 import { syncProjectListingBudget } from '@/lib/syncProjectListingBudget'
 
 type BudgetPlanRow = {
@@ -73,12 +76,13 @@ export function ProjectBudgetTab({ projectId }: Props) {
   const [productionStr, setProductionStr] = useState('')
   const [lines, setLines] = useState<LineDraft[]>([])
   const [members, setMembers] = useState<CrewSpendMemberRow[]>([])
+  const [equipmentRows, setEquipmentRows] = useState<EquipmentSpendRow[]>([])
   const [deletedLineIds, setDeletedLineIds] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
     setDeletedLineIds([])
-    const [planRes, linesRes, membersRes, manualRes] = await Promise.all([
+    const [planRes, linesRes, membersRes, manualRes, gearRes] = await Promise.all([
       supabase.from('project_budget_plans').select('*').eq('project_id', projectId).maybeSingle(),
       supabase.from('project_budget_lines').select('*').eq('project_id', projectId).order('sort_order'),
       supabase
@@ -94,6 +98,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
         )
         .eq('project_id', projectId)
         .is('claimed_profile_id', null),
+      fetchProductionEquipment(projectId),
     ])
 
     if (planRes.error) {
@@ -151,6 +156,10 @@ export function ProjectBudgetTab({ projectId }: Props) {
       profiles: null,
     }))
     setMembers([...registered, ...manualAsSpend])
+    if (gearRes.error) {
+      Alert.alert('Budget', gearRes.error)
+    }
+    setEquipmentRows(gearRes.rows)
     setLoading(false)
   }, [projectId])
 
@@ -159,6 +168,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
   }, [load])
 
   const crew = useMemo(() => computeCrewSpendLines(members, currency), [members, currency])
+  const equipment = useMemo(() => computeEquipmentSpend(equipmentRows), [equipmentRows])
   const lineTotals = useMemo(
     () =>
       sumBudgetLineSpent(
@@ -175,8 +185,8 @@ export function ProjectBudgetTab({ projectId }: Props) {
   const otherPlanned = lineTotals.planned
   const otherSpent = lineTotals.spent
 
-  const forecastRemaining = computeForecastRemaining(totalBudgetNum, crew.total, otherPlanned)
-  const wrapUpVariance = computeWrapUpVariance(totalBudgetNum, crew.total, otherSpent)
+  const forecastRemaining = computeForecastRemaining(totalBudgetNum, crew.total, otherPlanned, equipment.total)
+  const wrapUpVariance = computeWrapUpVariance(totalBudgetNum, crew.total, otherSpent, equipment.total)
   const wrapUpTone = budgetVarianceTone(wrapUpVariance)
   const remainingProduction =
     productionCapNum != null ? Math.round((productionCapNum - crew.total) * 100) / 100 : null
@@ -309,8 +319,8 @@ export function ProjectBudgetTab({ projectId }: Props) {
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lead}>
         Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each
-        person&apos;s public day / half-day rate when set. Enter planned estimates before the shoot; after wrap, enter
-        actual spend for the final balance.
+        person&apos;s public day / half-day rate when set. Equipment cost uses kit-list qty × unit price. Enter planned
+        estimates before the shoot; after wrap, enter actual spend for the final balance.
       </Text>
 
       <View style={styles.card}>
@@ -375,11 +385,39 @@ export function ProjectBudgetTab({ projectId }: Props) {
       </View>
 
       <View style={styles.card}>
+        <Text style={styles.cardTitle}>Equipment (auto)</Text>
+        <Text style={styles.summaryBig}>{formatMoneyAmount(equipment.total, currency)}</Text>
+        <Text style={styles.muted}>
+          Kit-list qty × unit price (same currency as this plan). Items without a price are skipped. Edit prices on the
+          Equipment tab.
+        </Text>
+        {equipment.lines.length === 0 ? (
+          <Text style={styles.muted}>No priced kit items yet.</Text>
+        ) : (
+          equipment.lines.map((ln) => (
+            <View key={ln.id} style={styles.crewRow}>
+              <Text style={styles.crewName}>{ln.displayName}</Text>
+              <View style={styles.crewDetailRow}>
+                <Text style={styles.crewMeta}>
+                  {ln.qty} × {formatMoneyAmount(ln.unitPrice, currency)}
+                </Text>
+                <Text style={styles.crewAmt}>{formatMoneyAmount(ln.subtotal, currency)}</Text>
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+
+      <View style={styles.card}>
         <Text style={styles.cardTitle}>Forecast</Text>
         <Text style={styles.muted}>Before the shoot — uses planned other expenses.</Text>
         <View style={styles.snapRow}>
           <Text style={styles.snapLabel}>Crew (booked)</Text>
           <Text style={styles.snapVal}>{formatMoneyAmount(crew.total, currency)}</Text>
+        </View>
+        <View style={styles.snapRow}>
+          <Text style={styles.snapLabel}>Equipment (kit list)</Text>
+          <Text style={styles.snapVal}>{formatMoneyAmount(equipment.total, currency)}</Text>
         </View>
         <View style={styles.snapRow}>
           <Text style={styles.snapLabel}>Other expenses (planned)</Text>
@@ -419,6 +457,10 @@ export function ProjectBudgetTab({ projectId }: Props) {
           <Text style={styles.snapVal}>{formatMoneyAmount(crew.total, currency)}</Text>
         </View>
         <View style={styles.snapRow}>
+          <Text style={styles.snapLabel}>Equipment (kit list)</Text>
+          <Text style={styles.snapVal}>{formatMoneyAmount(equipment.total, currency)}</Text>
+        </View>
+        <View style={styles.snapRow}>
           <Text style={styles.snapLabel}>Other expenses (actual)</Text>
           <Text style={styles.snapVal}>{formatMoneyAmount(otherSpent, currency)}</Text>
         </View>
@@ -426,7 +468,9 @@ export function ProjectBudgetTab({ projectId }: Props) {
           <>
             <View style={styles.snapRow}>
               <Text style={styles.snapLabel}>Committed total</Text>
-              <Text style={styles.snapVal}>{formatMoneyAmount(crew.total + otherSpent, currency)}</Text>
+              <Text style={styles.snapVal}>
+                {formatMoneyAmount(crew.total + equipment.total + otherSpent, currency)}
+              </Text>
             </View>
             <View style={styles.snapRow}>
               <Text style={[styles.snapLabel, styles.snapLabelStrong]}>
@@ -449,7 +493,10 @@ export function ProjectBudgetTab({ projectId }: Props) {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Other expenses</Text>
-        <Text style={styles.muted}>Manual lines (catering, travel, gear rentals, etc.).</Text>
+        <Text style={styles.muted}>
+          Manual lines (catering, travel, extra rentals not on the kit list). Kit-list prices are already included
+          above — don’t duplicate them here.
+        </Text>
         <View style={styles.presetRow}>
           {PRESETS.map((p) => (
             <TouchableOpacity key={p} style={styles.presetChip} onPress={() => addLine(p)}>

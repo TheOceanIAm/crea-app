@@ -1,6 +1,6 @@
 import { Linking } from 'react-native'
 
-/** Base URL for the Crea web app (Brief AI, Frame.io deep links, etc.) */
+/** Base URL for the Crea web app (workspace, Frame.io deep links, etc.) */
 export function getCreaWebBaseUrl(): string {
   const raw = (process.env.EXPO_PUBLIC_CREA_WEB_URL || '').trim().replace(/\/$/, '')
   if (!raw) return ''

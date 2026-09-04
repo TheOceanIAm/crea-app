@@ -105,6 +105,56 @@ export function computeCrewSpendLines(
   return { lines, total, currenciesMixed }
 }
 
+export type EquipmentSpendRow = {
+  id: string
+  name: string
+  qty: string
+  unit_price: number | null
+}
+
+export type EquipmentSpendLine = {
+  id: string
+  displayName: string
+  qty: number
+  unitPrice: number
+  subtotal: number
+}
+
+/** First positive number in qty text; empty / unparseable → 1. */
+export function parseEquipmentQty(qty: string | null | undefined): number {
+  const t = (qty ?? '').trim()
+  if (!t) return 1
+  const m = t.replace(',', '.').match(/\d+(?:\.\d+)?/)
+  if (!m) return 1
+  const n = Number(m[0])
+  return Number.isFinite(n) && n > 0 ? n : 1
+}
+
+export function equipmentLineTotal(qty: string, unitPrice: number | null | undefined): number {
+  if (unitPrice == null || !Number.isFinite(unitPrice) || unitPrice <= 0) return 0
+  return Math.round(parseEquipmentQty(qty) * unitPrice * 100) / 100
+}
+
+/** Live kit-list spend: qty × unit_price. Items without a price are omitted. */
+export function computeEquipmentSpend(rows: EquipmentSpendRow[]): { lines: EquipmentSpendLine[]; total: number } {
+  const lines: EquipmentSpendLine[] = []
+  for (const r of rows) {
+    const price = r.unit_price
+    if (price == null || !Number.isFinite(price) || price <= 0) continue
+    const qty = parseEquipmentQty(r.qty)
+    const subtotal = Math.round(qty * price * 100) / 100
+    lines.push({
+      id: r.id,
+      displayName: (r.name ?? '').trim() || 'Equipment',
+      qty,
+      unitPrice: price,
+      subtotal,
+    })
+  }
+  const total = Math.round(lines.reduce((s, l) => s + l.subtotal, 0) * 100) / 100
+  return { lines, total }
+}
+
 export function sumBudgetLineSpent(
   rows: { spent_amount?: number | null; planned_amount?: number | null }[],
 ): { spent: number; planned: number } {
@@ -122,24 +172,26 @@ export function sumBudgetLineSpent(
   }
 }
 
-/** Remaining headroom while planning — crew + planned other expenses vs total budget. */
+/** Remaining headroom while planning — crew + kit list + planned other expenses vs total budget. */
 export function computeForecastRemaining(
   totalBudget: number | null,
   crewTotal: number,
   otherPlanned: number,
+  equipmentTotal = 0,
 ): number | null {
   if (totalBudget == null) return null
-  return Math.round((totalBudget - crewTotal - otherPlanned) * 100) / 100
+  return Math.round((totalBudget - crewTotal - equipmentTotal - otherPlanned) * 100) / 100
 }
 
-/** Post-shoot balance — crew + actual other spend vs total budget (negative = over budget). */
+/** Post-shoot balance — crew + kit list + actual other spend vs total budget (negative = over budget). */
 export function computeWrapUpVariance(
   totalBudget: number | null,
   crewTotal: number,
   otherSpent: number,
+  equipmentTotal = 0,
 ): number | null {
   if (totalBudget == null) return null
-  return Math.round((totalBudget - crewTotal - otherSpent) * 100) / 100
+  return Math.round((totalBudget - crewTotal - equipmentTotal - otherSpent) * 100) / 100
 }
 
 export function budgetVarianceTone(variance: number | null): 'neutral' | 'under' | 'over' {

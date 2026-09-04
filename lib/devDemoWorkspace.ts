@@ -6,7 +6,7 @@
  *   Remove or set to `false` for a public App Store build if you don't want the entry.
  *
  * Optional: `EXPO_PUBLIC_DEMO_PROJECT_ID=<uuid>` — then `/project/demo` redirects to `/project/[id]`
- * so Brief AI, Production sync, and DB behave like production.
+ * so Production, and DB behave like production.
  * CEO accounts: run `supabase/sql/ceo_project_workspace_access.sql` (or full deploy) so RLS allows opening any project.
  */
 const UUID_RE =
