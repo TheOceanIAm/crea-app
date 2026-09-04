@@ -1453,44 +1453,47 @@ export function ProjectCrewTab({
                   keyboardType="decimal-pad"
                 />
                 <View style={styles.inviteSection}>
-                  <Text style={styles.modalSectionKicker}>Invite to Crea</Text>
-                  <Text style={styles.modalHintSmall}>
-                    Email them a link to create a free profile (30-day Pro trial) and join this workspace.
-                  </Text>
-                  <Text style={styles.inviteStatusLine}>
-                    {selectedCrew.inviteStatus === 'pending' ? 'Invite sent' : 'Not invited'}
-                  </Text>
-                  <View style={styles.inviteActionsRow}>
+                  <View style={styles.inviteHeaderRow}>
+                    <Text style={styles.inviteKicker}>Invite to Crea</Text>
                     {selectedCrew.inviteStatus === 'pending' ? (
-                      <>
-                        <TouchableOpacity
-                          style={[styles.inviteActionBtn, busy && styles.dim]}
-                          disabled={busy || !proFeaturesEnabled}
-                          onPress={() => void inviteManualToCrea(selectedCrew, 'resend')}
-                        >
-                          <Text style={styles.inviteActionText}>Resend</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.inviteActionBtnMuted, busy && styles.dim]}
-                          disabled={busy}
-                          onPress={() => void inviteManualToCrea(selectedCrew, 'cancel')}
-                        >
-                          <Text style={styles.inviteActionTextMuted}>Cancel invite</Text>
-                        </TouchableOpacity>
-                      </>
+                      <View style={styles.inviteChipSent}>
+                        <Text style={styles.inviteChipSentText}>Invited</Text>
+                      </View>
                     ) : (
                       <TouchableOpacity
                         style={[
-                          styles.inviteActionBtnPrimary,
+                          styles.inviteChip,
                           (busy || !proFeaturesEnabled || !(selectedCrew.email ?? '').trim()) && styles.dim,
                         ]}
                         disabled={busy || !proFeaturesEnabled || !(selectedCrew.email ?? '').trim()}
                         onPress={() => void inviteManualToCrea(selectedCrew, 'send')}
+                        accessibilityLabel="Invite to Crea"
                       >
-                        <Text style={styles.inviteActionTextPrimary}>Invite to Crea</Text>
+                        <Text style={styles.inviteChipText}>Invite</Text>
                       </TouchableOpacity>
                     )}
                   </View>
+                  <Text style={styles.modalHintSmall}>
+                    Email them a link to create a free profile (30-day Pro trial) and join this workspace.
+                  </Text>
+                  {selectedCrew.inviteStatus === 'pending' ? (
+                    <View style={styles.inviteActionsRow}>
+                      <TouchableOpacity
+                        style={[styles.inviteActionBtn, busy && styles.dim]}
+                        disabled={busy || !proFeaturesEnabled}
+                        onPress={() => void inviteManualToCrea(selectedCrew, 'resend')}
+                      >
+                        <Text style={styles.inviteActionText}>Resend</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.inviteActionBtnMuted, busy && styles.dim]}
+                        disabled={busy}
+                        onPress={() => void inviteManualToCrea(selectedCrew, 'cancel')}
+                      >
+                        <Text style={styles.inviteActionTextMuted}>Cancel invite</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
                 </View>
               </>
             ) : null}
@@ -1864,26 +1867,43 @@ const styles = StyleSheet.create({
   modalHintSmall: { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginBottom: 10, lineHeight: 16 },
   inviteSection: {
     marginTop: 14,
+    marginBottom: 16,
     paddingTop: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.08)',
   },
-  inviteStatusLine: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: 'rgba(255,220,0,0.85)',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
+  inviteHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 6,
   },
-  inviteActionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  inviteActionBtnPrimary: {
+  inviteKicker: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    color: 'rgba(255,255,255,0.45)',
+    textTransform: 'uppercase',
+    flex: 1,
+  },
+  inviteChip: {
     borderRadius: 999,
     backgroundColor: '#FFDC00',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
-  inviteActionTextPrimary: { color: '#0a0a0a', fontWeight: '800', fontSize: 13 },
+  inviteChipText: { color: '#0a0a0a', fontWeight: '800', fontSize: 12 },
+  inviteChipSent: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(52,211,153,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.45)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  inviteChipSentText: { color: '#34d399', fontWeight: '800', fontSize: 12 },
+  inviteActionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2, marginBottom: 4 },
   inviteActionBtn: {
     borderRadius: 999,
     borderWidth: 1,
@@ -1967,7 +1987,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(185,28,28,0.15)',
   },
   modalDeleteText: { color: '#fecaca', fontWeight: '700' },
-  contactActions: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  contactActions: { flexDirection: 'row', gap: 8, marginTop: 4, marginBottom: 8 },
   contactBtn: {
     flex: 1,
     paddingVertical: 10,
