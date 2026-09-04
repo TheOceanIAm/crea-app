@@ -34,6 +34,11 @@ import {
 } from '@/lib/workspaceMilestones'
 import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
 import {
+  detectReviewLinkKind,
+  reviewLinkOpenLabel,
+  type ReviewLinkKind,
+} from '@/lib/reviewLinkKind'
+import {
   OFFLINE_READ_ONLY_MESSAGE,
   OFFLINE_READ_ONLY_TITLE,
   isOfflineFetchError,
@@ -65,6 +70,35 @@ function openReviewUrl(raw: string) {
   Linking.openURL(withProto).catch(() => {
     Alert.alert('Could not open link', withProto)
   })
+}
+
+const REVIEW_CHIP_COLORS: Record<ReviewLinkKind, { border: string; background: string; text: string }> = {
+  frameio: {
+    border: 'rgba(91,68,255,0.4)',
+    background: 'rgba(91,68,255,0.12)',
+    text: '#8b7cff',
+  },
+  picdrop: {
+    border: 'rgba(255,255,255,0.28)',
+    background: 'rgba(255,255,255,0.08)',
+    text: 'rgba(255,255,255,0.78)',
+  },
+  other: {
+    border: 'rgba(255,255,255,0.18)',
+    background: 'rgba(255,255,255,0.05)',
+    text: 'rgba(255,255,255,0.6)',
+  },
+}
+
+function reviewKindHint(kind: ReviewLinkKind): string {
+  switch (kind) {
+    case 'picdrop':
+      return 'PicDrop — shown in white/gray'
+    case 'frameio':
+      return 'Frame.io — shown in purple'
+    default:
+      return 'Other link — shown as Review'
+  }
 }
 
 export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canManage }: Props) {
@@ -322,8 +356,8 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       {usingOfflinePack ? <OfflinePackBanner downloadedAt={packDownloadedAt} /> : null}
       <Text style={styles.hint}>
         {canManage
-          ? 'Shared with the web workspace. Description, deliverables and Frame.io are on each card — tap to expand status and priority.'
-          : 'Shared with the web workspace. Description, deliverables and Frame.io are on each card — tap to expand more details.'}
+          ? 'Shared with the web workspace. Description, deliverables and review links are on each card — tap to expand status and priority.'
+          : 'Shared with the web workspace. Description, deliverables and review links are on each card — tap to expand more details.'}
       </Text>
 
       {canManage && !usingOfflinePack ? (
@@ -409,7 +443,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
             onPress={() => setAddDetailsOpen((v) => !v)}
             activeOpacity={0.8}
           >
-            <Text style={styles.detailsToggleText}>Description, deliverables & Frame.io</Text>
+            <Text style={styles.detailsToggleText}>Description, deliverables & review link</Text>
             <ChevronDown
               size={18}
               color="rgba(255,255,255,0.4)"
@@ -458,7 +492,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
               ) : null}
               <TextInput
                 style={styles.input}
-                placeholder="https://app.frame.io/reviews/..."
+                placeholder="https://app.frame.io/… or picdrop.com/…"
                 placeholderTextColor="rgba(255,255,255,0.25)"
                 value={newFrameioUrl}
                 onChangeText={setNewFrameioUrl}
@@ -466,6 +500,16 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                 autoCorrect={false}
                 keyboardType="url"
               />
+              {newFrameioUrl.trim() ? (
+                <Text
+                  style={[
+                    styles.reviewHint,
+                    { color: REVIEW_CHIP_COLORS[detectReviewLinkKind(newFrameioUrl)].text },
+                  ]}
+                >
+                  {reviewKindHint(detectReviewLinkKind(newFrameioUrl))}
+                </Text>
+              ) : null}
             </View>
           ) : null}
 
@@ -486,6 +530,8 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
           const cfg = MILESTONE_PRIORITY_CONFIG[m.priority]
           const statusCfg = MILESTONE_STATUS_CONFIG[m.status]
           const isExpanded = expandedId === m.id
+          const reviewKind = m.frameioUrl ? detectReviewLinkKind(m.frameioUrl) : null
+          const reviewColors = reviewKind ? REVIEW_CHIP_COLORS[reviewKind] : null
           return (
             <Pressable
               key={m.id}
@@ -529,13 +575,21 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                     )}
                     {when ? <Text style={styles.when}>Delivery: {when}</Text> : null}
                   </View>
-                  {m.frameioUrl ? (
+                  {m.frameioUrl && reviewColors && reviewKind ? (
                     <TouchableOpacity
-                      style={styles.frameioChip}
+                      style={[
+                        styles.frameioChip,
+                        {
+                          borderColor: reviewColors.border,
+                          backgroundColor: reviewColors.background,
+                        },
+                      ]}
                       onPress={() => openReviewUrl(m.frameioUrl!)}
                       activeOpacity={0.8}
                     >
-                      <Text style={styles.frameioChipText}>Open Frame.io</Text>
+                      <Text style={[styles.frameioChipText, { color: reviewColors.text }]}>
+                        {reviewLinkOpenLabel(reviewKind)}
+                      </Text>
                     </TouchableOpacity>
                   ) : null}
                   {m.deliverables.length > 0 ? (
@@ -826,6 +880,7 @@ const styles = StyleSheet.create({
   },
   expandedEmpty: { fontSize: 12, color: 'rgba(255,255,255,0.28)' },
   expandHint: { fontSize: 11, color: 'rgba(255,220,0,0.65)', fontWeight: '600', marginTop: 2 },
+  reviewHint: { fontSize: 11, fontWeight: '600', marginTop: 2 },
   frameioChip: {
     alignSelf: 'flex-start',
     paddingHorizontal: 12,
