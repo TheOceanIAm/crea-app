@@ -30,6 +30,57 @@ export type ProductionEquipmentDraft = {
   unit_price: number | null
 }
 
+export function formatRentalPeriodLabel(period: string, days?: number | null): string {
+  const p = period.trim()
+  if (!p) return ''
+  if (days != null && Number.isFinite(days) && days > 0 && !/\(\s*\d+\s*days?\s*\)/i.test(p)) {
+    const n = Math.round(days)
+    return `${p} (${n} ${n === 1 ? 'day' : 'days'})`
+  }
+  return p
+}
+
+export function mergeRentalPeriodIntoNotes(period: string, notes: string): string {
+  const p = period.trim()
+  const n = notes.trim()
+  if (!p) return n
+  if (!n) return `Rental: ${p}`
+  if (n.toLowerCase().includes(p.toLowerCase()) || /^rental:/i.test(n)) return n
+  return `Rental: ${p}\n${n}`
+}
+
+export function rentalPeriodFromNotes(notes: string | null | undefined): string | null {
+  const m = (notes ?? '').match(/^Rental:\s*(.+)$/im)
+  const p = m?.[1]?.trim()
+  return p ? p : null
+}
+
+export function equipmentNotesWithoutPeriod(notes: string | null | undefined): string {
+  return (notes ?? '')
+    .split('\n')
+    .filter((line) => !/^Rental:\s*/i.test(line.trim()))
+    .join('\n')
+    .trim()
+}
+
+export function commonRentalPeriod(rows: { notes?: string | null }[]): string | null {
+  const periods = rows
+    .map((r) => rentalPeriodFromNotes(r.notes))
+    .filter((p): p is string => Boolean(p))
+  if (periods.length === 0) return null
+  const counts = new Map<string, number>()
+  for (const p of periods) counts.set(p, (counts.get(p) ?? 0) + 1)
+  let best = periods[0]!
+  let n = 0
+  for (const [p, c] of counts) {
+    if (c > n) {
+      best = p
+      n = c
+    }
+  }
+  return best
+}
+
 export type TaskAssigneeInput = {
   name: string
   profileId: string | null
@@ -321,7 +372,7 @@ export async function deleteProductionEquipment(id: string): Promise<{ error: st
 export async function importRentalPdf(
   projectId: string,
   file: { uri: string; name: string; mimeType?: string }
-): Promise<{ rows: ProductionEquipmentItem[]; error: string | null; count: number }> {
+): Promise<{ rows: ProductionEquipmentItem[]; error: string | null; count: number; rental_period: string | null }> {
   const fd = new FormData()
   fd.append('projectId', projectId)
   fd.append('file', {
@@ -334,6 +385,7 @@ export async function importRentalPdf(
     error?: string
     rows?: ProductionEquipmentItem[]
     count?: number
+    rental_period?: string | null
   }>('/api/app/equipment/parse-rental-pdf', {
     method: 'POST',
     body: fd,
@@ -350,8 +402,12 @@ export async function importRentalPdf(
             ? 'Please sign in again.'
             : error) ||
       `Could not read PDF (${status})`
-    return { rows: [], error: msg, count: 0 }
+    return { rows: [], error: msg, count: 0, rental_period: null }
   }
   const rows = Array.isArray(data.rows) ? data.rows : []
-  return { rows, error: null, count: data.count ?? rows.length }
+  const rental_period =
+    typeof data.rental_period === 'string' && data.rental_period.trim()
+      ? data.rental_period.trim()
+      : commonRentalPeriod(rows)
+  return { rows, error: null, count: data.count ?? rows.length, rental_period }
 }

@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native'
+import { ChevronDown } from 'lucide-react-native'
+import { ICON_STROKE } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
 import {
   budgetVarianceTone,
@@ -21,7 +23,7 @@ import {
   type CrewSpendMemberRow,
   type EquipmentSpendRow,
 } from '@/lib/projectInternalBudget'
-import { fetchProductionEquipment } from '@/lib/productionLists'
+import { commonRentalPeriod, fetchProductionEquipment } from '@/lib/productionLists'
 import { syncProjectListingBudget } from '@/lib/syncProjectListingBudget'
 
 type BudgetPlanRow = {
@@ -65,7 +67,7 @@ function moneyToInput(n: number | null | undefined): string {
   return String(n)
 }
 
-const PRESETS = ['Food & beverage', 'Travel', 'Rental cars', 'Equipment', 'Other']
+const PRESETS = ['Food & beverage', 'Travel', 'Rental cars', 'Other']
 
 export function ProjectBudgetTab({ projectId }: Props) {
   const [loading, setLoading] = useState(true)
@@ -78,6 +80,9 @@ export function ProjectBudgetTab({ projectId }: Props) {
   const [members, setMembers] = useState<CrewSpendMemberRow[]>([])
   const [equipmentRows, setEquipmentRows] = useState<EquipmentSpendRow[]>([])
   const [deletedLineIds, setDeletedLineIds] = useState<string[]>([])
+  const [equipmentOpen, setEquipmentOpen] = useState(false)
+  const [crewOpen, setCrewOpen] = useState(false)
+  const [otherOpen, setOtherOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -190,6 +195,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
   const wrapUpTone = budgetVarianceTone(wrapUpVariance)
   const remainingProduction =
     productionCapNum != null ? Math.round((productionCapNum - crew.total) * 100) / 100 : null
+  const equipmentPeriod = useMemo(() => commonRentalPeriod(equipmentRows), [equipmentRows])
 
   const varianceStyle = (v: number | null) => {
     const tone = budgetVarianceTone(v)
@@ -287,6 +293,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
   }
 
   const addLine = (label?: string) => {
+    setOtherOpen(true)
     const nextSort = lines.length ? Math.max(...lines.map((l) => l.sort_order)) + 1 : 0
     setLines((prev) => [
       ...prev,
@@ -355,57 +362,6 @@ export function ProjectBudgetTab({ projectId }: Props) {
         <TouchableOpacity style={[styles.primaryBtn, savingPlan && styles.dim]} onPress={() => void savePlan()} disabled={savingPlan}>
           <Text style={styles.primaryBtnText}>{savingPlan ? 'Saving…' : 'Save targets'}</Text>
         </TouchableOpacity>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Crew (auto)</Text>
-        {crew.currenciesMixed ? (
-          <Text style={styles.warn}>Some day rates use a different currency than the plan — totals may be misleading.</Text>
-        ) : null}
-        <Text style={styles.summaryBig}>{formatMoneyAmount(crew.total, currency)}</Text>
-        <Text style={styles.muted}>Booked day-equivalents × profile rates (excludes client row). Half-days use half-day rate when set.</Text>
-        {crew.lines.length === 0 ? (
-          <Text style={styles.muted}>No booked days or rates yet.</Text>
-        ) : (
-          crew.lines.map((ln) => (
-            <View key={ln.profileIdKey} style={styles.crewRow}>
-              <Text style={styles.crewName}>{ln.displayName}</Text>
-              <View style={styles.crewDetailRow}>
-                <Text style={styles.crewMeta}>
-                  {(ln.dayUnits % 1 === 0 ? String(ln.dayUnits) : ln.dayUnits.toFixed(1)) + 'd equiv'}
-                  {ln.halfDayRate != null && ln.halfDayRate > 0
-                    ? ` · day ${formatMoneyAmount(ln.dayRate, currency)} / half ${formatMoneyAmount(ln.halfDayRate, currency)}`
-                    : ` · ${formatMoneyAmount(ln.dayRate, currency)} day`}
-                </Text>
-                <Text style={styles.crewAmt}>{formatMoneyAmount(ln.subtotal, currency)}</Text>
-              </View>
-            </View>
-          ))
-        )}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Equipment (auto)</Text>
-        <Text style={styles.summaryBig}>{formatMoneyAmount(equipment.total, currency)}</Text>
-        <Text style={styles.muted}>
-          Kit-list qty × unit price (same currency as this plan). Items without a price are skipped. Edit prices on the
-          Equipment tab.
-        </Text>
-        {equipment.lines.length === 0 ? (
-          <Text style={styles.muted}>No priced kit items yet.</Text>
-        ) : (
-          equipment.lines.map((ln) => (
-            <View key={ln.id} style={styles.crewRow}>
-              <Text style={styles.crewName}>{ln.displayName}</Text>
-              <View style={styles.crewDetailRow}>
-                <Text style={styles.crewMeta}>
-                  {ln.qty} × {formatMoneyAmount(ln.unitPrice, currency)}
-                </Text>
-                <Text style={styles.crewAmt}>{formatMoneyAmount(ln.subtotal, currency)}</Text>
-              </View>
-            </View>
-          ))
-        )}
       </View>
 
       <View style={styles.card}>
@@ -492,60 +448,185 @@ export function ProjectBudgetTab({ projectId }: Props) {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Other expenses</Text>
-        <Text style={styles.muted}>
-          Manual lines (catering, travel, extra rentals not on the kit list). Kit-list prices are already included
-          above — don’t duplicate them here.
-        </Text>
-        <View style={styles.presetRow}>
-          {PRESETS.map((p) => (
-            <TouchableOpacity key={p} style={styles.presetChip} onPress={() => addLine(p)}>
-              <Text style={styles.presetChipText}>+ {p}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        {lines.map((l) => (
-          <View key={l.id} style={styles.lineBlock}>
-            <TextInput
-              style={styles.input}
-              value={l.label}
-              onChangeText={(t) => setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, label: t } : x)))}
-              placeholder="Label"
-              placeholderTextColor="rgba(255,255,255,0.3)"
-            />
-            <View style={styles.lineInputs}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.hint}>Planned (forecast)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={l.plannedStr}
-                  onChangeText={(t) => setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, plannedStr: t } : x)))}
-                  keyboardType="decimal-pad"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.hint}>Actual (wrap-up)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={l.spentStr}
-                  onChangeText={(t) => setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, spentStr: t } : x)))}
-                  keyboardType="decimal-pad"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                />
-              </View>
+        <TouchableOpacity
+          onPress={() => setCrewOpen((v) => !v)}
+          style={styles.foldHeader}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: crewOpen }}
+          accessibilityLabel="Crew"
+        >
+          <View style={styles.foldHeaderText}>
+            <Text style={styles.foldTitle}>Crew (auto)</Text>
+            <Text style={styles.foldAmount}>{formatMoneyAmount(crew.total, currency)}</Text>
+          </View>
+          <ChevronDown
+            size={18}
+            color="rgba(255,255,255,0.4)"
+            strokeWidth={ICON_STROKE}
+            style={{ transform: [{ rotate: crewOpen ? '180deg' : '0deg' }] }}
+          />
+        </TouchableOpacity>
+        {crewOpen ? (
+          <View style={styles.foldBody}>
+            {crew.currenciesMixed ? (
+              <Text style={styles.warn}>
+                Some day rates use a different currency than the plan — totals may be misleading.
+              </Text>
+            ) : null}
+            <Text style={styles.muted}>
+              Booked day-equivalents × profile rates (excludes client row). Half-days use half-day rate when set.
+            </Text>
+            {crew.lines.length === 0 ? (
+              <Text style={styles.muted}>No booked days or rates yet.</Text>
+            ) : (
+              crew.lines.map((ln) => (
+                <View key={ln.profileIdKey} style={styles.crewRow}>
+                  <Text style={styles.crewName}>{ln.displayName}</Text>
+                  <View style={styles.crewDetailRow}>
+                    <Text style={styles.crewMeta}>
+                      {(ln.dayUnits % 1 === 0 ? String(ln.dayUnits) : ln.dayUnits.toFixed(1)) + 'd equiv'}
+                      {ln.halfDayRate != null && ln.halfDayRate > 0
+                        ? ` · day ${formatMoneyAmount(ln.dayRate, currency)} / half ${formatMoneyAmount(ln.halfDayRate, currency)}`
+                        : ` · ${formatMoneyAmount(ln.dayRate, currency)} day`}
+                    </Text>
+                    <Text style={styles.crewAmt}>{formatMoneyAmount(ln.subtotal, currency)}</Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        ) : null}
+      </View>
+
+      <View style={styles.card}>
+        <TouchableOpacity
+          onPress={() => setEquipmentOpen((v) => !v)}
+          style={styles.foldHeader}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: equipmentOpen }}
+          accessibilityLabel="Equipment"
+        >
+          <View style={styles.foldHeaderText}>
+            <Text style={styles.foldTitle}>Equipment (auto)</Text>
+            <Text style={styles.foldAmount}>{formatMoneyAmount(equipment.total, currency)}</Text>
+          </View>
+          <ChevronDown
+            size={18}
+            color="rgba(255,255,255,0.4)"
+            strokeWidth={ICON_STROKE}
+            style={{ transform: [{ rotate: equipmentOpen ? '180deg' : '0deg' }] }}
+          />
+        </TouchableOpacity>
+        {equipmentOpen ? (
+          <View style={styles.foldBody}>
+            {equipmentPeriod ? <Text style={styles.periodLine}>Rental: {equipmentPeriod}</Text> : null}
+            <Text style={styles.muted}>
+              Kit-list qty × unit price (same currency as this plan). Items without a price are skipped. Edit prices on
+              the Equipment tab.
+            </Text>
+            {equipment.lines.length === 0 ? (
+              <Text style={styles.muted}>No priced kit items yet.</Text>
+            ) : (
+              equipment.lines.map((ln) => (
+                <View key={ln.id} style={styles.crewRow}>
+                  <Text style={styles.crewName}>{ln.displayName}</Text>
+                  <View style={styles.crewDetailRow}>
+                    <Text style={styles.crewMeta}>
+                      {ln.qty} × {formatMoneyAmount(ln.unitPrice, currency)}
+                      {ln.period && ln.period !== equipmentPeriod ? ` · ${ln.period}` : ''}
+                    </Text>
+                    <Text style={styles.crewAmt}>{formatMoneyAmount(ln.subtotal, currency)}</Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        ) : null}
+      </View>
+
+      <View style={styles.card}>
+        <TouchableOpacity
+          onPress={() => setOtherOpen((v) => !v)}
+          style={styles.foldHeader}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: otherOpen }}
+          accessibilityLabel="Other expenses"
+        >
+          <View style={styles.foldHeaderText}>
+            <Text style={styles.foldTitle}>Other expenses</Text>
+            <Text style={styles.foldAmount}>{formatMoneyAmount(otherPlanned, currency)}</Text>
+          </View>
+          <ChevronDown
+            size={18}
+            color="rgba(255,255,255,0.4)"
+            strokeWidth={ICON_STROKE}
+            style={{ transform: [{ rotate: otherOpen ? '180deg' : '0deg' }] }}
+          />
+        </TouchableOpacity>
+        {otherOpen ? (
+          <View style={styles.foldBody}>
+            <Text style={styles.muted}>
+              Manual lines (catering, travel, cars, etc.). Kit-list prices are already in Equipment (auto).
+            </Text>
+            <View style={styles.presetRow}>
+              {PRESETS.map((p) => (
+                <TouchableOpacity key={p} style={styles.presetChip} onPress={() => addLine(p)}>
+                  <Text style={styles.presetChipText}>+ {p}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
-            <TouchableOpacity onPress={() => removeLine(l.id)}>
-              <Text style={styles.remove}>Remove</Text>
+            {lines.map((l) => (
+              <View key={l.id} style={styles.lineBlock}>
+                <TextInput
+                  style={styles.input}
+                  value={l.label}
+                  onChangeText={(t) => setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, label: t } : x)))}
+                  placeholder="Label"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                />
+                <View style={styles.lineInputs}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.hint}>Planned (forecast)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={l.plannedStr}
+                      onChangeText={(t) =>
+                        setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, plannedStr: t } : x)))
+                      }
+                      keyboardType="decimal-pad"
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.hint}>Actual (wrap-up)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={l.spentStr}
+                      onChangeText={(t) =>
+                        setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, spentStr: t } : x)))
+                      }
+                      keyboardType="decimal-pad"
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                    />
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => removeLine(l.id)}>
+                  <Text style={styles.remove}>Remove</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => addLine()}>
+              <Text style={styles.secondaryBtnText}>+ Add line</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.primaryBtn, savingLines && styles.dim]}
+              onPress={() => void saveLines()}
+              disabled={savingLines}
+            >
+              <Text style={styles.primaryBtnText}>{savingLines ? 'Saving…' : 'Save expense lines'}</Text>
             </TouchableOpacity>
           </View>
-        ))}
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => addLine()}>
-          <Text style={styles.secondaryBtnText}>+ Add line</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.primaryBtn, savingLines && styles.dim]} onPress={() => void saveLines()} disabled={savingLines}>
-          <Text style={styles.primaryBtnText}>{savingLines ? 'Saving…' : 'Save expense lines'}</Text>
-        </TouchableOpacity>
+        ) : null}
       </View>
     </ScrollView>
   )
@@ -572,6 +653,23 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 10,
   },
+  foldHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  foldHeaderText: { flex: 1, minWidth: 0 },
+  foldTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+    color: 'rgba(255,255,255,0.45)',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  foldAmount: { fontSize: 18, fontWeight: '800', color: '#FFDC00' },
+  foldBody: { marginTop: 12 },
+  periodLine: { fontSize: 12, fontWeight: '700', color: '#FFDC00', marginBottom: 8 },
   hint: { fontSize: 11, color: 'rgba(255,255,255,0.35)', marginBottom: 4 },
   input: {
     backgroundColor: '#0a0a0a',

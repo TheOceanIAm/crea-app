@@ -26,6 +26,9 @@ import {
   insertProductionEquipment,
   insertProductionTask,
   parseOptionalUnitPrice,
+  commonRentalPeriod,
+  equipmentNotesWithoutPeriod,
+  rentalPeriodFromNotes,
   unitPriceToInput,
   updateProductionEquipment,
   updateProductionTask,
@@ -492,7 +495,7 @@ export function ProductionEquipmentSection({ projectId, readOnly = false, offlin
       return
     }
     setPdfBusy(true)
-    const { rows: added, error, count } = await importRentalPdf(projectId, {
+    const { rows: added, error, count, rental_period } = await importRentalPdf(projectId, {
       uri: asset.uri,
       name: asset.name || 'quote.pdf',
       mimeType: asset.mimeType,
@@ -503,8 +506,11 @@ export function ProductionEquipmentSection({ projectId, readOnly = false, offlin
       return
     }
     setRows((prev) => [...prev, ...added])
-    Alert.alert('Equipment', count === 1 ? 'Added 1 item from the quote.' : `Added ${count} items from the quote.`)
+    const addedMsg = count === 1 ? 'Added 1 item from the quote.' : `Added ${count} items from the quote.`
+    Alert.alert('Equipment', rental_period ? `${addedMsg}\nRental: ${rental_period}` : addedMsg)
   }
+
+  const sharedPeriod = useMemo(() => commonRentalPeriod(rows), [rows])
 
   if (loading) {
     return (
@@ -534,7 +540,7 @@ export function ProductionEquipmentSection({ projectId, readOnly = false, offlin
             )}
             <Text style={styles.pdfBtnText}>{pdfBusy ? 'Reading PDF…' : 'Upload rental PDF'}</Text>
           </TouchableOpacity>
-          <Text style={styles.pdfHint}>Quote is added to this list. Existing items stay.</Text>
+          <Text style={styles.pdfHint}>Quote is added to this list. Existing items stay. Rental dates from the PDF are saved on the list.</Text>
           <TextInput
             style={styles.input}
             placeholder="Item (e.g. Alexa Mini)"
@@ -576,9 +582,18 @@ export function ProductionEquipmentSection({ projectId, readOnly = false, offlin
       {rows.length === 0 ? (
         <Text style={styles.empty}>No equipment yet.</Text>
       ) : (
-        rows.map((row) => {
+        <>
+          {sharedPeriod ? (
+            <View style={styles.periodBanner}>
+              <Text style={styles.periodKicker}>Rental period</Text>
+              <Text style={styles.periodText}>{sharedPeriod}</Text>
+            </View>
+          ) : null}
+          {rows.map((row) => {
           const line = equipmentLineTotal(row.qty, row.unit_price)
           const hasPrice = row.unit_price != null && row.unit_price > 0
+          const period = rentalPeriodFromNotes(row.notes)
+          const extraNotes = equipmentNotesWithoutPeriod(row.notes)
           return (
             <View key={row.id} style={styles.row}>
               <View style={styles.rowText}>
@@ -595,7 +610,8 @@ export function ProductionEquipmentSection({ projectId, readOnly = false, offlin
                         : 'Add price'}
                   </Text>
                 </TouchableOpacity>
-                {row.notes.trim() ? <Text style={styles.rowNotes}>{row.notes}</Text> : null}
+                {period && period !== sharedPeriod ? <Text style={styles.periodRow}>{period}</Text> : null}
+                {extraNotes ? <Text style={styles.rowNotes}>{extraNotes}</Text> : null}
               </View>
               {!readOnly ? (
                 <TouchableOpacity style={styles.deleteBtn} onPress={() => remove(row)} hitSlop={8}>
@@ -604,7 +620,8 @@ export function ProductionEquipmentSection({ projectId, readOnly = false, offlin
               ) : null}
             </View>
           )
-        })
+        })}
+        </>
       )}
 
       <KeyboardFormModal visible={Boolean(editRow)} onClose={() => setEditRow(null)}>
@@ -696,6 +713,25 @@ const styles = StyleSheet.create({
   rowTitleDone: { textDecorationLine: 'line-through', color: 'rgba(255,255,255,0.4)' },
   qty: { color: '#FFDC00', fontWeight: '700' },
   rowNotes: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 4, lineHeight: 16 },
+  periodBanner: {
+    backgroundColor: '#111',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.22)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  periodKicker: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    color: 'rgba(255,255,255,0.4)',
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  periodText: { color: '#FFDC00', fontSize: 14, fontWeight: '700' },
+  periodRow: { color: '#FFDC00', fontSize: 12, fontWeight: '600', marginTop: 4 },
   deleteBtn: { padding: 4 },
   assigneeBlock: { gap: 8 },
   assigneeLabel: {

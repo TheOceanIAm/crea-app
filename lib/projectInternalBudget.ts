@@ -110,6 +110,7 @@ export type EquipmentSpendRow = {
   name: string
   qty: string
   unit_price: number | null
+  notes?: string | null
 }
 
 export type EquipmentSpendLine = {
@@ -118,6 +119,7 @@ export type EquipmentSpendLine = {
   qty: number
   unitPrice: number
   subtotal: number
+  period: string | null
 }
 
 /** First positive number in qty text; empty / unparseable → 1. */
@@ -143,12 +145,14 @@ export function computeEquipmentSpend(rows: EquipmentSpendRow[]): { lines: Equip
     if (price == null || !Number.isFinite(price) || price <= 0) continue
     const qty = parseEquipmentQty(r.qty)
     const subtotal = Math.round(qty * price * 100) / 100
+    const periodMatch = (r.notes ?? '').match(/^Rental:\s*(.+)$/im)
     lines.push({
       id: r.id,
       displayName: (r.name ?? '').trim() || 'Equipment',
       qty,
       unitPrice: price,
       subtotal,
+      period: periodMatch?.[1]?.trim() || null,
     })
   }
   const total = Math.round(lines.reduce((s, l) => s + l.subtotal, 0) * 100) / 100
