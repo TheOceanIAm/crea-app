@@ -26,9 +26,11 @@ import {
   MILESTONE_PRIORITY_CONFIG,
   MILESTONE_STATUS_CONFIG,
   setWorkspaceMilestoneCompleted,
+  setWorkspaceMilestoneDeliverableDone,
   setWorkspaceMilestonePriority,
   setWorkspaceMilestoneStatus,
   updateWorkspaceMilestone,
+  mergeWorkspaceMilestoneDeliverableDone,
   type WorkspaceMilestonePriority,
   type WorkspaceMilestoneStatus,
   type WorkspaceMilestoneUi,
@@ -319,6 +321,11 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       scheduledAt,
       priority: editPriority,
       deliverables: editDeliverables,
+      deliverablesDone: mergeWorkspaceMilestoneDeliverableDone(
+        m.deliverables,
+        m.deliverablesDone,
+        editDeliverables
+      ),
       frameioUrl: editFrameioUrl,
     })
     setBusy(false)
@@ -347,7 +354,9 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       return
     }
     const nextCompleted = !m.completed
-    const { error } = await setWorkspaceMilestoneCompleted(supabase, m.id, nextCompleted)
+    const { error } = await setWorkspaceMilestoneCompleted(supabase, m.id, nextCompleted, {
+      deliverablesDone: m.deliverablesDone,
+    })
     if (error) {
       Alert.alert('Update failed', error)
       return
@@ -355,11 +364,34 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
     setRows((prev) =>
       prev.map((r) =>
         r.id === m.id
-          ? { ...r, completed: nextCompleted, status: nextCompleted ? 'completed' : 'pending' }
+          ? {
+              ...r,
+              completed: nextCompleted,
+              status: nextCompleted ? 'completed' : 'pending',
+              deliverablesDone: nextCompleted ? r.deliverables.map(() => true) : r.deliverablesDone,
+            }
           : r
       )
     )
     onCountsChanged?.()
+  }
+
+  const toggleDeliverable = async (m: WorkspaceMilestoneUi, index: number) => {
+    if (!canManage) return
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
+    if (index < 0 || index >= m.deliverables.length) return
+    const deliverablesDone = m.deliverables.map((_, i) =>
+      i === index ? !m.deliverablesDone[i] : m.deliverablesDone[i] === true
+    )
+    const { error } = await setWorkspaceMilestoneDeliverableDone(supabase, m.id, deliverablesDone)
+    if (error) {
+      Alert.alert('Update failed', error)
+      return
+    }
+    setRows((prev) => prev.map((r) => (r.id === m.id ? { ...r, deliverablesDone } : r)))
   }
 
   const setPriority = async (m: WorkspaceMilestoneUi, priority: WorkspaceMilestonePriority) => {
@@ -382,12 +414,28 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
       return
     }
-    const { error } = await setWorkspaceMilestoneStatus(supabase, m.id, status)
+    const { error } = await setWorkspaceMilestoneStatus(
+      supabase,
+      m.id,
+      status,
+      status === 'completed' ? { deliverablesDone: m.deliverablesDone } : undefined
+    )
     if (error) {
       Alert.alert('Update failed', error)
       return
     }
-    setRows((prev) => prev.map((r) => (r.id === m.id ? { ...r, status, completed: status === 'completed' } : r)))
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === m.id
+          ? {
+              ...r,
+              status,
+              completed: status === 'completed',
+              deliverablesDone: status === 'completed' ? r.deliverables.map(() => true) : r.deliverablesDone,
+            }
+          : r
+      )
+    )
     onCountsChanged?.()
   }
 
@@ -680,14 +728,36 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                   {m.deliverables.length > 0 ? (
                     <View style={styles.expandedBlock}>
                       <Text style={styles.expandedLabel}>Deliverables</Text>
-                      {(isExpanded ? m.deliverables : m.deliverables.slice(0, 3)).map((d, i) => (
-                        <View key={`${m.id}-d-${i}`} style={styles.deliverableRow}>
-                          <View style={[styles.deliverableCheck, m.completed && styles.deliverableCheckOn]}>
-                            {m.completed ? <Check size={10} color="#4ade80" strokeWidth={ICON_STROKE} /> : null}
+                      {canManage ? (
+                        <Text style={styles.expandedEmpty}>Check off each item as you accept it.</Text>
+                      ) : null}
+                      {(isExpanded ? m.deliverables : m.deliverables.slice(0, 3)).map((d, i) => {
+                        const done = m.deliverablesDone[i] === true
+                        const rowInner = (
+                          <>
+                            <View style={[styles.deliverableCheck, done && styles.deliverableCheckOn]}>
+                              {done ? <Check size={10} color="#4ade80" strokeWidth={ICON_STROKE} /> : null}
+                            </View>
+                            <Text style={[styles.deliverableText, done && styles.titleDone]}>{d}</Text>
+                          </>
+                        )
+                        return canManage ? (
+                          <TouchableOpacity
+                            key={`${m.id}-d-${i}`}
+                            style={styles.deliverableRow}
+                            onPress={() => void toggleDeliverable(m, i)}
+                            activeOpacity={0.7}
+                            accessibilityRole="checkbox"
+                            accessibilityState={{ checked: done }}
+                          >
+                            {rowInner}
+                          </TouchableOpacity>
+                        ) : (
+                          <View key={`${m.id}-d-${i}`} style={styles.deliverableRow}>
+                            {rowInner}
                           </View>
-                          <Text style={[styles.deliverableText, m.completed && styles.titleDone]}>{d}</Text>
-                        </View>
-                      ))}
+                        )
+                      })}
                       {!isExpanded && m.deliverables.length > 3 ? (
                         <Text style={styles.expandHint}>+{m.deliverables.length - 3} more · tap to expand</Text>
                       ) : null}

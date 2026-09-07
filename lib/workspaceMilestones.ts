@@ -58,6 +58,7 @@ export type WorkspaceMilestoneDbRow = {
   due_date?: string | null
   position: number
   deliverables?: unknown
+  deliverables_done?: unknown
   frameio_url?: string | null
 }
 
@@ -71,6 +72,7 @@ export type WorkspaceMilestoneUi = {
   scheduledAt: string | null
   sortOrder: number
   deliverables: string[]
+  deliverablesDone: boolean[]
   frameioUrl: string | null
 }
 
@@ -102,7 +104,7 @@ export const MILESTONE_PRIORITY_CONFIG: Record<
 }
 
 const MILESTONE_SELECT =
-  'id, job_id, title, description, status, priority, due_at, due_date, position, deliverables, frameio_url'
+  'id, job_id, title, description, status, priority, due_at, due_date, position, deliverables, deliverables_done, frameio_url'
 
 const STATUSES: WorkspaceMilestoneStatus[] = ['pending', 'in_progress', 'completed']
 
@@ -145,15 +147,48 @@ export function parseWorkspaceMilestoneStatus(value: unknown): WorkspaceMileston
 export function parseWorkspaceMilestoneDeliverables(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
+    .map((item) => {
+      if (typeof item === 'string') return item.trim()
+      if (item && typeof item === 'object') {
+        const rec = item as { text?: unknown; label?: unknown }
+        const raw = rec.text ?? rec.label
+        if (typeof raw === 'string') return raw.trim()
+      }
+      return ''
+    })
     .filter((item) => item.length > 0)
+}
+
+export function parseWorkspaceMilestoneDeliverableDone(value: unknown, count: number): boolean[] {
+  const flags: boolean[] = []
+  const src = Array.isArray(value) ? value : []
+  for (let i = 0; i < count; i++) {
+    flags.push(src[i] === true)
+  }
+  return flags
+}
+
+export function mergeWorkspaceMilestoneDeliverableDone(
+  prevLabels: string[],
+  prevDone: boolean[],
+  nextLabels: string[]
+): boolean[] {
+  const used = new Set<number>()
+  return nextLabels.map((label) => {
+    const idx = prevLabels.findIndex((prev, i) => prev === label && !used.has(i))
+    if (idx >= 0) {
+      used.add(idx)
+      return prevDone[idx] === true
+    }
+    return false
+  })
 }
 
 export function mapWorkspaceMilestoneToUi(row: WorkspaceMilestoneDbRow): WorkspaceMilestoneUi {
   const status = parseWorkspaceMilestoneStatus(row.status)
   const scheduledAt = row.due_at?.trim() || row.due_date?.trim() || null
   const frameioUrl = row.frameio_url?.trim() || null
+  const deliverables = parseWorkspaceMilestoneDeliverables(row.deliverables)
   return {
     id: row.id,
     title: row.title,
@@ -163,7 +198,8 @@ export function mapWorkspaceMilestoneToUi(row: WorkspaceMilestoneDbRow): Workspa
     priority: parseWorkspaceMilestonePriority(row.priority),
     scheduledAt,
     sortOrder: typeof row.position === 'number' ? row.position : 0,
-    deliverables: parseWorkspaceMilestoneDeliverables(row.deliverables),
+    deliverables,
+    deliverablesDone: parseWorkspaceMilestoneDeliverableDone(row.deliverables_done, deliverables.length),
     frameioUrl,
   }
 }
@@ -225,6 +261,7 @@ export async function insertWorkspaceMilestone(
       due_at: opts.scheduledAt,
       due_date: opts.scheduledAt,
       deliverables,
+      deliverables_done: deliverables.map(() => false),
       frameio_url: frameioUrl,
     })
     .select(MILESTONE_SELECT)
@@ -240,9 +277,14 @@ export async function insertWorkspaceMilestone(
 export async function setWorkspaceMilestoneStatus(
   supabase: SupabaseClient,
   milestoneId: string,
-  status: WorkspaceMilestoneStatus
+  status: WorkspaceMilestoneStatus,
+  extras?: { deliverablesDone?: boolean[] }
 ): Promise<{ error: string | null }> {
-  const { error } = await supabase.from('milestones').update({ status }).eq('id', milestoneId)
+  const patch: Record<string, unknown> = { status }
+  if (status === 'completed' && extras?.deliverablesDone) {
+    patch.deliverables_done = extras.deliverablesDone.map(() => true)
+  }
+  const { error } = await supabase.from('milestones').update(patch).eq('id', milestoneId)
   if (error) {
     logMilestoneDbError('setStatus', error)
     return { error: friendlyMilestoneError('update', error.message) }
@@ -253,9 +295,31 @@ export async function setWorkspaceMilestoneStatus(
 export async function setWorkspaceMilestoneCompleted(
   supabase: SupabaseClient,
   milestoneId: string,
-  completed: boolean
+  completed: boolean,
+  extras?: { deliverablesDone?: boolean[] }
 ): Promise<{ error: string | null }> {
-  return setWorkspaceMilestoneStatus(supabase, milestoneId, completed ? 'completed' : 'pending')
+  return setWorkspaceMilestoneStatus(
+    supabase,
+    milestoneId,
+    completed ? 'completed' : 'pending',
+    completed ? extras : undefined
+  )
+}
+
+export async function setWorkspaceMilestoneDeliverableDone(
+  supabase: SupabaseClient,
+  milestoneId: string,
+  deliverablesDone: boolean[]
+): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from('milestones')
+    .update({ deliverables_done: deliverablesDone })
+    .eq('id', milestoneId)
+  if (error) {
+    logMilestoneDbError('setDeliverableDone', error)
+    return { error: friendlyMilestoneError('update', error.message) }
+  }
+  return { error: null }
 }
 
 export async function setWorkspaceMilestonePriority(
@@ -280,6 +344,7 @@ export async function updateWorkspaceMilestone(
     scheduledAt: string | null
     priority?: WorkspaceMilestonePriority
     deliverables?: string[]
+    deliverablesDone?: boolean[]
     frameioUrl?: string | null
   }
 ): Promise<{ row: WorkspaceMilestoneUi | null; error: string | null }> {
@@ -287,6 +352,8 @@ export async function updateWorkspaceMilestone(
   if (!title) return { row: null, error: 'Title is required.' }
   const description = opts.description?.trim() || ''
   const deliverables = parseWorkspaceMilestoneDeliverables(opts.deliverables)
+  const deliverablesDone =
+    opts.deliverablesDone ?? deliverables.map(() => false)
   const frameioUrl = opts.frameioUrl?.trim() || null
   const patch: Record<string, unknown> = {
     title,
@@ -294,6 +361,7 @@ export async function updateWorkspaceMilestone(
     due_at: opts.scheduledAt,
     due_date: opts.scheduledAt,
     deliverables,
+    deliverables_done: deliverablesDone,
     frameio_url: frameioUrl,
   }
   if (opts.priority) patch.priority = opts.priority

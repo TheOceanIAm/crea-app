@@ -8,7 +8,7 @@ export async function ensureSoloWorkspaceProjectRow(
   supabase: SupabaseClient,
   params: { projectOrJobId: string; userId: string }
 ): Promise<{ ok: boolean; reason?: string }> {
-  const { projectOrJobId, userId } = params
+  const { projectOrJobId } = params
 
   const { data: existing } = await supabase.from('projects').select('id').eq('id', projectOrJobId).maybeSingle()
   if (existing?.id) return { ok: true }
@@ -45,15 +45,15 @@ export async function ensureSoloWorkspaceProjectRow(
     updated_at?: string | null
   }
 
-  if (!row.is_solo_workspace || row.company_id !== userId) {
+  if (!row.is_solo_workspace) {
     return { ok: false, reason: 'not_solo_owner' }
   }
 
   const { error: insErr } = await supabase.from('projects').insert({
     id: row.id,
     job_id: row.id,
-    company_id: userId,
-    freelancer_id: userId,
+    company_id: row.company_id,
+    freelancer_id: row.company_id,
     title: (row.title && String(row.title).trim()) || 'Untitled project',
     status:
       typeof row.project_status === 'string' && row.project_status.trim()

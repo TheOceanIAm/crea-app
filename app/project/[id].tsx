@@ -191,11 +191,7 @@ export default function ProjectWorkspaceScreen() {
             .maybeSingle()
         : Promise.resolve({ data: null }),
     ])
-    const soloPrivate = Boolean(
-      jobRow.data?.is_solo_workspace &&
-        userId &&
-        String(jobRow.data.company_id ?? '') === userId
-    )
+    const soloPrivate = Boolean(jobRow.data?.is_solo_workspace)
     setIsPrivateWorkspace(soloPrivate)
 
     if (next) {
@@ -381,7 +377,7 @@ export default function ProjectWorkspaceScreen() {
         setWorkspaceOnlyPlan(
           roleHint !== 'company' && isFreelancerWorkspaceOnlyPlan(freelancerPlanAgg)
         )
-        setIsPrivateWorkspace(Boolean(shellOnly.job?.is_solo_workspace && shellOnly.isOwner))
+        setIsPrivateWorkspace(Boolean(shellOnly.job?.is_solo_workspace))
         setJobOwnerCompanyId(
           typeof shellOnly.job?.company_id === 'string' ? shellOnly.job.company_id : ap.company_id
         )
@@ -440,14 +436,14 @@ export default function ProjectWorkspaceScreen() {
         cacheProjectShell(id, {
           project: ap,
           overviewSummary: aggOverview,
-          isPrivateWorkspace: Boolean(shellOnly.job?.is_solo_workspace && shellOnly.isOwner),
+          isPrivateWorkspace: Boolean(shellOnly.job?.is_solo_workspace),
           jobOwnerCompanyId:
             typeof shellOnly.job?.company_id === 'string' ? shellOnly.job.company_id : ap.company_id,
         })
         void persistProjectShellToDisk(id, {
           project: ap,
           overviewSummary: aggOverview,
-          isPrivateWorkspace: Boolean(shellOnly.job?.is_solo_workspace && shellOnly.isOwner),
+          isPrivateWorkspace: Boolean(shellOnly.job?.is_solo_workspace),
           jobOwnerCompanyId:
             typeof shellOnly.job?.company_id === 'string' ? shellOnly.job.company_id : ap.company_id,
         })
@@ -475,9 +471,7 @@ export default function ProjectWorkspaceScreen() {
           .eq('id', jobLookupId)
           .maybeSingle()
       : { data: null }
-    const soloPrivate = Boolean(
-      jobPhase?.is_solo_workspace && String(jobPhase.company_id ?? '') === user.id
-    )
+    const soloPrivate = Boolean(jobPhase?.is_solo_workspace)
     setIsPrivateWorkspace(soloPrivate)
     const jobCompanyId =
       jobPhase && typeof (jobPhase as { company_id?: string | null }).company_id === 'string'
@@ -580,7 +574,7 @@ export default function ProjectWorkspaceScreen() {
       setWorkspaceOnlyPlan(
         roleHint !== 'company' && isFreelancerWorkspaceOnlyPlan(freelancerPlanAgg)
       )
-      setIsPrivateWorkspace(Boolean(shell.job?.is_solo_workspace && shell.isOwner))
+      setIsPrivateWorkspace(Boolean(shell.job?.is_solo_workspace))
       setJobOwnerCompanyId(
         typeof shell.job?.company_id === 'string' ? shell.job.company_id : ap.company_id
       )
@@ -611,14 +605,14 @@ export default function ProjectWorkspaceScreen() {
       cacheProjectShell(id, {
         project: ap,
         overviewSummary: aggOverview,
-        isPrivateWorkspace: Boolean(shell.job?.is_solo_workspace && shell.isOwner),
+        isPrivateWorkspace: Boolean(shell.job?.is_solo_workspace),
         jobOwnerCompanyId:
           typeof shell.job?.company_id === 'string' ? shell.job.company_id : ap.company_id,
       })
       void persistProjectShellToDisk(id, {
         project: ap,
         overviewSummary: aggOverview,
-        isPrivateWorkspace: Boolean(shell.job?.is_solo_workspace && shell.isOwner),
+        isPrivateWorkspace: Boolean(shell.job?.is_solo_workspace),
         jobOwnerCompanyId:
           typeof shell.job?.company_id === 'string' ? shell.job.company_id : ap.company_id,
       })
@@ -1168,6 +1162,7 @@ export default function ProjectWorkspaceScreen() {
                     viewerIsCompany={canEditProductionSchedule}
                     viewerId={userId}
                     workspaceOnly={workspaceOnlyPlan}
+                    inHouseWorkspace={isPrivateWorkspace}
                     proFeaturesEnabled={!starterFreelancerPlan}
                     productionWindowStart={scheduleStart}
                     productionWindowEnd={scheduleEnd}

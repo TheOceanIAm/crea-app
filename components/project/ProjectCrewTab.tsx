@@ -139,6 +139,8 @@ type Props = {
   /** Signed-in user id from parent (avoids race before auth effect in this tab). */
   viewerId?: string | null
   workspaceOnly?: boolean
+  /** Solo / in-house workspace: manual crew only — no Crea freelancer invites. */
+  inHouseWorkspace?: boolean
   proFeaturesEnabled?: boolean
   /** Job production window (Overview); required to pick shoot days per freelancer. */
   productionWindowStart: string
@@ -207,6 +209,7 @@ export function ProjectCrewTab({
   viewerIsCompany,
   viewerId: viewerIdProp,
   workspaceOnly = false,
+  inHouseWorkspace = false,
   proFeaturesEnabled = true,
   productionWindowStart,
   productionWindowEnd,
@@ -478,7 +481,7 @@ export function ProjectCrewTab({
   }, [projectId, load])
 
   useEffect(() => {
-    if (!proFeaturesEnabled || !canManage || usingOfflinePack) {
+    if (!proFeaturesEnabled || !canManage || usingOfflinePack || workspaceOnly || inHouseWorkspace) {
       setCrewSearchResults([])
       return
     }
@@ -511,7 +514,7 @@ export function ProjectCrewTab({
       })()
     }, 320)
     return () => clearTimeout(t)
-  }, [crewSearch, projectId, proFeaturesEnabled, canManage, usingOfflinePack])
+  }, [crewSearch, projectId, proFeaturesEnabled, canManage, usingOfflinePack, workspaceOnly, inHouseWorkspace])
 
   const clearCrewBlurTimer = () => {
     if (crewBlurTimerRef.current) {
@@ -528,6 +531,10 @@ export function ProjectCrewTab({
   const addByProfileId = async (profileId: string) => {
     if (usingOfflinePack) {
       Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
+    if (inHouseWorkspace) {
+      Alert.alert('In-house project', 'External Crea freelancers cannot be invited to in-house workspaces. Add crew manually instead.')
       return
     }
     if (!proFeaturesEnabled) {
@@ -578,7 +585,7 @@ export function ProjectCrewTab({
     row: Extract<CrewRow, { source: 'manual' }>,
     action: 'send' | 'resend' | 'cancel'
   ) => {
-    if (!viewerIsCompany || !proFeaturesEnabled) return
+    if (!viewerIsCompany || !proFeaturesEnabled || inHouseWorkspace) return
     if (action !== 'cancel' && !(row.email ?? '').trim()) {
       Alert.alert('Email required', 'Add an email address before inviting this person to Crea.')
       return
@@ -993,12 +1000,14 @@ export function ProjectCrewTab({
       {usingOfflinePack ? <OfflinePackBanner downloadedAt={packDownloadedAt} /> : null}
       {canManage && !usingOfflinePack && (
         <>
-          {workspaceOnly ? (
+          {workspaceOnly || inHouseWorkspace ? (
             viewerIsCompany ? (
               <>
                 <Text style={styles.label}>Add crew</Text>
                 <Text style={styles.hint}>
-                  Workspace mode: add external crew manually without requiring a CREA account.
+                  {inHouseWorkspace
+                    ? 'In-house workspace: add people manually. External Crea freelancers cannot be invited.'
+                    : 'Workspace mode: add external crew manually without requiring a CREA account.'}
                 </Text>
                 <TouchableOpacity style={[styles.addBtnWide, busy && styles.dim]} onPress={() => setModalOpen(true)}>
                   <Text style={styles.addBtnText}>ADD CREW</Text>
@@ -1096,7 +1105,7 @@ export function ProjectCrewTab({
         </>
       )}
 
-      {canManage && pendingInvites.length > 0 ? (
+      {canManage && !inHouseWorkspace && pendingInvites.length > 0 ? (
         <>
           <Text style={styles.label}>Pending invitations</Text>
           {pendingInvites.map((inv) => {
@@ -1452,6 +1461,7 @@ export function ProjectCrewTab({
                   onChangeText={setPersonHalfDayRate}
                   keyboardType="decimal-pad"
                 />
+                {!inHouseWorkspace ? (
                 <View style={styles.inviteSection}>
                   <View style={styles.inviteHeaderRow}>
                     <Text style={styles.inviteKicker}>Invite to Crea</Text>
@@ -1495,6 +1505,7 @@ export function ProjectCrewTab({
                     </View>
                   ) : null}
                 </View>
+                ) : null}
               </>
             ) : null}
 

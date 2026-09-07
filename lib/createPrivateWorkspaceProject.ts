@@ -21,11 +21,13 @@ export type CreatePrivateWorkspaceProjectResult =
  */
 export async function createPrivateWorkspaceProject(
   supabase: SupabaseClient,
-  userId: string,
+  ownerCompanyId: string,
   input: CreatePrivateWorkspaceProjectInput
 ): Promise<CreatePrivateWorkspaceProjectResult> {
   const title = input.title.trim()
   if (!title) return { ok: false, error: 'Project name is required.' }
+  const companyId = ownerCompanyId.trim()
+  if (!companyId) return { ok: false, error: 'Company account is required.' }
 
   const notes = (input.notes ?? '').trim()
   const clientLabel = (input.clientLabel ?? '').trim()
@@ -39,7 +41,7 @@ export async function createPrivateWorkspaceProject(
   const { data: job, error: jobErr } = await supabase
     .from('jobs')
     .insert({
-      company_id: userId,
+      company_id: companyId,
       title,
       category: 'General',
       location: 'Remote',
@@ -66,7 +68,7 @@ export async function createPrivateWorkspaceProject(
 
   const ensured = await ensureSoloWorkspaceProjectRow(supabase, {
     projectOrJobId: job.id,
-    userId,
+    userId: companyId,
   })
   if (!ensured.ok) {
     return { ok: false, error: ensured.reason ?? 'Could not open workspace project.' }

@@ -17,6 +17,7 @@ import { ChevronLeft, Plus } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { createPrivateWorkspaceProject } from '@/lib/createPrivateWorkspaceProject'
+import { resolveActingCompanyId } from '@/lib/companyAccount'
 import {
   JOB_LISTING_BUDGET_TYPES,
   parseJobListingBudgetInput,
@@ -271,18 +272,22 @@ export default function WorkspaceProjectsScreen() {
       Alert.alert('Projects', 'Please sign in again.')
       return
     }
-    const { data: selfProfile } = await supabase
-      .from('profiles')
-      .select('subscription_tier')
-      .eq('id', u.id)
-      .maybeSingle()
-    if (!canFreelancerCreatePrivateProjects(resolveFreelancerPlanFromUserAndProfileTier(u, selfProfile?.subscription_tier))) {
-      Alert.alert('Projects', 'Creating lead-owned private workspaces requires Pro or Workspace. Upgrade on the web.')
-      return
+    const isCompany = viewerRole === 'company'
+    if (!isCompany) {
+      const { data: selfProfile } = await supabase
+        .from('profiles')
+        .select('subscription_tier')
+        .eq('id', u.id)
+        .maybeSingle()
+      if (!canFreelancerCreatePrivateProjects(resolveFreelancerPlanFromUserAndProfileTier(u, selfProfile?.subscription_tier))) {
+        Alert.alert('Projects', 'Creating lead-owned private workspaces requires Pro or Workspace. Upgrade on the web.')
+        return
+      }
     }
+    const ownerCompanyId = isCompany ? (await resolveActingCompanyId(u.id)) ?? u.id : u.id
     setCreating(true)
     setError(null)
-    const result = await createPrivateWorkspaceProject(supabase, u.id, {
+    const result = await createPrivateWorkspaceProject(supabase, ownerCompanyId, {
       title: t,
       notes: notes.trim() || undefined,
       budget_type: budgetParsed.budget_type,
@@ -427,9 +432,16 @@ export default function WorkspaceProjectsScreen() {
               }
               setActingId(item.id)
               setError(null)
-              const result = isCompany
-                ? await deleteCompanyJob(supabase, user.id, item.id)
-                : await deletePrivateWorkspaceProject(supabase, user.id, item.id)
+              const { data: jobRow } = await supabase
+                .from('jobs')
+                .select('is_solo_workspace')
+                .eq('id', item.id)
+                .maybeSingle()
+              const inHouse = Boolean(jobRow?.is_solo_workspace)
+              const result =
+                isCompany && !inHouse
+                  ? await deleteCompanyJob(supabase, user.id, item.id)
+                  : await deletePrivateWorkspaceProject(supabase, user.id, item.id)
               setActingId(null)
               if (!result.ok) {
                 setError(result.error)
@@ -593,7 +605,7 @@ export default function WorkspaceProjectsScreen() {
       <Text style={styles.title}>Projects</Text>
       <Text style={styles.sub}>
         {viewerRole === 'company'
-          ? 'Your company projects. You can open, edit, archive, or delete them here.'
+          ? 'Your company listings and in-house workspaces. You can open, edit, archive, or delete them here.'
           : "Private workspaces (your avatar) and customer jobs you're booked on — same overview as on the web. Budget comes from each project or job."}
       </Text>
       {!canCreatePrivate ? (
@@ -626,7 +638,9 @@ export default function WorkspaceProjectsScreen() {
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>No projects yet</Text>
             <Text style={styles.emptySub}>
-              Accept a job from the Jobs tab, or create a private workspace when your plan allows.
+              {viewerRole === 'company'
+                ? 'Post a public listing, or create an in-house workspace for work that stays inside your team.'
+                : 'Accept a job from the Jobs tab, or create a private workspace when your plan allows.'}
             </Text>
             {canCreatePrivate ? (
               <TouchableOpacity style={styles.emptyBtn} onPress={() => setCreateOpen(true)}>
@@ -652,9 +666,13 @@ export default function WorkspaceProjectsScreen() {
       />
 
       <KeyboardFormModal visible={createOpen} onClose={() => { setCreateOpen(false); resetCreateForm() }}>
-            <Text style={styles.modalTitle}>New project</Text>
+            <Text style={styles.modalTitle}>
+              {viewerRole === 'company' ? 'In-house project' : 'New project'}
+            </Text>
             <Text style={styles.modalSub}>
-              Creates a private workspace only. It will not appear on the Jobs tab for other users.
+              {viewerRole === 'company'
+                ? 'Private workspace for your team. It will not appear as a public listing, and you cannot invite external freelancers from the marketplace.'
+                : 'Creates a private workspace only. It will not appear on the Jobs tab for other users.'}
             </Text>
 
             <Text style={styles.fieldLabel}>Project name</Text>

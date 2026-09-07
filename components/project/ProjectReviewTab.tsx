@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Linking } from 'react-native'
 import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
+import { detectReviewLinkKind, reviewLinkOpenLabel } from '@/lib/reviewLinkKind'
+import { fetchWorkspaceMilestones, type WorkspaceMilestoneUi } from '@/lib/workspaceMilestones'
 
 type Props = {
   projectId: string
@@ -27,6 +29,7 @@ export function ProjectReviewTab({ projectId, jobId, frameIoUrl, picdropUrl, can
   const [picDraft, setPicDraft] = useState(picdropUrl ?? '')
   const [savingFrame, setSavingFrame] = useState(false)
   const [savingPic, setSavingPic] = useState(false)
+  const [milestones, setMilestones] = useState<WorkspaceMilestoneUi[]>([])
 
   useEffect(() => {
     setFrameDraft(frameIoUrl ?? '')
@@ -34,6 +37,39 @@ export function ProjectReviewTab({ projectId, jobId, frameIoUrl, picdropUrl, can
   useEffect(() => {
     setPicDraft(picdropUrl ?? '')
   }, [picdropUrl])
+
+  useEffect(() => {
+    if (!jobId) {
+      setMilestones([])
+      return
+    }
+    let cancelled = false
+    void fetchWorkspaceMilestones(supabase, jobId).then(({ rows }) => {
+      if (!cancelled) setMilestones(rows)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [jobId])
+
+  const frameioMilestones = useMemo(
+    () =>
+      milestones.filter((m) => {
+        const url = m.frameioUrl?.trim()
+        if (!url) return false
+        return detectReviewLinkKind(url) !== 'picdrop'
+      }),
+    [milestones]
+  )
+  const picdropMilestones = useMemo(
+    () =>
+      milestones.filter((m) => {
+        const url = m.frameioUrl?.trim()
+        if (!url) return false
+        return detectReviewLinkKind(url) === 'picdrop'
+      }),
+    [milestones]
+  )
 
   const saveFrame = async () => {
     setSavingFrame(true)
@@ -115,6 +151,23 @@ export function ProjectReviewTab({ projectId, jobId, frameIoUrl, picdropUrl, can
         <TouchableOpacity style={styles.secondary} onPress={() => openUrl(frameIoUrl, canEdit, frameDraft)}>
           <Text style={styles.secondaryText}>Open Frame.io</Text>
         </TouchableOpacity>
+        {frameioMilestones.length > 0 ? (
+          <View style={styles.milestoneBlock}>
+            <Text style={styles.milestoneLabel}>From milestones</Text>
+            {frameioMilestones.map((m) => (
+              <TouchableOpacity
+                key={m.id}
+                style={styles.milestoneRow}
+                onPress={() => openUrl(m.frameioUrl, false, '')}
+              >
+                <Text style={styles.milestoneTitle}>{m.title}</Text>
+                <Text style={styles.milestoneOpen}>
+                  {reviewLinkOpenLabel(detectReviewLinkKind(m.frameioUrl))}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.card}>
@@ -146,6 +199,23 @@ export function ProjectReviewTab({ projectId, jobId, frameIoUrl, picdropUrl, can
         <TouchableOpacity style={styles.secondary} onPress={() => openUrl(picdropUrl, canEdit, picDraft)}>
           <Text style={styles.secondaryText}>Open PicDrop</Text>
         </TouchableOpacity>
+        {picdropMilestones.length > 0 ? (
+          <View style={styles.milestoneBlock}>
+            <Text style={styles.milestoneLabel}>From milestones</Text>
+            {picdropMilestones.map((m) => (
+              <TouchableOpacity
+                key={m.id}
+                style={styles.milestoneRow}
+                onPress={() => openUrl(m.frameioUrl, false, '')}
+              >
+                <Text style={styles.milestoneTitle}>{m.title}</Text>
+                <Text style={styles.milestoneOpen}>
+                  {reviewLinkOpenLabel(detectReviewLinkKind(m.frameioUrl))}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
       </View>
     </View>
   )
@@ -201,4 +271,27 @@ const styles = StyleSheet.create({
   secondaryText: { color: '#FFDC00', fontWeight: '700', fontSize: 14 },
   readonly: { fontSize: 14, color: 'rgba(255,255,255,0.55)', marginBottom: 12, lineHeight: 20 },
   dim: { opacity: 0.6 },
+  milestoneBlock: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    gap: 8,
+  },
+  milestoneLabel: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  milestoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  milestoneTitle: { flex: 1, fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.85)' },
+  milestoneOpen: { fontSize: 12, fontWeight: '700', color: '#FFDC00' },
 })
