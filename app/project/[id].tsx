@@ -28,7 +28,6 @@ import { ProjectReviewTab } from '@/components/project/ProjectReviewTab'
 import { ProductionTab } from '@/app/components/project/[projectId]/ProductionTab'
 import { ProjectOverviewAbout } from '@/components/project/ProjectOverviewAbout'
 import { ProjectOverviewProductionWindow } from '@/components/project/ProjectOverviewProductionWindow'
-import { countProjectCrewMembers, crewMembersSubLabel } from '@/lib/projectCrewCount'
 import { formatProjectBudgetLine } from '@/lib/budgetFormatting'
 import {
   PROJECT_STATUS_PILL,
@@ -217,7 +216,7 @@ export default function ProjectWorkspaceScreen() {
       return
     }
     if (soloPrivate) {
-      setPipelineStatCount(await countProjectCrewMembers(supabase, project.id))
+      setPipelineStatCount(0)
       return
     }
     const { count } = await supabase
@@ -536,16 +535,12 @@ export default function ProjectWorkspaceScreen() {
     setScheduleEnd(typeof p.scheduling_end_date === 'string' ? p.scheduling_end_date.slice(0, 10) : '')
     setForbidden(false)
 
-    if (viewerIsCompanyOnProject && p.job_id) {
-      if (soloPrivate) {
-        setPipelineStatCount(await countProjectCrewMembers(supabase, p.id))
-      } else {
-        const { count } = await supabase
-          .from('job_applications')
-          .select('*', { count: 'exact', head: true })
-          .eq('job_id', p.job_id)
-        setPipelineStatCount(count ?? 0)
-      }
+    if (viewerIsCompanyOnProject && p.job_id && !soloPrivate) {
+      const { count } = await supabase
+        .from('job_applications')
+        .select('*', { count: 'exact', head: true })
+        .eq('job_id', p.job_id)
+      setPipelineStatCount(count ?? 0)
     } else {
       setPipelineStatCount(0)
     }
@@ -646,17 +641,24 @@ export default function ProjectWorkspaceScreen() {
 
   const tabs = useMemo(() => {
     let list = [...BASE_TABS]
+    if (isPrivateWorkspace) {
+      list = list.filter((t) => t.id !== 'messages' && t.id !== 'crew')
+    } else if (workspaceOnlyPlan) {
+      list = list.filter((t) => t.id !== 'messages')
+    }
     if (viewerIsCompanyOnProject) {
       const ix = list.findIndex((t) => t.id === 'crew')
-      const insertAt = ix >= 0 ? ix + 1 : list.length
+      const miles = list.findIndex((t) => t.id === 'milestones')
+      const insertAt = ix >= 0 ? ix + 1 : miles >= 0 ? miles + 1 : list.length
       list = [...list.slice(0, insertAt), { id: 'budget' as const, label: 'Budget' }, ...list.slice(insertAt)]
     }
-    return workspaceOnlyPlan ? list.filter((t) => t.id !== 'messages') : list
-  }, [workspaceOnlyPlan, viewerIsCompanyOnProject])
+    return list
+  }, [workspaceOnlyPlan, isPrivateWorkspace, viewerIsCompanyOnProject])
 
   useEffect(() => {
-    if (workspaceOnlyPlan && tab === 'messages') setTab('overview')
-  }, [workspaceOnlyPlan, tab])
+    if ((workspaceOnlyPlan || isPrivateWorkspace) && tab === 'messages') setTab('overview')
+    if (isPrivateWorkspace && tab === 'crew') setTab('overview')
+  }, [workspaceOnlyPlan, isPrivateWorkspace, tab])
 
   useEffect(() => {
     if (tab === 'budget' && !viewerIsCompanyOnProject) setTab('overview')
@@ -1026,13 +1028,11 @@ export default function ProjectWorkspaceScreen() {
 
   const statsRow = (
     <View style={styles.statsRow}>
-      {viewerIsCompanyOnProject && project.job_id ? (
+      {viewerIsCompanyOnProject && project.job_id && !isPrivateWorkspace ? (
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>{isPrivateWorkspace ? 'Crew' : 'Applicants'}</Text>
+          <Text style={styles.statLabel}>Applicants</Text>
           <Text style={styles.statValue}>{pipelineStatCount}</Text>
-          <Text style={styles.statSub}>
-            {isPrivateWorkspace ? crewMembersSubLabel(pipelineStatCount) : 'in crew pipeline'}
-          </Text>
+          <Text style={styles.statSub}>in crew pipeline</Text>
         </View>
       ) : null}
       <View style={styles.statCard}>
@@ -1114,7 +1114,9 @@ export default function ProjectWorkspaceScreen() {
           {needsFlexTab ? (
             <View style={styles.flexFill}>
               <View style={styles.flexTabInner}>
-                {tab === 'messages' && <ProjectMessagesTab projectId={project.id} userId={userId} />}
+                {tab === 'messages' && !isPrivateWorkspace && !workspaceOnlyPlan && (
+                  <ProjectMessagesTab projectId={project.id} userId={userId} />
+                )}
                 {tab === 'milestones' && (
                   <ProjectMilestonesTab
                     projectId={project.id}
@@ -1155,7 +1157,7 @@ export default function ProjectWorkspaceScreen() {
                     initialShootDay={shootDayParam || null}
                   />
                 )}
-                {tab === 'crew' && (
+                {tab === 'crew' && !isPrivateWorkspace && (
                   <ProjectCrewTab
                     projectId={project.id}
                     canManage={canManageCrew}
@@ -1169,7 +1171,7 @@ export default function ProjectWorkspaceScreen() {
                   />
                 )}
                 {tab === 'budget' && viewerIsCompanyOnProject ? (
-                  <ProjectBudgetTab projectId={project.id} />
+                  <ProjectBudgetTab projectId={project.id} hideCrewBudgeting={isPrivateWorkspace} />
                 ) : null}
                 {tab === 'files' && (
                   <ProjectFilesTab

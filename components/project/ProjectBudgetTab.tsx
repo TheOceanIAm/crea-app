@@ -53,6 +53,8 @@ type LineDraft = {
 
 type Props = {
   projectId: string
+  /** Solo / in-house workspaces have no crew tab — skip crew spend. */
+  hideCrewBudgeting?: boolean
 }
 
 function parseMoneyInput(raw: string): number | null {
@@ -69,7 +71,7 @@ function moneyToInput(n: number | null | undefined): string {
 
 const PRESETS = ['Food & beverage', 'Travel', 'Rental cars', 'Other']
 
-export function ProjectBudgetTab({ projectId }: Props) {
+export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props) {
   const [loading, setLoading] = useState(true)
   const [savingPlan, setSavingPlan] = useState(false)
   const [savingLines, setSavingLines] = useState(false)
@@ -87,22 +89,31 @@ export function ProjectBudgetTab({ projectId }: Props) {
   const load = useCallback(async () => {
     setLoading(true)
     setDeletedLineIds([])
+    const emptyMembers = {
+      data: [] as CrewSpendMemberRow[],
+      error: null as { message: string } | null,
+    }
+    const emptyManual = { data: [] as unknown[], error: null as { message: string } | null }
     const [planRes, linesRes, membersRes, manualRes, gearRes] = await Promise.all([
       supabase.from('project_budget_plans').select('*').eq('project_id', projectId).maybeSingle(),
       supabase.from('project_budget_lines').select('*').eq('project_id', projectId).order('sort_order'),
-      supabase
-        .from('project_members')
-        .select(
-          'profile_id, member_role, booked_dates, scheduling_start_date, scheduling_end_date, profiles(name, day_rate_amount, half_day_rate_amount, rates_currency)'
-        )
-        .eq('project_id', projectId),
-      supabase
-        .from('project_manual_crew_readable')
-        .select(
-          'id, name, member_role, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount, claimed_profile_id'
-        )
-        .eq('project_id', projectId)
-        .is('claimed_profile_id', null),
+      hideCrewBudgeting
+        ? Promise.resolve(emptyMembers)
+        : supabase
+            .from('project_members')
+            .select(
+              'profile_id, member_role, booked_dates, scheduling_start_date, scheduling_end_date, profiles(name, day_rate_amount, half_day_rate_amount, rates_currency)'
+            )
+            .eq('project_id', projectId),
+      hideCrewBudgeting
+        ? Promise.resolve(emptyManual)
+        : supabase
+            .from('project_manual_crew_readable')
+            .select(
+              'id, name, member_role, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount, claimed_profile_id'
+            )
+            .eq('project_id', projectId)
+            .is('claimed_profile_id', null),
       fetchProductionEquipment(projectId),
     ])
 
@@ -138,35 +149,39 @@ export function ProjectBudgetTab({ projectId }: Props) {
       })),
     )
 
-    const registered = (membersRes.data ?? []) as CrewSpendMemberRow[]
-    const manualRows = (manualRes.error ? [] : (manualRes.data ?? [])) as Array<{
-      id: string
-      name: string | null
-      member_role: string | null
-      booked_dates?: unknown
-      scheduling_start_date?: string | null
-      scheduling_end_date?: string | null
-      day_rate_amount?: number | null
-      half_day_rate_amount?: number | null
-    }>
-    const manualAsSpend: CrewSpendMemberRow[] = manualRows.map((m) => ({
-      profile_id: `manual:${m.id}`,
-      member_role: (m.member_role ?? 'crew').trim() || 'crew',
-      booked_dates: m.booked_dates,
-      scheduling_start_date: m.scheduling_start_date,
-      scheduling_end_date: m.scheduling_end_date,
-      day_rate_amount: m.day_rate_amount,
-      half_day_rate_amount: m.half_day_rate_amount,
-      display_name: (m.name ?? '').trim() || 'Crew',
-      profiles: null,
-    }))
-    setMembers([...registered, ...manualAsSpend])
+    if (hideCrewBudgeting) {
+      setMembers([])
+    } else {
+      const registered = (membersRes.data ?? []) as CrewSpendMemberRow[]
+      const manualRows = (manualRes.error ? [] : (manualRes.data ?? [])) as Array<{
+        id: string
+        name: string | null
+        member_role: string | null
+        booked_dates?: unknown
+        scheduling_start_date?: string | null
+        scheduling_end_date?: string | null
+        day_rate_amount?: number | null
+        half_day_rate_amount?: number | null
+      }>
+      const manualAsSpend: CrewSpendMemberRow[] = manualRows.map((m) => ({
+        profile_id: `manual:${m.id}`,
+        member_role: (m.member_role ?? 'crew').trim() || 'crew',
+        booked_dates: m.booked_dates,
+        scheduling_start_date: m.scheduling_start_date,
+        scheduling_end_date: m.scheduling_end_date,
+        day_rate_amount: m.day_rate_amount,
+        half_day_rate_amount: m.half_day_rate_amount,
+        display_name: (m.name ?? '').trim() || 'Crew',
+        profiles: null,
+      }))
+      setMembers([...registered, ...manualAsSpend])
+    }
     if (gearRes.error) {
       Alert.alert('Budget', gearRes.error)
     }
     setEquipmentRows(gearRes.rows)
     setLoading(false)
-  }, [projectId])
+  }, [projectId, hideCrewBudgeting])
 
   useEffect(() => {
     void load()
@@ -325,9 +340,9 @@ export function ProjectBudgetTab({ projectId }: Props) {
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lead}>
-        Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each
-        person&apos;s public day / half-day rate when set. Equipment cost uses kit-list qty × unit price. Enter planned
-        estimates before the shoot; after wrap, enter actual spend for the final balance.
+        {hideCrewBudgeting
+          ? 'Internal planning only. Equipment cost uses kit-list qty × unit price. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'
+          : "Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each person's public day / half-day rate when set. Equipment cost uses kit-list qty × unit price. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance."}
       </Text>
 
       <View style={styles.card}>
@@ -350,15 +365,19 @@ export function ProjectBudgetTab({ projectId }: Props) {
           placeholderTextColor="rgba(255,255,255,0.3)"
           keyboardType="decimal-pad"
         />
-        <Text style={styles.hint}>Production bucket (crew day-rate burn)</Text>
-        <TextInput
-          style={styles.input}
-          value={productionStr}
-          onChangeText={setProductionStr}
-          placeholder="e.g. 10000 — optional"
-          placeholderTextColor="rgba(255,255,255,0.3)"
-          keyboardType="decimal-pad"
-        />
+        {!hideCrewBudgeting ? (
+          <>
+            <Text style={styles.hint}>Production bucket (crew day-rate burn)</Text>
+            <TextInput
+              style={styles.input}
+              value={productionStr}
+              onChangeText={setProductionStr}
+              placeholder="e.g. 10000 — optional"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              keyboardType="decimal-pad"
+            />
+          </>
+        ) : null}
         <TouchableOpacity style={[styles.primaryBtn, savingPlan && styles.dim]} onPress={() => void savePlan()} disabled={savingPlan}>
           <Text style={styles.primaryBtnText}>{savingPlan ? 'Saving…' : 'Save targets'}</Text>
         </TouchableOpacity>
@@ -367,10 +386,12 @@ export function ProjectBudgetTab({ projectId }: Props) {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Forecast</Text>
         <Text style={styles.muted}>Before the shoot — uses planned other expenses.</Text>
-        <View style={styles.snapRow}>
-          <Text style={styles.snapLabel}>Crew (booked)</Text>
-          <Text style={styles.snapVal}>{formatMoneyAmount(crew.total, currency)}</Text>
-        </View>
+        {!hideCrewBudgeting ? (
+          <View style={styles.snapRow}>
+            <Text style={styles.snapLabel}>Crew (booked)</Text>
+            <Text style={styles.snapVal}>{formatMoneyAmount(crew.total, currency)}</Text>
+          </View>
+        ) : null}
         <View style={styles.snapRow}>
           <Text style={styles.snapLabel}>Equipment (kit list)</Text>
           <Text style={styles.snapVal}>{formatMoneyAmount(equipment.total, currency)}</Text>
@@ -379,7 +400,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
           <Text style={styles.snapLabel}>Other expenses (planned)</Text>
           <Text style={styles.snapVal}>{formatMoneyAmount(otherPlanned, currency)}</Text>
         </View>
-        {productionCapNum != null ? (
+        {!hideCrewBudgeting && productionCapNum != null ? (
           <View style={styles.snapRow}>
             <Text style={styles.snapLabel}>Remaining in production bucket</Text>
             <Text style={[styles.snapVal, varianceStyle(remainingProduction)]}>
@@ -408,10 +429,12 @@ export function ProjectBudgetTab({ projectId }: Props) {
       >
         <Text style={styles.cardTitle}>Wrap-up</Text>
         <Text style={styles.muted}>After the shoot — uses actual spend on other expenses.</Text>
-        <View style={styles.snapRow}>
-          <Text style={styles.snapLabel}>Crew (booked)</Text>
-          <Text style={styles.snapVal}>{formatMoneyAmount(crew.total, currency)}</Text>
-        </View>
+        {!hideCrewBudgeting ? (
+          <View style={styles.snapRow}>
+            <Text style={styles.snapLabel}>Crew (booked)</Text>
+            <Text style={styles.snapVal}>{formatMoneyAmount(crew.total, currency)}</Text>
+          </View>
+        ) : null}
         <View style={styles.snapRow}>
           <Text style={styles.snapLabel}>Equipment (kit list)</Text>
           <Text style={styles.snapVal}>{formatMoneyAmount(equipment.total, currency)}</Text>
@@ -447,6 +470,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
         )}
       </View>
 
+      {!hideCrewBudgeting ? (
       <View style={styles.card}>
         <TouchableOpacity
           onPress={() => setCrewOpen((v) => !v)}
@@ -497,6 +521,7 @@ export function ProjectBudgetTab({ projectId }: Props) {
           </View>
         ) : null}
       </View>
+      ) : null}
 
       <View style={styles.card}>
         <TouchableOpacity
