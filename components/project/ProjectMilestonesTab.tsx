@@ -14,11 +14,11 @@ import {
 } from 'react-native'
 import { useFocusEffect } from 'expo-router'
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker'
-import { Check, Plus, Trash2, CalendarClock, ChevronDown } from 'lucide-react-native'
+import { Check, Plus, Trash2, CalendarClock, ChevronDown, Pencil } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
-import { formatMilestoneSchedule, isoFromDateAndTime } from '@/lib/milestoneSchedule'
+import { formatMilestoneSchedule, isoFromDateAndTime, splitIsoToDateAndTime } from '@/lib/milestoneSchedule'
 import {
   deleteWorkspaceMilestone,
   fetchWorkspaceMilestones,
@@ -28,6 +28,7 @@ import {
   setWorkspaceMilestoneCompleted,
   setWorkspaceMilestonePriority,
   setWorkspaceMilestoneStatus,
+  updateWorkspaceMilestone,
   type WorkspaceMilestonePriority,
   type WorkspaceMilestoneStatus,
   type WorkspaceMilestoneUi,
@@ -51,7 +52,7 @@ type Props = {
   projectId: string
   jobId: string | null
   onCountsChanged?: () => void
-  /** Company or lead: add/remove milestones. Crew can still mark items complete when false. */
+  /** Company account (owner or active team seat): add/edit/remove. Freelancers are view-only. */
   canManage: boolean
 }
 
@@ -117,6 +118,17 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
   const [scheduleTime, setScheduleTime] = useState(() => defaultScheduleDate())
   const [pickerMode, setPickerMode] = useState<'date' | 'time' | null>(null)
   const [busy, setBusy] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editPriority, setEditPriority] = useState<WorkspaceMilestonePriority>('p3')
+  const [editDeliverable, setEditDeliverable] = useState('')
+  const [editDeliverables, setEditDeliverables] = useState<string[]>([])
+  const [editFrameioUrl, setEditFrameioUrl] = useState('')
+  const [editScheduleEnabled, setEditScheduleEnabled] = useState(false)
+  const [editScheduleDate, setEditScheduleDate] = useState(() => defaultScheduleDate())
+  const [editScheduleTime, setEditScheduleTime] = useState(() => defaultScheduleDate())
+  const [editPickerMode, setEditPickerMode] = useState<'date' | 'time' | null>(null)
   const [usingOfflinePack, setUsingOfflinePack] = useState(false)
   const [packDownloadedAt, setPackDownloadedAt] = useState<string | null>(null)
 
@@ -206,6 +218,17 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
     if (Platform.OS === 'android') setPickerMode(null)
   }
 
+  const onEditPickerChange = (event: DateTimePickerEvent, value?: Date) => {
+    if (event.type === 'dismissed') {
+      setEditPickerMode(null)
+      return
+    }
+    if (!value) return
+    if (editPickerMode === 'date') setEditScheduleDate(value)
+    if (editPickerMode === 'time') setEditScheduleTime(value)
+    if (Platform.OS === 'android') setEditPickerMode(null)
+  }
+
   const scheduledIso = scheduleEnabled ? isoFromDateAndTime(scheduleDate, scheduleTime) : null
 
   const addDeliverable = () => {
@@ -261,7 +284,64 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
     })
   }
 
+  const startEdit = (m: WorkspaceMilestoneUi) => {
+    setEditingId(m.id)
+    setExpandedId(m.id)
+    setEditTitle(m.title)
+    setEditDescription(m.description)
+    setEditPriority(m.priority)
+    setEditDeliverable('')
+    setEditDeliverables([...m.deliverables])
+    setEditFrameioUrl(m.frameioUrl ?? '')
+    const split = splitIsoToDateAndTime(m.scheduledAt)
+    setEditScheduleEnabled(Boolean(split))
+    if (split) {
+      setEditScheduleDate(split.date)
+      setEditScheduleTime(split.time)
+    } else {
+      setEditScheduleDate(defaultScheduleDate())
+      setEditScheduleTime(defaultScheduleDate())
+    }
+  }
+
+  const saveEdit = async (m: WorkspaceMilestoneUi) => {
+    const t = editTitle.trim()
+    if (!t || busy) return
+    if (usingOfflinePack) {
+      Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
+      return
+    }
+    setBusy(true)
+    const scheduledAt = editScheduleEnabled ? isoFromDateAndTime(editScheduleDate, editScheduleTime) : null
+    const { row, error } = await updateWorkspaceMilestone(supabase, m.id, {
+      title: t,
+      description: editDescription,
+      scheduledAt,
+      priority: editPriority,
+      deliverables: editDeliverables,
+      frameioUrl: editFrameioUrl,
+    })
+    setBusy(false)
+    if (error || !row) {
+      Alert.alert('Could not save', error ?? 'Unknown error')
+      return
+    }
+    setRows((prev) => prev.map((r) => (r.id === m.id ? row : r)))
+    setEditingId(null)
+    onCountsChanged?.()
+    if (jobId) {
+      void notifyExpoEvent({
+        kind: 'workspace_activity',
+        jobId,
+        projectId,
+        activity: 'milestone',
+        detail: t,
+      })
+    }
+  }
+
   const toggle = async (m: WorkspaceMilestoneUi) => {
+    if (!canManage) return
     if (usingOfflinePack) {
       Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
       return
@@ -356,8 +436,8 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       {usingOfflinePack ? <OfflinePackBanner downloadedAt={packDownloadedAt} /> : null}
       <Text style={styles.hint}>
         {canManage
-          ? 'Shared with the web workspace. Description, deliverables and review links are on each card — tap to expand status and priority.'
-          : 'Shared with the web workspace. Description, deliverables and review links are on each card — tap to expand more details.'}
+          ? 'Shared with the web workspace. Tap a milestone to edit title, schedule, deliverables and status. Freelancers on the job can only view this list.'
+          : 'Shared with the web workspace. View each milestone to work through it — only the company team can edit.'}
       </Text>
 
       {canManage && !usingOfflinePack ? (
@@ -545,7 +625,12 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
               ]}
             >
               <View style={styles.row}>
-                <TouchableOpacity style={styles.checkWrap} onPress={() => toggle(m)} hitSlop={8}>
+                <TouchableOpacity
+                  style={styles.checkWrap}
+                  onPress={() => toggle(m)}
+                  hitSlop={8}
+                  disabled={!canManage}
+                >
                   {m.completed ? (
                     <View style={styles.checkOn}>
                       <Check size={16} color="#0a0a0a" strokeWidth={ICON_STROKE} />
@@ -613,9 +698,21 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                   {!isExpanded ? <Text style={styles.expandHint}>Tap card to expand</Text> : null}
                 </View>
                 {canManage ? (
-                  <TouchableOpacity onPress={() => remove(m)} hitSlop={8}>
-                    <Trash2 size={18} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
-                  </TouchableOpacity>
+                  <View style={styles.cardActions}>
+                    <TouchableOpacity
+                      onPress={() => (editingId === m.id ? setEditingId(null) : startEdit(m))}
+                      hitSlop={8}
+                    >
+                      <Pencil
+                        size={18}
+                        color={editingId === m.id ? '#FFDC00' : 'rgba(255,255,255,0.35)'}
+                        strokeWidth={ICON_STROKE}
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => remove(m)} hitSlop={8}>
+                      <Trash2 size={18} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
+                    </TouchableOpacity>
+                  </View>
                 ) : (
                   <View style={styles.trashSpacer} />
                 )}
@@ -629,6 +726,154 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
 
               {isExpanded && canManage ? (
                 <View style={styles.expanded}>
+                  {editingId === m.id ? (
+                    <View style={styles.editBlock}>
+                      <Text style={styles.expandedLabel}>Edit milestone</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editTitle}
+                        onChangeText={setEditTitle}
+                        placeholder="Title"
+                        placeholderTextColor="rgba(255,255,255,0.25)"
+                      />
+                      <TextInput
+                        style={[styles.input, styles.inputMultiline]}
+                        value={editDescription}
+                        onChangeText={setEditDescription}
+                        placeholder="What needs to happen..."
+                        placeholderTextColor="rgba(255,255,255,0.25)"
+                        multiline
+                      />
+                      <Text style={styles.priorityLabel}>Priority</Text>
+                      <View style={styles.priorityRow}>
+                        {PRIORITIES.map((p) => {
+                          const cfg = MILESTONE_PRIORITY_CONFIG[p]
+                          const active = editPriority === p
+                          return (
+                            <TouchableOpacity
+                              key={p}
+                              style={[
+                                styles.priorityChip,
+                                {
+                                  borderColor: active ? cfg.border : 'rgba(255,255,255,0.08)',
+                                  backgroundColor: active ? cfg.bg : 'transparent',
+                                },
+                              ]}
+                              onPress={() => setEditPriority(p)}
+                              activeOpacity={0.8}
+                            >
+                              <View style={[styles.priorityDot, { backgroundColor: cfg.color }]} />
+                              <Text style={[styles.priorityChipText, { color: active ? cfg.color : 'rgba(255,255,255,0.35)' }]}>
+                                {cfg.short}
+                              </Text>
+                            </TouchableOpacity>
+                          )
+                        })}
+                      </View>
+                      <TouchableOpacity
+                        style={styles.scheduleToggle}
+                        onPress={() => setEditScheduleEnabled((v) => !v)}
+                        activeOpacity={0.8}
+                      >
+                        <View style={[styles.scheduleCheck, editScheduleEnabled && styles.scheduleCheckOn]}>
+                          {editScheduleEnabled ? <Check size={14} color="#0a0a0a" strokeWidth={ICON_STROKE} /> : null}
+                        </View>
+                        <Text style={styles.scheduleToggleText}>Set delivery date & time</Text>
+                      </TouchableOpacity>
+                      {editScheduleEnabled ? (
+                        <View style={styles.scheduleRow}>
+                          <TouchableOpacity style={styles.scheduleBtn} onPress={() => setEditPickerMode('date')}>
+                            <CalendarClock size={16} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                            <Text style={styles.scheduleBtnText}>
+                              {editScheduleDate.toLocaleDateString(undefined, {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.scheduleBtn} onPress={() => setEditPickerMode('time')}>
+                            <Text style={styles.scheduleBtnText}>
+                              {editScheduleTime.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : null}
+                      {editPickerMode ? (
+                        <DateTimePicker
+                          value={editPickerMode === 'date' ? editScheduleDate : editScheduleTime}
+                          mode={editPickerMode}
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          onChange={onEditPickerChange}
+                        />
+                      ) : null}
+                      <View style={styles.deliverableAddRow}>
+                        <TextInput
+                          style={[styles.input, styles.deliverableInput]}
+                          placeholder="Add a deliverable..."
+                          placeholderTextColor="rgba(255,255,255,0.25)"
+                          value={editDeliverable}
+                          onChangeText={setEditDeliverable}
+                          onSubmitEditing={() => {
+                            const next = editDeliverable.trim()
+                            if (!next) return
+                            setEditDeliverables((prev) => [...prev, next])
+                            setEditDeliverable('')
+                          }}
+                          returnKeyType="done"
+                        />
+                        <TouchableOpacity
+                          style={styles.deliverableAddBtn}
+                          onPress={() => {
+                            const next = editDeliverable.trim()
+                            if (!next) return
+                            setEditDeliverables((prev) => [...prev, next])
+                            setEditDeliverable('')
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Plus size={18} color="rgba(255,255,255,0.7)" strokeWidth={ICON_STROKE} />
+                        </TouchableOpacity>
+                      </View>
+                      {editDeliverables.length > 0 ? (
+                        <View style={styles.deliverableChips}>
+                          {editDeliverables.map((d, i) => (
+                            <TouchableOpacity
+                              key={`${d}-${i}`}
+                              style={styles.deliverableChip}
+                              onPress={() => setEditDeliverables((prev) => prev.filter((_, j) => j !== i))}
+                            >
+                              <Text style={styles.deliverableChipText}>{d}</Text>
+                              <Text style={styles.deliverableChipRemove}>✕</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      ) : null}
+                      <TextInput
+                        style={styles.input}
+                        placeholder="https://app.frame.io/… or picdrop.com/…"
+                        placeholderTextColor="rgba(255,255,255,0.25)"
+                        value={editFrameioUrl}
+                        onChangeText={setEditFrameioUrl}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        keyboardType="url"
+                      />
+                      <View style={styles.editActions}>
+                        <TouchableOpacity style={styles.editCancel} onPress={() => setEditingId(null)} activeOpacity={0.8}>
+                          <Text style={styles.editCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.editSave, busy && styles.dim]}
+                          onPress={() => void saveEdit(m)}
+                          disabled={busy}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.editSaveText}>{busy ? 'Saving…' : 'Save changes'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : null}
                   <View style={styles.expandedBlock}>
                     <Text style={styles.expandedLabel}>Priority</Text>
                     <View style={styles.priorityRowCompact}>
@@ -862,6 +1107,26 @@ const styles = StyleSheet.create({
   descriptionPreview: { fontSize: 13, color: 'rgba(255,255,255,0.4)', lineHeight: 18 },
   when: { fontSize: 12, color: 'rgba(255,220,0,0.75)', fontWeight: '500' },
   trashSpacer: { width: 18 },
+  cardActions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
+  editBlock: { gap: 10 },
+  editActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  editCancel: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  editCancelText: { color: 'rgba(255,255,255,0.5)', fontSize: 14, fontWeight: '700' },
+  editSave: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#FFDC00',
+  },
+  editSaveText: { color: '#0a0a0a', fontSize: 14, fontWeight: '800' },
   expanded: {
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.08)',

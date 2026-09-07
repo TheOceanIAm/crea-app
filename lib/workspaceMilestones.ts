@@ -271,6 +271,46 @@ export async function setWorkspaceMilestonePriority(
   return { error: null }
 }
 
+export async function updateWorkspaceMilestone(
+  supabase: SupabaseClient,
+  milestoneId: string,
+  opts: {
+    title: string
+    description?: string
+    scheduledAt: string | null
+    priority?: WorkspaceMilestonePriority
+    deliverables?: string[]
+    frameioUrl?: string | null
+  }
+): Promise<{ row: WorkspaceMilestoneUi | null; error: string | null }> {
+  const title = opts.title.trim()
+  if (!title) return { row: null, error: 'Title is required.' }
+  const description = opts.description?.trim() || ''
+  const deliverables = parseWorkspaceMilestoneDeliverables(opts.deliverables)
+  const frameioUrl = opts.frameioUrl?.trim() || null
+  const patch: Record<string, unknown> = {
+    title,
+    description,
+    due_at: opts.scheduledAt,
+    due_date: opts.scheduledAt,
+    deliverables,
+    frameio_url: frameioUrl,
+  }
+  if (opts.priority) patch.priority = opts.priority
+  const { data, error } = await supabase
+    .from('milestones')
+    .update(patch)
+    .eq('id', milestoneId)
+    .select(MILESTONE_SELECT)
+    .single()
+
+  if (error) {
+    logMilestoneDbError('update', error)
+    return { row: null, error: friendlyMilestoneError('update', error.message) }
+  }
+  return { row: mapWorkspaceMilestoneToUi(data as WorkspaceMilestoneDbRow), error: null }
+}
+
 export async function deleteWorkspaceMilestone(
   supabase: SupabaseClient,
   milestoneId: string

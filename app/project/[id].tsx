@@ -55,7 +55,7 @@ import {
   persistProjectShellToDisk,
   readCachedProjectShell,
 } from '@/lib/projectShellCache'
-import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
+import { userIsActiveOnCompanyAccount } from '@/lib/companyAccount'
 
 type TabId =
   | 'overview'
@@ -136,6 +136,7 @@ export default function ProjectWorkspaceScreen() {
   const [jobOwnerCompanyId, setJobOwnerCompanyId] = useState<string | null>(
     bootShell?.jobOwnerCompanyId ?? null
   )
+  const [companyTeamOnJob, setCompanyTeamOnJob] = useState(false)
   const [pipelineStatCount, setPipelineStatCount] = useState(0)
   const initialTabRaw = Array.isArray(tabParam) ? tabParam[0] : tabParam
   const initialTool = Array.isArray(toolParam) ? toolParam[0] : toolParam
@@ -696,6 +697,28 @@ export default function ProjectWorkspaceScreen() {
     return project.company_id === userId || project.freelancer_id === userId
   }, [project, userId])
 
+  /** Owner or any active seat on the company account — not freelancer crew. */
+  const canManageMilestones = companyTeamOnJob
+
+  useEffect(() => {
+    const companyId = (jobOwnerCompanyId && jobOwnerCompanyId.trim()) || project?.company_id || null
+    if (!userId || !companyId) {
+      setCompanyTeamOnJob(false)
+      return
+    }
+    if (userId === companyId) {
+      setCompanyTeamOnJob(true)
+      return
+    }
+    let cancelled = false
+    void userIsActiveOnCompanyAccount(userId, companyId).then((ok) => {
+      if (!cancelled) setCompanyTeamOnJob(ok)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [userId, jobOwnerCompanyId, project?.company_id])
+
   /**
    * Phase (recruiting / active / completed): same source as web `jobs.project_status`.
    * Owner = `jobs.company_id` (web `isOwner`), not `projects.freelancer_id`.
@@ -1103,7 +1126,7 @@ export default function ProjectWorkspaceScreen() {
                     projectId={project.id}
                     jobId={project.job_id}
                     onCountsChanged={refreshProjectCounts}
-                    canManage={canManageCrew}
+                    canManage={canManageMilestones}
                   />
                 )}
                 {tab === 'production' && (
