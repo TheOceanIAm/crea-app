@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -25,7 +25,6 @@ import { ProjectBudgetTab } from '@/components/project/ProjectBudgetTab'
 import { ProjectCrewTab } from '@/components/project/ProjectCrewTab'
 import { ProjectFilesTab } from '@/components/project/ProjectFilesTab'
 import { ProjectReviewTab } from '@/components/project/ProjectReviewTab'
-import { ProductionTab } from '@/app/components/project/[projectId]/ProductionTab'
 import { ProjectOverviewAbout } from '@/components/project/ProjectOverviewAbout'
 import { ProjectOverviewProductionWindow } from '@/components/project/ProjectOverviewProductionWindow'
 import { formatProjectBudgetLine } from '@/lib/budgetFormatting'
@@ -55,6 +54,14 @@ import {
   readCachedProjectShell,
 } from '@/lib/projectShellCache'
 import { userIsActiveOnCompanyAccount } from '@/lib/companyAccount'
+import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
+
+/** Loaded only when the Production tab is opened — keeps WebView/Slider off the overview path. */
+const ProductionTab = lazy(() =>
+  import('@/app/components/project/[projectId]/ProductionTab').then((m) => ({
+    default: m.ProductionTab,
+  }))
+)
 
 type TabId =
   | 'overview'
@@ -227,6 +234,7 @@ export default function ProjectWorkspaceScreen() {
   }, [project?.id, project?.job_id, project?.company_id, userId])
 
   const load = useCallback(async () => {
+    try {
     const timed = await runTimed('project-workspace.load', async () => {
     if (!id || typeof id !== 'string') {
       setSunPlannerEnabled(false)
@@ -618,6 +626,10 @@ export default function ProjectWorkspaceScreen() {
     })
     if (__DEV__ && timed.value) {
       console.log(`[perf] project-workspace.meta: hasJob=${timed.value.hasJob}`)
+    }
+    } catch (e) {
+      if (__DEV__) console.warn('[project-workspace] load failed', e)
+      setLoading(false)
     }
   }, [id])
 
@@ -1126,36 +1138,38 @@ export default function ProjectWorkspaceScreen() {
                   />
                 )}
                 {tab === 'production' && (
-                  <ProductionTab
-                    projectId={project.id}
-                    userId={userId}
-                    projectTitle={project.title}
-                    projectLocation={project.location}
-                    companyId={project.company_id}
-                    canUseProductionWeather={productionWeatherEnabled}
-                    canUseSunPlanner={sunPlannerEnabled}
-                    productionWeatherLockedHint={productionWeatherLockedHint}
-                    sunPlannerLockedHint={sunPlannerLockedHint}
-                    productionWindowStart={scheduleStart}
-                    productionWindowEnd={scheduleEnd}
-                    jobId={project.job_id}
-                    initialFeature={
-                      tool === 'shotlist'
-                        ? 'shotlist'
-                        : tool === 'callsheet'
-                          ? 'call_sheet'
-                          : tool === 'gear'
-                            ? 'equipment'
-                            : tool === 'tasks'
-                              ? 'tasks'
-                              : tool === 'sun'
-                                ? 'sun'
-                                : tool === 'weather'
-                                  ? 'weather'
-                                  : null
-                    }
-                    initialShootDay={shootDayParam || null}
-                  />
+                  <Suspense fallback={<ScreenListSkeleton rows={6} />}>
+                    <ProductionTab
+                      projectId={project.id}
+                      userId={userId}
+                      projectTitle={project.title}
+                      projectLocation={project.location}
+                      companyId={project.company_id}
+                      canUseProductionWeather={productionWeatherEnabled}
+                      canUseSunPlanner={sunPlannerEnabled}
+                      productionWeatherLockedHint={productionWeatherLockedHint}
+                      sunPlannerLockedHint={sunPlannerLockedHint}
+                      productionWindowStart={scheduleStart}
+                      productionWindowEnd={scheduleEnd}
+                      jobId={project.job_id}
+                      initialFeature={
+                        tool === 'shotlist'
+                          ? 'shotlist'
+                          : tool === 'callsheet'
+                            ? 'call_sheet'
+                            : tool === 'gear'
+                              ? 'equipment'
+                              : tool === 'tasks'
+                                ? 'tasks'
+                                : tool === 'sun'
+                                  ? 'sun'
+                                  : tool === 'weather'
+                                    ? 'weather'
+                                    : null
+                      }
+                      initialShootDay={shootDayParam || null}
+                    />
+                  </Suspense>
                 )}
                 {tab === 'crew' && !isPrivateWorkspace && (
                   <ProjectCrewTab
