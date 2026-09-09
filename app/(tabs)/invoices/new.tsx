@@ -17,6 +17,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { freelancerHasInvoicing, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { ACCOUNT_ROLE_COPY } from '@/lib/accountRoleCopy'
 import { loadInvoiceBookedFeeForJob } from '@/lib/invoiceBookedFee'
 
 type CompanyOption = { id: string; name: string }
@@ -278,10 +279,8 @@ export default function NewInvoiceScreen() {
             </>
           ) : (
             <>
-              <Text style={styles.blockTitle}>Freelancers only</Text>
-              <Text style={styles.blockSub}>
-                Companies receive invoices here. Switch to a freelancer account to create one.
-              </Text>
+              <Text style={styles.blockTitle}>{ACCOUNT_ROLE_COPY.invoiceHireOnlyTitle}</Text>
+              <Text style={styles.blockSub}>{ACCOUNT_ROLE_COPY.invoiceHireOnlyBody}</Text>
             </>
           )}
         </View>

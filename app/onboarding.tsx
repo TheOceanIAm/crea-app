@@ -17,6 +17,7 @@ import { router } from 'expo-router'
 import { Briefcase, Building2, Camera, ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { ACCOUNT_ROLE_COPY } from '@/lib/accountRoleCopy'
 import { profileNeedsOnboarding } from '@/lib/onboardingGate'
 import { pickAndUploadAvatarOnly } from '@/lib/uploadProfileAvatar'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
@@ -175,7 +176,7 @@ export default function OnboardingScreen() {
         return
       }
       if (roleChoice === 'freelancer' && parsePositiveDayRate(dayRate) == null) {
-        Alert.alert('Day rate', 'Enter your day rate so companies know what you charge.')
+        Alert.alert('Day rate', 'Enter your day rate so productions know what you charge.')
         return
       }
       void completeOnboarding()
@@ -185,7 +186,7 @@ export default function OnboardingScreen() {
   const completeOnboarding = async () => {
     const name = displayName.trim()
     if (!roleChoice) {
-      Alert.alert('Account type', 'Choose how you want to use Crea.')
+      Alert.alert('Get booked or Hire crew', 'Choose how you will use Crea on a production.')
       return
     }
     if (!isMeaningfulProfileName(name)) {
@@ -203,7 +204,7 @@ export default function OnboardingScreen() {
     }
     const parsedDayRate = roleChoice === 'freelancer' ? parsePositiveDayRate(dayRate) : null
     if (roleChoice === 'freelancer' && parsedDayRate == null) {
-      Alert.alert('Day rate', 'Enter your day rate so companies know what you charge.')
+      Alert.alert('Day rate', 'Enter your day rate so productions know what you charge.')
       return
     }
     if (!termsAccepted) {
@@ -324,7 +325,7 @@ export default function OnboardingScreen() {
 
   const title =
     step === 0
-      ? 'How will you use Crea?'
+      ? ACCOUNT_ROLE_COPY.onboardingTitle
       : step === 1
         ? 'Trial plan'
         : step === 2
@@ -335,12 +336,12 @@ export default function OnboardingScreen() {
 
   const sub =
     step === 0
-      ? 'You can change details later in settings.'
+      ? ACCOUNT_ROLE_COPY.onboardingSub
       : step === 1
         ? `During your ${PLATFORM_TRIAL_DAYS}-day platform trial you can preview Free vs Pro. Switch anytime under Profile → Plan (same as creaservices.de).`
         : step === 2
           ? roleChoice === 'company'
-            ? 'This is how you appear to freelancers.'
+            ? 'This is how you appear when you hire crew.'
             : 'This is how you appear on your public profile.'
           : roleChoice === 'freelancer'
             ? 'A profile photo and day rate are required. You must also accept our policies to finish.'
@@ -374,8 +375,8 @@ export default function OnboardingScreen() {
                 <View style={styles.roleIconWrap}>
                   <Briefcase size={28} color="#FFDC00" strokeWidth={ICON_STROKE} />
                 </View>
-                <Text style={styles.roleTitle}>I'm a freelancer</Text>
-                <Text style={styles.roleDesc}>Find jobs, send invoices, share your portfolio.</Text>
+                <Text style={styles.roleTitle}>{ACCOUNT_ROLE_COPY.getBooked.label}</Text>
+                <Text style={styles.roleDesc}>{ACCOUNT_ROLE_COPY.getBooked.desc}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -386,9 +387,10 @@ export default function OnboardingScreen() {
                 <View style={styles.roleIconWrap}>
                   <Building2 size={28} color="#FFDC00" strokeWidth={ICON_STROKE} />
                 </View>
-                <Text style={styles.roleTitle}>I hire talent</Text>
-                <Text style={styles.roleDesc}>Post roles, review applicants, pay invoices.</Text>
+                <Text style={styles.roleTitle}>{ACCOUNT_ROLE_COPY.hireCrew.label}</Text>
+                <Text style={styles.roleDesc}>{ACCOUNT_ROLE_COPY.hireCrew.desc}</Text>
               </TouchableOpacity>
+              <Text style={styles.legalHint}>{ACCOUNT_ROLE_COPY.legalHint}</Text>
             </View>
           ) : null}
 
@@ -446,7 +448,7 @@ export default function OnboardingScreen() {
               </TouchableOpacity>
 
               <Text style={styles.fieldLabel}>
-                {roleChoice === 'company' ? 'Company or brand name' : 'Your name'}
+                {roleChoice === 'company' ? ACCOUNT_ROLE_COPY.nameLabelHireCrew : 'Your name'}
               </Text>
               <TextInput
                 style={styles.input}
@@ -671,6 +673,12 @@ const styles = StyleSheet.create({
   },
   roleTitle: { fontSize: 18, fontWeight: '800', color: '#ffffff', marginBottom: 6 },
   roleDesc: { fontSize: 13, color: 'rgba(255,255,255,0.4)', lineHeight: 18 },
+  legalHint: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.28)',
+    lineHeight: 16,
+    marginTop: 8,
+  },
   trialFootnote: {
     fontSize: 11,
     color: 'rgba(255,255,255,0.28)',

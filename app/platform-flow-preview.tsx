@@ -32,23 +32,23 @@ const INTENT_OPTIONS: {
 }[] = [
   {
     key: 'find-work',
-    kicker: 'Ich bin Freelancer',
-    title: 'Ich suche Arbeit',
-    desc: 'Jobs durchstöbern, bewerben mit Pro, Rechnungen & Portfolio.',
+    kicker: 'Get booked',
+    title: 'I get hired',
+    desc: 'Apply to jobs, send invoices, run your own projects. A company name can still go on the PDF.',
     icon: Briefcase,
   },
   {
     key: 'hire',
-    kicker: 'Ich stelle ein',
-    title: 'Ich suche Talent',
-    desc: 'Jobs posten, Bewerber prüfen, Crew einladen.',
+    kicker: 'Hire crew',
+    title: 'I staff productions',
+    desc: 'Post roles, review applicants, pay crew invoices.',
     icon: Building2,
   },
   {
     key: 'both',
-    kicker: 'Ich mache beides',
-    title: 'Arbeiten & Einstellen',
-    desc: 'Freelancer-Profil plus eigene Jobs — wie viele Creatives.',
+    kicker: 'I do both',
+    title: 'Start with Get booked',
+    desc: 'Producer-operators start here. You can still post crew roles from this account.',
     icon: Layers,
   },
 ]
@@ -153,7 +153,7 @@ export default function PlatformFlowPreviewScreen() {
 
           {step === 'intent' ? (
             <>
-              {header(greeting, 'Choose how you will use CREA. Plan tiers come later.')}
+              {header(greeting, 'On a production, I mostly get booked or hire crew. Plan tiers come later.')}
               <View style={styles.cardGrid}>
                 {INTENT_OPTIONS.map((opt) => {
                   const Icon = opt.icon
@@ -195,10 +195,10 @@ export default function PlatformFlowPreviewScreen() {
                   <Text style={styles.mappingLabel}>Auto-Mapping (Prototyp)</Text>
                   <Text style={styles.mappingValue}>
                     {intent === 'find-work'
-                      ? 'role: freelancer · default plan: Starter'
+                      ? 'role: freelancer · Get booked'
                       : intent === 'hire'
-                        ? 'role: company · default plan: Studio'
-                        : 'role: freelancer + hiring enabled · default: Starter'}
+                        ? 'role: company · Hire crew'
+                        : 'role: freelancer · Get booked (I do both)'}
                   </Text>
                 </View>
               ) : null}

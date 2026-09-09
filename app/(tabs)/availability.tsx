@@ -328,8 +328,8 @@ export default function AvailabilityScreen() {
           </TouchableOpacity>
         </View>
         <View style={styles.blockedWrap}>
-          <Text style={styles.blockedTitle}>Freelancers only</Text>
-          <Text style={styles.blockedSub}>Companies can’t set availability here.</Text>
+          <Text style={styles.blockedTitle}>Get booked only</Text>
+          <Text style={styles.blockedSub}>Hire crew accounts don’t set personal availability here.</Text>
         </View>
       </SafeAreaView>
     )

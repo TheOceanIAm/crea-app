@@ -563,9 +563,9 @@ export default function WorkspaceProjectsScreen() {
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
         <View style={styles.center}>
-          <Text style={styles.blockTitle}>Freelancers only</Text>
+          <Text style={styles.blockTitle}>Account needed</Text>
           <Text style={styles.blockSub}>
-            This overview is for freelancer or company accounts.
+            This overview is for Get booked or Hire crew accounts.
           </Text>
         </View>
         </ResponsiveScreen>
