@@ -4,8 +4,9 @@ import { SocialLinkButton } from '@/components/SocialLinkButton'
 import type { AppStoreScreenshotId } from '@/lib/appStoreScreenshotCatalog'
 import { ICON_STROKE } from '@/lib/iconTheme'
 
+const PROJECT_TITLE = 'ON Running – "Move Free" Spring Campaign'
 const AVATAR_CHRIS =
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face'
+  'https://trcjalnzuzpgygxtncvp.supabase.co/storage/v1/object/public/avatars/b008d171-8f73-415d-b585-3749e6a28efa/avatar.jpeg'
 const AVATAR_JANA =
   'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=face'
 const AVATAR_2 =
@@ -145,39 +146,41 @@ function PostProjectScreen() {
       </View>
       <SectionLabel>ROLES NEEDED</SectionLabel>
       <View style={styles.chipRow}>
-        <Chip label="Direction" />
-        <Chip label="Videography" />
-        <Chip label="Photography" />
+        <Chip label="Direction" active />
+        <Chip label="DoP" active />
+        <Chip label="Photography" active />
         <View style={styles.chipAdd}>
           <Text style={styles.chipAddText}>+</Text>
         </View>
       </View>
       <SectionLabel>BUDGET</SectionLabel>
       <View style={styles.chipRow}>
-        <Chip label="Negotiable" active />
+        <Chip label="Negotiable" />
         <Chip label="Day rate" />
-        <Chip label="Fixed budget" />
+        <Chip label="Fixed budget" active />
       </View>
       <SectionLabel>LOCATION</SectionLabel>
       <View style={styles.chipRow}>
         <Chip label="Remote" />
-        <Chip label="On-site" />
-        <Chip label="Hybrid" active />
+        <Chip label="On-site" active />
+        <Chip label="Hybrid" />
       </View>
       <SectionLabel>PRODUCTION WINDOW</SectionLabel>
       <View style={styles.dateRow}>
         <View style={styles.dateField}>
           <Text style={styles.dateLabel}>START</Text>
-          <Text style={styles.datePlaceholder}>YYYY-MM-DD</Text>
+          <Text style={styles.dateValue}>2026-09-07</Text>
         </View>
         <View style={styles.dateField}>
           <Text style={styles.dateLabel}>END</Text>
-          <Text style={styles.datePlaceholder}>YYYY-MM-DD</Text>
+          <Text style={styles.dateValue}>2026-10-16</Text>
         </View>
       </View>
       <SectionLabel>DESCRIPTION</SectionLabel>
       <View style={styles.textArea}>
-        <Text style={styles.placeholder}>Deliverables, dates, kit, usage…</Text>
+        <Text style={styles.bodyCopy}>
+          ON Spring “Move Free” campaign. 60-second hero, eight 9:16 cutdowns, stills for OOH — Lisbon and Berlin.
+        </Text>
       </View>
       <View style={styles.primaryBtn}>
         <Text style={styles.primaryBtnText}>Publish project</Text>
@@ -187,7 +190,7 @@ function PostProjectScreen() {
 }
 
 function ProjectTabs({ active }: { active: string }) {
-  const tabs = ['Overview', 'Milestones', 'Production', 'Crew', 'Budget', 'Messages']
+  const tabs = ['Overview', 'Milestones', 'Production', 'Crew', 'Budget', 'Messages', 'Files', 'Review']
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll}>
       <View style={styles.tabRow}>
@@ -207,44 +210,51 @@ function ProjectOverviewScreen() {
       <View style={styles.backRow}>
         <ChevronLeft size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
         <Text style={styles.backYellow}>Back</Text>
-        <Text style={styles.projectTitle}>Brand Film</Text>
+        <Text style={styles.projectTitle} numberOfLines={1}>
+          {PROJECT_TITLE}
+        </Text>
       </View>
       <ProjectTabs active="Overview" />
       <View style={styles.statGrid}>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>12</Text>
+          <Text style={styles.statKicker}>APPLICANTS</Text>
+          <Text style={styles.statValue}>0</Text>
           <Text style={styles.statLabel}>in crew pipeline</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>3/6</Text>
+          <Text style={styles.statKicker}>MILESTONES</Text>
+          <Text style={styles.statValue}>0/6</Text>
           <Text style={styles.statLabel}>completed</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>€14,000 · FIXED</Text>
+          <Text style={styles.statKicker}>BUDGET</Text>
+          <Text style={styles.statValueBudget}>€164,000.00 · FIXED</Text>
           <Text style={styles.statLabel}>total</Text>
         </View>
         <View style={styles.statCard}>
+          <Text style={styles.statKicker}>STATUS</Text>
           <View style={styles.rolePill}>
-            <Text style={styles.rolePillText}>Recruiting</Text>
+            <Text style={styles.rolePillText}>Completed</Text>
           </View>
         </View>
       </View>
       <Text style={styles.blockTitle}>Project status</Text>
+      <Text style={styles.hint}>Matches the web job workspace (Recruiting → Active → Completed).</Text>
       <View style={styles.chipRow}>
-        <Chip label="Recruiting" active />
+        <Chip label="Recruiting" />
         <Chip label="Active" />
-        <Chip label="Completed" />
+        <Chip label="Completed" active />
       </View>
       <View style={styles.banner}>
-        <Text style={styles.bannerText}>14 Jun 2026 → 21 Jun 2026 · 8 days</Text>
+        <Text style={styles.bannerText}>7 Sep 2026 → 16 Oct 2026 · 40 production days</Text>
       </View>
-      <Text style={styles.blockTitle}>About this project</Text>
+      <Text style={styles.blockTitle}>About This Project</Text>
       <View style={styles.aboutBox}>
         <Text style={styles.bodyCopy}>
-          Hero brand film for summer launch. Need DOP + gaffer for studio and location days in Berlin.
+          We&apos;re producing ON&apos;s Spring “Move Free” campaign. Deliverables: one 60-second hero film, eight 9:16
+          social cutdowns, and a full stills package for OOH and retail. Shot across Lisbon rooftops, coastline and
+          studio in Berlin.
         </Text>
-        <Text style={[styles.sectionLabel, { marginTop: 12 }]}>DELIVERABLES</Text>
-        <Text style={styles.bodyCopy}>1 × Brand Film 90 sec{'\n'}2 × Cut downs 15 sec</Text>
       </View>
     </ScrollView>
   )
@@ -256,15 +266,17 @@ function ProductionScreen() {
     ['Weather', '7-day forecast for your shoot location'],
     ['Shotlist', 'Scene-by-scene list for the calendar day you load'],
     ['Call Sheet', 'Crew calls, locations, PDF export, and daily wrap'],
-    ['Tasks', 'AI task breakdown synced to production context'],
-    ['Equipment', 'AI equipment list synced to production context'],
+    ['Tasks', 'Manual checklist for prep, shoot, and wrap'],
+    ['Equipment', 'Manual kit list for this production'],
   ]
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollPad} showsVerticalScrollIndicator={false}>
       <View style={styles.backRow}>
         <ChevronLeft size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
         <Text style={styles.backYellow}>Back</Text>
-        <Text style={styles.projectTitle}>Brand Film</Text>
+        <Text style={styles.projectTitle} numberOfLines={1}>
+          {PROJECT_TITLE}
+        </Text>
       </View>
       <ProjectTabs active="Production" />
       <Text style={styles.hint}>
@@ -440,16 +452,18 @@ function MessagesScreen() {
       <View style={styles.backRow}>
         <ChevronLeft size={18} color="#FFDC00" strokeWidth={ICON_STROKE} />
         <Text style={styles.backYellow}>Back</Text>
-        <Text style={styles.projectTitle}>Brand Film</Text>
+        <Text style={styles.projectTitle} numberOfLines={1}>
+          {PROJECT_TITLE}
+        </Text>
       </View>
       <ProjectTabs active="Messages" />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.msgPad} showsVerticalScrollIndicator={false}>
         <View style={styles.msgMine}>
           <View style={styles.msgBubbleMine}>
-            <Text style={styles.msgKicker}>CREA · you</Text>
+            <Text style={styles.msgKicker}>Crea Services · you</Text>
             <Text style={styles.msgBodyMine}>
-              Hey Jana, glad you joined the crew! 👋 Have you had a chance to review the brief? Would love your take on
-              the camera approach before we lock the shotlist.
+              Hey Chris, we&apos;ve started adding the crew from our roster to this project. Anything you need before our
+              meeting tomorrow?
             </Text>
           </View>
           <View style={styles.msgAvatarMine}>
@@ -457,12 +471,11 @@ function MessagesScreen() {
           </View>
         </View>
         <View style={styles.msgTheirs}>
-          <Image source={{ uri: AVATAR_JANA }} style={styles.msgAvatar} />
+          <Image source={{ uri: AVATAR_CHRIS }} style={styles.msgAvatar} />
           <View style={styles.msgBubbleTheirs}>
-            <Text style={styles.msgKickerTheirs}>Jana Maier</Text>
+            <Text style={styles.msgKickerTheirs}>Chris Noviak</Text>
             <Text style={styles.msgBodyTheirs}>
-              Hey! Yes read it — love the concept. I think we should go handheld for the lifestyle scenes and locked-off
-              for the product. Can chat tomorrow if that works?
+              Thanks for having me! All good from my end — can&apos;t wait to meet you and the rest of the crew tomorrow.
             </Text>
           </View>
         </View>
@@ -505,7 +518,7 @@ function BookingScreen() {
         <Text style={styles.amount}>~€2,850</Text>
         <Text style={[styles.sectionLabel, { marginTop: 16 }]}>PROJECT</Text>
         <View style={styles.selectField}>
-          <Text style={styles.selectValue}>Apex Studio – Fashion Editorial</Text>
+          <Text style={styles.selectValue}>ON Running – Move Free</Text>
         </View>
         <Text style={[styles.sectionLabel, { marginTop: 12 }]}>MESSAGE</Text>
         <View style={styles.textArea}>
@@ -716,7 +729,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
   },
+  statKicker: {
+    fontSize: 9,
+    color: 'rgba(255,255,255,0.35)',
+    letterSpacing: 1.2,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
   statValue: { color: '#FFDC00', fontSize: 18, fontWeight: '800' },
+  statValueBudget: { color: '#FFDC00', fontSize: 13, fontWeight: '800', lineHeight: 18 },
   statLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 11, marginTop: 4 },
   blockTitle: { color: '#fff', fontSize: 13, fontWeight: '800', letterSpacing: 0.8, marginTop: 8, marginBottom: 8 },
   banner: {
