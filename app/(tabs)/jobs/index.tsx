@@ -30,7 +30,7 @@ import {
 } from '@/lib/freelancerPlan'
 import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
 import { publishCeoExternalJob } from '@/lib/ceoExternalJobsApi'
-import { instagramUrl, linkedinUrl } from '@/lib/profilePublicLinks'
+import { instagramUrl, linkedinUrl, normalizeExternalUrl } from '@/lib/profilePublicLinks'
 import {
   cacheJobsFeed,
   hydrateJobsFeedBestEffort,
@@ -127,6 +127,7 @@ export default function JobsListScreen() {
   const [ceoContactEmail, setCeoContactEmail] = useState('')
   const [ceoLinkedIn, setCeoLinkedIn] = useState('')
   const [ceoInstagram, setCeoInstagram] = useState('')
+  const [ceoContactUrl, setCeoContactUrl] = useState('')
 
   const [refreshing, setRefreshing] = useState(false)
 
@@ -263,8 +264,8 @@ export default function JobsListScreen() {
       Alert.alert('Title required', 'Please enter a project title.')
       return
     }
-    if (!email || !/\S+@\S+\.\S+/.test(email)) {
-      Alert.alert('Email required', 'Please enter a valid contact email.')
+    if (email && !/\S+@\S+\.\S+/.test(email)) {
+      Alert.alert('Invalid email', 'Contact email must be valid when provided.')
       return
     }
     setCeoExtSaving(true)
@@ -277,9 +278,10 @@ export default function JobsListScreen() {
       needed_when: ceoNeededWhen.trim() || undefined,
       intel_brief: ceoIntel.trim() || undefined,
       contact_name: ceoContactName.trim() || undefined,
-      contact_email: email,
+      contact_email: email || undefined,
       contact_linkedin: ceoLinkedIn.trim() || undefined,
       contact_instagram: ceoInstagram.trim() || undefined,
+      contact_url: ceoContactUrl.trim() || undefined,
     })
     setCeoExtSaving(false)
     if (result.ok === false) {
@@ -297,6 +299,7 @@ export default function JobsListScreen() {
     setCeoContactEmail('')
     setCeoLinkedIn('')
     setCeoInstagram('')
+    setCeoContactUrl('')
     setAddExternalOpen(false)
     hasLoadedRef.current = false
     lastLoadedAtRef.current = 0
@@ -600,7 +603,8 @@ export default function JobsListScreen() {
                 {(() => {
                   const linkedIn = linkedinUrl(activeExternalJob?.contact_linkedin ?? '')
                   const instagram = instagramUrl(activeExternalJob?.contact_instagram ?? '')
-                  if (!linkedIn && !instagram) return null
+                  const generalUrl = normalizeExternalUrl(activeExternalJob?.contact_url ?? '')
+                  if (!linkedIn && !instagram && !generalUrl) return null
                   return (
                     <View style={styles.modalContactLinksRow}>
                       {linkedIn ? (
@@ -617,6 +621,14 @@ export default function JobsListScreen() {
                           onPress={() => openExternalUrl(instagram, 'Instagram')}
                         >
                           <Text style={styles.modalContactLink}>Instagram</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {generalUrl ? (
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          onPress={() => openExternalUrl(generalUrl, 'Link')}
+                        >
+                          <Text style={styles.modalContactLink}>Link</Text>
                         </TouchableOpacity>
                       ) : null}
                     </View>
@@ -638,13 +650,19 @@ export default function JobsListScreen() {
                 style={styles.modalPrimary}
                 onPress={() => {
                   const email = activeExternalJob?.contact_email?.trim()
-                  if (!email) return
-                  openExternalUrl(`mailto:${email}`, 'Email')
+                  if (email) {
+                    openExternalUrl(`mailto:${email}`, 'Email')
+                    return
+                  }
+                  const generalUrl = normalizeExternalUrl(activeExternalJob?.contact_url ?? '')
+                  if (generalUrl) openExternalUrl(generalUrl, 'Link')
                 }}
                 activeOpacity={0.85}
-                disabled={!activeExternalJob?.contact_email}
+                disabled={!activeExternalJob?.contact_email && !normalizeExternalUrl(activeExternalJob?.contact_url ?? '')}
               >
-                <Text style={styles.modalPrimaryText}>Open email</Text>
+                <Text style={styles.modalPrimaryText}>
+                  {activeExternalJob?.contact_email?.trim() ? 'Open email' : 'Open link'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -691,12 +709,12 @@ export default function JobsListScreen() {
                 placeholder="e.g. Logo design"
                 placeholderTextColor="rgba(255,255,255,0.25)"
               />
-              <Text style={styles.ceoLabel}>Contact email — required</Text>
+              <Text style={styles.ceoLabel}>Contact email</Text>
               <TextInput
                 style={styles.ceoInput}
                 value={ceoContactEmail}
                 onChangeText={setCeoContactEmail}
-                placeholder="producer@agency.com"
+                placeholder="Optional"
                 placeholderTextColor="rgba(255,255,255,0.25)"
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -765,6 +783,15 @@ export default function JobsListScreen() {
                 value={ceoInstagram}
                 onChangeText={setCeoInstagram}
                 placeholder="Optional @handle"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                autoCapitalize="none"
+              />
+              <Text style={styles.ceoLabel}>Link</Text>
+              <TextInput
+                style={styles.ceoInput}
+                value={ceoContactUrl}
+                onChangeText={setCeoContactUrl}
+                placeholder="Website, form, or any other URL"
                 placeholderTextColor="rgba(255,255,255,0.25)"
                 autoCapitalize="none"
               />

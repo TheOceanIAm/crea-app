@@ -10,9 +10,10 @@ export type PublishCeoExternalJobInput = {
   needed_when?: string
   intel_brief?: string
   contact_name?: string
-  contact_email: string
+  contact_email?: string
   contact_linkedin?: string
   contact_instagram?: string
+  contact_url?: string
 }
 
 /**
