@@ -603,8 +603,7 @@ export default function JobsListScreen() {
                 {(() => {
                   const linkedIn = linkedinUrl(activeExternalJob?.contact_linkedin ?? '')
                   const instagram = instagramUrl(activeExternalJob?.contact_instagram ?? '')
-                  const generalUrl = normalizeExternalUrl(activeExternalJob?.contact_url ?? '')
-                  if (!linkedIn && !instagram && !generalUrl) return null
+                  if (!linkedIn && !instagram) return null
                   return (
                     <View style={styles.modalContactLinksRow}>
                       {linkedIn ? (
@@ -623,18 +622,22 @@ export default function JobsListScreen() {
                           <Text style={styles.modalContactLink}>Instagram</Text>
                         </TouchableOpacity>
                       ) : null}
-                      {generalUrl ? (
-                        <TouchableOpacity
-                          activeOpacity={0.85}
-                          onPress={() => openExternalUrl(generalUrl, 'Link')}
-                        >
-                          <Text style={styles.modalContactLink}>Link</Text>
-                        </TouchableOpacity>
-                      ) : null}
                     </View>
                   )
                 })()}
               </View>
+              {(() => {
+                const applyUrl = normalizeExternalUrl(activeExternalJob?.contact_url ?? '')
+                if (!applyUrl) return null
+                return (
+                  <View style={styles.modalApplyCard}>
+                    <Text style={styles.modalApplyTitle}>Apply Via</Text>
+                    <TouchableOpacity activeOpacity={0.85} onPress={() => openExternalUrl(applyUrl, 'Apply Via')}>
+                      <Text style={styles.modalApplyUrl}>{applyUrl}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )
+              })()}
               <View style={styles.modalIntelCard}>
                 <Text style={styles.modalContactLabel}>Intel brief</Text>
                 <Text style={styles.modalIntel}>
@@ -655,13 +658,13 @@ export default function JobsListScreen() {
                     return
                   }
                   const generalUrl = normalizeExternalUrl(activeExternalJob?.contact_url ?? '')
-                  if (generalUrl) openExternalUrl(generalUrl, 'Link')
+                  if (generalUrl) openExternalUrl(generalUrl, 'Apply Via')
                 }}
                 activeOpacity={0.85}
                 disabled={!activeExternalJob?.contact_email && !normalizeExternalUrl(activeExternalJob?.contact_url ?? '')}
               >
                 <Text style={styles.modalPrimaryText}>
-                  {activeExternalJob?.contact_email?.trim() ? 'Open email' : 'Open link'}
+                  {activeExternalJob?.contact_email?.trim() ? 'Open email' : 'Apply via'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -786,12 +789,12 @@ export default function JobsListScreen() {
                 placeholderTextColor="rgba(255,255,255,0.25)"
                 autoCapitalize="none"
               />
-              <Text style={styles.ceoLabel}>Link</Text>
+              <Text style={styles.ceoLabel}>Apply via</Text>
               <TextInput
                 style={styles.ceoInput}
                 value={ceoContactUrl}
                 onChangeText={setCeoContactUrl}
-                placeholder="Website, form, or any other URL"
+                placeholder="Application URL"
                 placeholderTextColor="rgba(255,255,255,0.25)"
                 autoCapitalize="none"
               />
@@ -1145,6 +1148,26 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.65)',
     fontSize: 13,
     fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
+  modalApplyCard: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.28)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    backgroundColor: 'rgba(255,220,0,0.07)',
+  },
+  modalApplyTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  modalApplyUrl: {
+    color: '#FFDC00',
+    fontSize: 13,
+    fontWeight: '600',
     textDecorationLine: 'underline',
   },
   modalActions: {
