@@ -20,6 +20,10 @@ export function OfflinePackCard({ projectId, projectTitle, jobId, shootDates, pr
   const dayLabel = dayCount === 1 ? '1 shoot day' : `${dayCount} shoot days`
   const pdfLabel =
     meta?.pdfDays && meta.pdfDays > 0 ? ` · ${meta.pdfDays} PDF${meta.pdfDays === 1 ? '' : 's'}` : ''
+  const filesLabel =
+    meta?.fileCount && meta.fileCount > 0
+      ? ` · ${meta.fileCount} file${meta.fileCount === 1 ? '' : 's'}`
+      : ''
   const changeLabel =
     freshness && freshness.changes > 0
       ? `${freshness.changes} change${freshness.changes === 1 ? '' : 's'} online`
@@ -31,9 +35,9 @@ export function OfflinePackCard({ projectId, projectTitle, jobId, shootDates, pr
         ? 'Shoot day tomorrow — update before set'
         : null
 
-  let sub = 'Shot list, call sheet, crew and milestones — use on set without Wi‑Fi.'
+  let sub = 'Shot list, call sheet, crew, milestones, budget and files — use on set without Wi‑Fi.'
   if (meta) {
-    const stamp = `${formatOfflinePackStamp(meta.downloadedAt)} · ${dayLabel}${pdfLabel}`
+    const stamp = `${formatOfflinePackStamp(meta.downloadedAt)} · ${dayLabel}${pdfLabel}${filesLabel}`
     if (silentUpdating) sub = `Updating… · ${stamp}`
     else if (soonLabel && changeLabel) sub = `${soonLabel} · ${changeLabel}`
     else if (soonLabel) sub = `${soonLabel} · pack is current`

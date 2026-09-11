@@ -81,7 +81,10 @@ export function useOfflinePack(
   }, [busy, jobId, projectId, projectLocation, projectTitle, shootDates])
 
   const remove = useCallback(() => {
-    Alert.alert('Remove offline copy', 'Delete the downloaded shot list, call sheet, crew and milestones from this device?', [
+    Alert.alert(
+      'Remove offline copy',
+      'Delete the downloaded shot list, call sheet, crew, milestones, budget and files from this device?',
+      [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',

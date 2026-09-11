@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
 } from 'react-native'
 import * as ImagePicker from 'expo-image-picker'
 import * as FileSystem from 'expo-file-system'
+import * as Sharing from 'expo-sharing'
 import { decode } from 'base64-arraybuffer'
 import { FileText, ImageIcon, Upload } from 'lucide-react-native'
 import { useFocusEffect } from 'expo-router'
@@ -19,6 +20,16 @@ import { requireOptionalNativeModule } from 'expo-modules-core'
 import { supabase } from '@/lib/supabase'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
+import {
+  getPackedAttachmentUri,
+  isOfflineFetchError,
+  mimeFromFileName,
+  readOfflinePack,
+  resolveOfflineRead,
+  subscribeOfflinePack,
+  type OfflinePackedFile,
+} from '@/lib/offlinePack'
 
 const JOB_ATTACHMENTS_BUCKET = 'job-attachments'
 const MAX_BYTES = 20 * 1024 * 1024
@@ -36,6 +47,10 @@ type FileRow = {
   /** job-attachments path, or null for legacy project-files entries */
   storagePath: string | null
   source: 'job' | 'legacy'
+  localFileName?: string | null
+  mimeType?: string | null
+  skipped?: boolean
+  skipReason?: string | null
 }
 
 type DocumentPickerModule = {
@@ -102,8 +117,36 @@ export function ProjectFilesTab({ projectId, jobId, userId }: Props) {
   const [loading, setLoading] = useState(true)
   const [uploadingDoc, setUploadingDoc] = useState(false)
   const [uploadingMedia, setUploadingMedia] = useState(false)
+  const [usingOfflinePack, setUsingOfflinePack] = useState(false)
+  const [packDownloadedAt, setPackDownloadedAt] = useState<string | null>(null)
+  const [packMissingFiles, setPackMissingFiles] = useState(false)
+
+  const applyPackedFiles = useCallback((packed: OfflinePackedFile[] | undefined, downloadedAt: string) => {
+    setFiles(
+      (packed ?? []).map((f) => ({
+        key: f.key,
+        name: f.name,
+        storagePath: null,
+        source: f.source,
+        localFileName: f.localFileName ?? null,
+        mimeType: f.mimeType ?? null,
+        skipped: f.skipped,
+        skipReason: f.skipReason ?? null,
+      }))
+    )
+    setUsingOfflinePack(true)
+    setPackDownloadedAt(downloadedAt)
+    setPackMissingFiles(packed == null)
+    setLoading(false)
+  }, [])
 
   const load = useCallback(async () => {
+    const offline = await resolveOfflineRead(projectId)
+    if (offline) {
+      applyPackedFiles(offline.pack.files, offline.pack.downloadedAt)
+      return
+    }
+
     const next: FileRow[] = []
 
     if (jobId) {
@@ -113,6 +156,13 @@ export function ProjectFilesTab({ projectId, jobId, userId }: Props) {
         .eq('job_id', jobId)
         .order('created_at', { ascending: false })
       if (error) {
+        if (isOfflineFetchError(error)) {
+          const pack = await readOfflinePack(projectId)
+          if (pack) {
+            applyPackedFiles(pack.files, pack.downloadedAt)
+            return
+          }
+        }
         console.warn('[ProjectFilesTab] job_attachments', error.message)
       } else {
         for (const r of rows ?? []) {
@@ -127,12 +177,17 @@ export function ProjectFilesTab({ projectId, jobId, userId }: Props) {
     }
 
     // Legacy app uploads (pre job_attachments sync) — keep visible if present.
-    const { data: legacy, error: legacyErr } = await supabase.storage
-      .from('project-files')
-      .list(projectId, {
-        limit: 100,
-        sortBy: { column: 'created_at', order: 'desc' },
-      })
+    const { data: legacy, error: legacyErr } = await supabase.storage.from('project-files').list(projectId, {
+      limit: 100,
+      sortBy: { column: 'created_at', order: 'desc' },
+    })
+    if (legacyErr && isOfflineFetchError(legacyErr)) {
+      const pack = await readOfflinePack(projectId)
+      if (pack) {
+        applyPackedFiles(pack.files, pack.downloadedAt)
+        return
+      }
+    }
     if (!legacyErr) {
       for (const f of legacy ?? []) {
         const name = (f.name ?? '').trim()
@@ -146,9 +201,12 @@ export function ProjectFilesTab({ projectId, jobId, userId }: Props) {
       }
     }
 
+    setUsingOfflinePack(false)
+    setPackDownloadedAt(null)
+    setPackMissingFiles(false)
     setFiles(next)
     setLoading(false)
-  }, [jobId, projectId])
+  }, [applyPackedFiles, jobId, projectId])
 
   useFocusEffect(
     useCallback(() => {
@@ -156,6 +214,12 @@ export function ProjectFilesTab({ projectId, jobId, userId }: Props) {
       void load()
     }, [load])
   )
+
+  useEffect(() => {
+    return subscribeOfflinePack((id) => {
+      if (id === projectId) void load()
+    })
+  }, [load, projectId])
 
   const uploadBytes = async (
     buf: ArrayBuffer,
@@ -166,6 +230,11 @@ export function ProjectFilesTab({ projectId, jobId, userId }: Props) {
   ) => {
     if (!userId) {
       Alert.alert('Upload failed', 'Please sign in again.')
+      setBusy(false)
+      return
+    }
+    if (usingOfflinePack) {
+      Alert.alert('Downloaded version', 'Connect to the internet to upload files.')
       setBusy(false)
       return
     }
@@ -323,6 +392,31 @@ export function ProjectFilesTab({ projectId, jobId, userId }: Props) {
   }
 
   const openFile = async (row: FileRow) => {
+    if (usingOfflinePack || row.localFileName || row.skipped) {
+      if (row.skipped || !row.localFileName) {
+        Alert.alert(
+          'Not on this device',
+          row.skipReason
+            ? `${row.skipReason}. Connect and update the offline copy to include this file.`
+            : 'This file was not in the download. Connect and update the offline copy.'
+        )
+        return
+      }
+      const uri = await getPackedAttachmentUri(projectId, row.localFileName)
+      if (!uri) {
+        Alert.alert('Could not open', 'The downloaded file is missing on this device.')
+        return
+      }
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: mimeFromFileName(row.name, row.mimeType),
+          dialogTitle: row.name,
+        }).catch(() => {})
+        return
+      }
+      Linking.openURL(uri).catch(() => {})
+      return
+    }
     if (row.source === 'job' && row.storagePath) {
       const { data, error } = await supabase.storage
         .from(JOB_ATTACHMENTS_BUCKET)
@@ -357,40 +451,55 @@ export function ProjectFilesTab({ projectId, jobId, userId }: Props) {
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      {usingOfflinePack ? <OfflinePackBanner downloadedAt={packDownloadedAt} /> : null}
       <Text style={styles.hint}>
-        Contracts, briefs, PDFs, and references — same workspace files as on web. Only project members can see these
-        files.
+        {usingOfflinePack
+          ? packMissingFiles
+            ? 'This copy was downloaded before files were included. Connect and tap Update on Overview to save them for set.'
+            : 'Downloaded copies of workspace files. Open a file to share or preview it. Uploads need a connection.'
+          : 'Contracts, briefs, PDFs, and references — same workspace files as on web. Only project members can see these files.'}
       </Text>
 
-      <TouchableOpacity
-        style={[styles.uploadBtn, (busy || uploadingDoc) && styles.dim]}
-        onPress={() => void pickDocument()}
-        disabled={busy}
-      >
-        <Upload size={20} color="#0a0a0a" strokeWidth={ICON_STROKE} />
-        <Text style={styles.uploadText}>{uploadingDoc ? 'Uploading…' : 'Upload PDF or file'}</Text>
-      </TouchableOpacity>
+      {!usingOfflinePack ? (
+        <>
+          <TouchableOpacity
+            style={[styles.uploadBtn, (busy || uploadingDoc) && styles.dim]}
+            onPress={() => void pickDocument()}
+            disabled={busy}
+          >
+            <Upload size={20} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+            <Text style={styles.uploadText}>{uploadingDoc ? 'Uploading…' : 'Upload PDF or file'}</Text>
+          </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[styles.uploadBtnSecondary, (busy || uploadingMedia) && styles.dim]}
-        onPress={() => void pickFromLibrary()}
-        disabled={busy}
-      >
-        <ImageIcon size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-        <Text style={styles.uploadTextSecondary}>
-          {uploadingMedia ? 'Uploading…' : 'Photo or video from library'}
-        </Text>
-      </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.uploadBtnSecondary, (busy || uploadingMedia) && styles.dim]}
+            onPress={() => void pickFromLibrary()}
+            disabled={busy}
+          >
+            <ImageIcon size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
+            <Text style={styles.uploadTextSecondary}>
+              {uploadingMedia ? 'Uploading…' : 'Photo or video from library'}
+            </Text>
+          </TouchableOpacity>
+        </>
+      ) : null}
 
       {files.length === 0 ? (
-        <Text style={styles.empty}>No files yet.</Text>
+        <Text style={styles.empty}>{usingOfflinePack && packMissingFiles ? 'No files in this copy.' : 'No files yet.'}</Text>
       ) : (
         files.map((f) => (
           <TouchableOpacity key={f.key} style={styles.row} onPress={() => void openFile(f)}>
-            <FileText size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-            <Text style={styles.fileName} numberOfLines={2}>
-              {f.name}
-            </Text>
+            <FileText size={20} color={f.skipped ? 'rgba(255,255,255,0.35)' : '#FFDC00'} strokeWidth={ICON_STROKE} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.fileName, f.skipped ? styles.fileNameMuted : null]} numberOfLines={2}>
+                {f.name}
+              </Text>
+              {f.skipped && f.skipReason ? (
+                <Text style={styles.fileMeta} numberOfLines={1}>
+                  {f.skipReason}
+                </Text>
+              ) : null}
+            </View>
           </TouchableOpacity>
         ))
       )}
@@ -440,4 +549,6 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   fileName: { flex: 1, fontSize: 15, color: 'rgba(255,255,255,0.85)' },
+  fileNameMuted: { color: 'rgba(255,255,255,0.4)' },
+  fileMeta: { fontSize: 12, color: 'rgba(255,255,255,0.38)', marginTop: 2 },
 })

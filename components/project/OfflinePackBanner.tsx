@@ -18,7 +18,7 @@ export function OfflinePackBanner({
       <Text style={styles.title}>Offline copy</Text>
       <Text style={styles.body}>
         {stamp ? `Downloaded ${stamp}. ` : ''}
-        Shot status can still be cycled on set. Other edits need a connection.{pending}
+        Shot status can still be cycled on set. Budget, files, and other edits are view-only until you reconnect.{pending}
       </Text>
     </View>
   )

@@ -13,11 +13,17 @@ import { fetchWorkspaceMilestones, type WorkspaceMilestoneUi } from '@/lib/works
 import { fetchProductionEquipment, fetchProductionTasks, type ProductionEquipmentItem, type ProductionTask } from '@/lib/productionLists'
 import { overlayPendingStatuses, type OfflineShotStatus } from '@/lib/offlineShotOutbox'
 import { buildCallSheetHtml, generateCallSheetPdfFile } from '@/lib/offlineCallSheetPdf'
+import type { CrewSpendMemberRow, EquipmentSpendRow } from '@/lib/projectInternalBudget'
 
 export type { OfflineShotStatus }
 
-export const OFFLINE_PACK_VERSION = 2 as const
-const SUPPORTED_PACK_VERSIONS = new Set([1, 2])
+export const OFFLINE_PACK_VERSION = 3 as const
+const SUPPORTED_PACK_VERSIONS = new Set([1, 2, 3])
+/** Same ceiling as Files upload — skip oversized attachments rather than bloating the pack. */
+const MAX_PACK_FILE_BYTES = 20 * 1024 * 1024
+const MAX_PACK_FILES_TOTAL_BYTES = 250 * 1024 * 1024
+const JOB_ATTACHMENTS_BUCKET = 'job-attachments'
+const PROJECT_FILES_BUCKET = 'project-files'
 
 export type OfflineShot = {
   id: string
@@ -77,6 +83,33 @@ export type OfflineCrewMember = {
   pendingInviteId?: string | null
 }
 
+export type OfflineBudgetLine = {
+  id: string
+  label: string
+  planned_amount: number
+  spent_amount: number
+  sort_order: number
+}
+
+export type OfflineBudgetSnapshot = {
+  currency: string
+  total_budget: number | null
+  production_budget: number | null
+  lines: OfflineBudgetLine[]
+  members: CrewSpendMemberRow[]
+}
+
+export type OfflinePackedFile = {
+  key: string
+  name: string
+  source: 'job' | 'legacy'
+  mimeType?: string | null
+  /** Filename inside the pack files folder when the bytes were stored. */
+  localFileName?: string | null
+  skipped?: boolean
+  skipReason?: string | null
+}
+
 export type OfflinePack = {
   version: typeof OFFLINE_PACK_VERSION
   projectId: string
@@ -91,6 +124,8 @@ export type OfflinePack = {
   milestones: WorkspaceMilestoneUi[]
   tasks?: ProductionTask[]
   equipment?: ProductionEquipmentItem[]
+  budget?: OfflineBudgetSnapshot | null
+  files?: OfflinePackedFile[]
   /** YYYY-MM-DD → filename inside the pack files folder. */
   callSheetPdfs?: Record<string, string>
 }
@@ -102,6 +137,7 @@ export type OfflinePackMeta = {
   shootDates: string[]
   bytes: number
   pdfDays?: number
+  fileCount?: number
 }
 
 const preferPackIds = new Set<string>()
@@ -164,6 +200,7 @@ function isSupportedPack(parsed: unknown): parsed is OfflinePack {
 }
 
 function metaFromPack(pack: OfflinePack, bytes: number): OfflinePackMeta {
+  const packedFiles = (pack.files ?? []).filter((f) => f.localFileName && !f.skipped).length
   return {
     projectId: pack.projectId,
     projectTitle: pack.projectTitle,
@@ -171,6 +208,7 @@ function metaFromPack(pack: OfflinePack, bytes: number): OfflinePackMeta {
     shootDates: pack.shootDates,
     bytes,
     pdfDays: pack.callSheetPdfs ? Object.keys(pack.callSheetPdfs).length : 0,
+    fileCount: packedFiles,
   }
 }
 
@@ -260,6 +298,10 @@ export async function deleteOfflinePack(projectId: string): Promise<void> {
   if (files) {
     await FileSystem.deleteAsync(files, { idempotent: true }).catch(() => {})
   }
+  const staging = packStagingDir(projectId)
+  if (staging) {
+    await FileSystem.deleteAsync(staging, { idempotent: true }).catch(() => {})
+  }
   notifyOfflinePack(projectId)
 }
 
@@ -275,6 +317,41 @@ export async function getPackedCallSheetPdfUri(projectId: string, shootDay: stri
     if (info.exists) return candidate
   }
   return null
+}
+
+export async function getPackedAttachmentUri(projectId: string, localFileName: string): Promise<string | null> {
+  const dir = packFilesDir(projectId)
+  if (!dir || !localFileName) return null
+  const path = `${dir}${localFileName}`
+  const info = await FileSystem.getInfoAsync(path)
+  return info.exists ? path : null
+}
+
+export function equipmentSpendFromPack(pack: OfflinePack): EquipmentSpendRow[] {
+  return (pack.equipment ?? []).map((e) => ({
+    id: e.id,
+    name: e.name,
+    qty: e.qty,
+    unit_price: e.unit_price,
+    notes: e.notes,
+  }))
+}
+
+export function mimeFromFileName(name: string, fallback?: string | null): string {
+  const lower = name.toLowerCase()
+  if (fallback && fallback.includes('/')) return fallback
+  if (lower.endsWith('.pdf')) return 'application/pdf'
+  if (lower.endsWith('.png')) return 'image/png'
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  if (lower.endsWith('.gif')) return 'image/gif'
+  if (lower.endsWith('.webp')) return 'image/webp'
+  if (lower.endsWith('.heic')) return 'image/heic'
+  if (lower.endsWith('.mp4')) return 'video/mp4'
+  if (lower.endsWith('.mov')) return 'video/quicktime'
+  if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  if (lower.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  if (lower.endsWith('.zip')) return 'application/zip'
+  return 'application/octet-stream'
 }
 
 export async function patchShotStatusInPack(
@@ -567,6 +644,11 @@ export async function downloadOfflinePack(opts: {
   const tasks = tasksRes.error ? [] : tasksRes.rows
   const equipment = gearRes.error ? [] : gearRes.rows
 
+  const budget = await fetchBudgetSnapshotForPack(projectId)
+  if (budget === 'offline') {
+    return { ok: false, error: 'No internet connection. Connect to download.' }
+  }
+
   const fromWindow = (opts.shootDates ?? []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
   const shootDates = [
     ...new Set([
@@ -575,6 +657,21 @@ export async function downloadOfflinePack(opts: {
       ...productionDays.map((d) => d.date).filter(Boolean),
     ]),
   ].sort()
+
+  const stagingDir = await prepareStagingDir(projectId)
+  if (!stagingDir) {
+    return { ok: false, error: 'This device cannot store an offline pack.' }
+  }
+
+  const files = await downloadAttachmentsForPack({
+    projectId,
+    jobId: jobId || null,
+    dir: stagingDir,
+  })
+  if (files === 'offline') {
+    await FileSystem.deleteAsync(stagingDir, { idempotent: true }).catch(() => {})
+    return { ok: false, error: 'No internet connection. Connect to download.' }
+  }
 
   const pack: OfflinePack = {
     version: OFFLINE_PACK_VERSION,
@@ -590,12 +687,15 @@ export async function downloadOfflinePack(opts: {
     milestones,
     tasks,
     equipment,
+    budget,
+    files,
     callSheetPdfs: {},
   }
 
-  pack.callSheetPdfs = await writeCallSheetPdfsForPack(pack, opts.projectLocation ?? null)
+  pack.callSheetPdfs = await writeCallSheetPdfsForPack(pack, opts.projectLocation ?? null, stagingDir)
 
   try {
+    await commitStagingDir(projectId)
     const meta = await writePackFile(pack)
     notifyOfflinePack(projectId)
     return { ok: true, meta }
@@ -604,13 +704,266 @@ export async function downloadOfflinePack(opts: {
   }
 }
 
+function packStagingDir(projectId: string): string | null {
+  const dir = packsDir()
+  if (!dir) return null
+  return `${dir}${projectId}.downloading/`
+}
+
+async function prepareStagingDir(projectId: string): Promise<string | null> {
+  const dir = packStagingDir(projectId)
+  if (!dir) return null
+  await FileSystem.deleteAsync(dir, { idempotent: true }).catch(() => {})
+  await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {})
+  return dir
+}
+
+async function commitStagingDir(projectId: string): Promise<void> {
+  const staging = packStagingDir(projectId)
+  const finalDir = packFilesDir(projectId)
+  if (!staging || !finalDir) return
+  await FileSystem.deleteAsync(finalDir, { idempotent: true }).catch(() => {})
+  await FileSystem.moveAsync({ from: staging, to: finalDir })
+}
+
+function moneyOrNull(value: unknown): number | null {
+  return parseOptionalRate(value)
+}
+
+function moneyOrZero(value: unknown): number {
+  return parseOptionalRate(value) ?? 0
+}
+
+async function fetchBudgetSnapshotForPack(
+  projectId: string
+): Promise<OfflineBudgetSnapshot | null | 'offline'> {
+  const [planRes, linesRes, membersRes, manualRes] = await Promise.all([
+    supabase.from('project_budget_plans').select('*').eq('project_id', projectId).maybeSingle(),
+    supabase.from('project_budget_lines').select('*').eq('project_id', projectId).order('sort_order'),
+    supabase
+      .from('project_members')
+      .select(
+        'profile_id, member_role, booked_dates, scheduling_start_date, scheduling_end_date, profiles(name, day_rate_amount, half_day_rate_amount, rates_currency)'
+      )
+      .eq('project_id', projectId),
+    supabase
+      .from('project_manual_crew_readable')
+      .select(
+        'id, name, member_role, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount, claimed_profile_id'
+      )
+      .eq('project_id', projectId)
+      .is('claimed_profile_id', null),
+  ])
+
+  if (
+    (planRes.error && isOfflineFetchError(planRes.error)) ||
+    (linesRes.error && isOfflineFetchError(linesRes.error))
+  ) {
+    return 'offline'
+  }
+  // RLS: crew cannot read budget — pack still downloads, just without numbers.
+  if (planRes.error || linesRes.error) return null
+
+  const plan = planRes.data as {
+    currency?: string | null
+    total_budget?: unknown
+    production_budget?: unknown
+  } | null
+
+  const registered = (membersRes.error ? [] : (membersRes.data ?? [])) as CrewSpendMemberRow[]
+  const manualRows = (manualRes.error ? [] : (manualRes.data ?? [])) as Array<{
+    id: string
+    name: string | null
+    member_role: string | null
+    booked_dates?: unknown
+    scheduling_start_date?: string | null
+    scheduling_end_date?: string | null
+    day_rate_amount?: number | null
+    half_day_rate_amount?: number | null
+  }>
+  const manualAsSpend: CrewSpendMemberRow[] = manualRows.map((m) => ({
+    profile_id: `manual:${m.id}`,
+    member_role: (m.member_role ?? 'crew').trim() || 'crew',
+    booked_dates: m.booked_dates,
+    scheduling_start_date: m.scheduling_start_date,
+    scheduling_end_date: m.scheduling_end_date,
+    day_rate_amount: moneyOrNull(m.day_rate_amount),
+    half_day_rate_amount: moneyOrNull(m.half_day_rate_amount),
+    display_name: (m.name ?? '').trim() || 'Crew',
+    profiles: null,
+  }))
+
+  const lines = ((linesRes.data ?? []) as Array<Record<string, unknown>>).map((r, i) => ({
+    id: String(r.id ?? `line-${i}`),
+    label: String(r.label ?? ''),
+    planned_amount: moneyOrZero(r.planned_amount),
+    spent_amount: moneyOrZero(r.spent_amount),
+    sort_order: typeof r.sort_order === 'number' ? r.sort_order : i,
+  }))
+
+  return {
+    currency: (plan?.currency ?? 'EUR').trim() || 'EUR',
+    total_budget: moneyOrNull(plan?.total_budget),
+    production_budget: moneyOrNull(plan?.production_budget),
+    lines,
+    members: [...registered, ...manualAsSpend],
+  }
+}
+
+function packedAttachmentName(index: number, displayName: string): string {
+  const safe = displayName.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_+/g, '_').slice(0, 80)
+  return `file-${String(index).padStart(3, '0')}-${safe || 'attachment'}`
+}
+
+async function downloadSignedFile(signedUrl: string, destPath: string): Promise<boolean> {
+  try {
+    const res = await FileSystem.downloadAsync(signedUrl, destPath)
+    return res.status === 200
+  } catch {
+    return false
+  }
+}
+
+async function signedDownloadToPack(bucket: string, storagePath: string, destPath: string): Promise<boolean> {
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(storagePath, 180)
+  if (error || !data?.signedUrl) return false
+  return downloadSignedFile(data.signedUrl, destPath)
+}
+
+async function downloadAttachmentsForPack(opts: {
+  projectId: string
+  jobId: string | null
+  dir: string
+}): Promise<OfflinePackedFile[] | 'offline'> {
+  const listed: Array<{
+    key: string
+    name: string
+    source: 'job' | 'legacy'
+    bucket: string
+    storagePath: string
+    mimeType: string | null
+    size: number | null
+  }> = []
+
+  if (opts.jobId) {
+    const { data: rows, error } = await supabase
+      .from('job_attachments')
+      .select('id, file_name, storage_path, content_type, file_size, created_at')
+      .eq('job_id', opts.jobId)
+      .order('created_at', { ascending: false })
+    if (error && isOfflineFetchError(error)) return 'offline'
+    if (!error) {
+      for (const r of rows ?? []) {
+        const storagePath = String(r.storage_path ?? '').trim()
+        if (!storagePath) continue
+        listed.push({
+          key: `job:${String(r.id)}`,
+          name: String(r.file_name ?? 'file'),
+          source: 'job',
+          bucket: JOB_ATTACHMENTS_BUCKET,
+          storagePath,
+          mimeType: typeof r.content_type === 'string' ? r.content_type : null,
+          size: typeof r.file_size === 'number' ? r.file_size : Number(r.file_size) || null,
+        })
+      }
+    }
+  }
+
+  const { data: legacy, error: legacyErr } = await supabase.storage.from(PROJECT_FILES_BUCKET).list(opts.projectId, {
+    limit: 100,
+    sortBy: { column: 'created_at', order: 'desc' },
+  })
+  if (legacyErr && isOfflineFetchError(legacyErr)) return 'offline'
+  if (!legacyErr) {
+    for (const f of legacy ?? []) {
+      const name = (f.name ?? '').trim()
+      if (!name) continue
+      const meta = (f.metadata ?? null) as { size?: number; mimetype?: string } | null
+      listed.push({
+        key: `legacy:${name}`,
+        name: name.replace(/^\d+_/, ''),
+        source: 'legacy',
+        bucket: PROJECT_FILES_BUCKET,
+        storagePath: `${opts.projectId}/${name}`,
+        mimeType: typeof meta?.mimetype === 'string' ? meta.mimetype : null,
+        size: typeof meta?.size === 'number' ? meta.size : null,
+      })
+    }
+  }
+
+  const out: OfflinePackedFile[] = []
+  let usedBytes = 0
+  for (let i = 0; i < listed.length; i++) {
+    const item = listed[i]!
+    const size = item.size != null && Number.isFinite(item.size) ? item.size : null
+    if (size != null && size > MAX_PACK_FILE_BYTES) {
+      out.push({
+        key: item.key,
+        name: item.name,
+        source: item.source,
+        mimeType: item.mimeType,
+        skipped: true,
+        skipReason: 'File is larger than 20 MB',
+      })
+      continue
+    }
+    if (size != null && usedBytes + size > MAX_PACK_FILES_TOTAL_BYTES) {
+      out.push({
+        key: item.key,
+        name: item.name,
+        source: item.source,
+        mimeType: item.mimeType,
+        skipped: true,
+        skipReason: 'Offline pack size limit',
+      })
+      continue
+    }
+
+    const localFileName = packedAttachmentName(i, item.name)
+    const dest = `${opts.dir}${localFileName}`
+    const ok = await signedDownloadToPack(item.bucket, item.storagePath, dest)
+    if (!ok) {
+      out.push({
+        key: item.key,
+        name: item.name,
+        source: item.source,
+        mimeType: item.mimeType,
+        skipped: true,
+        skipReason: 'Could not download',
+      })
+      continue
+    }
+    const stored = await fileBytes(dest)
+    if (stored > MAX_PACK_FILE_BYTES || usedBytes + stored > MAX_PACK_FILES_TOTAL_BYTES) {
+      await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {})
+      out.push({
+        key: item.key,
+        name: item.name,
+        source: item.source,
+        mimeType: item.mimeType,
+        skipped: true,
+        skipReason: stored > MAX_PACK_FILE_BYTES ? 'File is larger than 20 MB' : 'Offline pack size limit',
+      })
+      continue
+    }
+    usedBytes += stored
+    out.push({
+      key: item.key,
+      name: item.name,
+      source: item.source,
+      mimeType: item.mimeType,
+      localFileName,
+    })
+  }
+  return out
+}
+
 async function writeCallSheetPdfsForPack(
   pack: OfflinePack,
-  locationFallback: string | null
+  locationFallback: string | null,
+  destDir: string
 ): Promise<Record<string, string>> {
-  const dir = packFilesDir(pack.projectId)
-  if (!dir) return {}
-  await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {})
+  await FileSystem.makeDirectoryAsync(destDir, { intermediates: true }).catch(() => {})
   const crew = pack.callSheetCrew
   const out: Record<string, string> = {}
   for (const date of pack.shootDates) {
@@ -625,7 +978,7 @@ async function writeCallSheetPdfsForPack(
       callSheet: day?.call_sheet ?? {},
     })
     const fileName = `call-sheet-${date}.pdf`
-    const dest = `${dir}${fileName}`
+    const dest = `${destDir}${fileName}`
     const ok = await generateCallSheetPdfFile(html, dest)
     if (ok) out[date] = fileName
   }

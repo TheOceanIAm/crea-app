@@ -25,6 +25,15 @@ import {
 } from '@/lib/projectInternalBudget'
 import { commonRentalPeriod, fetchProductionEquipment } from '@/lib/productionLists'
 import { syncProjectListingBudget } from '@/lib/syncProjectListingBudget'
+import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
+import {
+  equipmentSpendFromPack,
+  isOfflineFetchError,
+  readOfflinePack,
+  resolveOfflineRead,
+  subscribeOfflinePack,
+  type OfflinePack,
+} from '@/lib/offlinePack'
 
 type BudgetPlanRow = {
   project_id: string
@@ -85,10 +94,44 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
   const [equipmentOpen, setEquipmentOpen] = useState(false)
   const [crewOpen, setCrewOpen] = useState(false)
   const [otherOpen, setOtherOpen] = useState(false)
+  const [usingOfflinePack, setUsingOfflinePack] = useState(false)
+  const [packDownloadedAt, setPackDownloadedAt] = useState<string | null>(null)
+  const [packMissingBudget, setPackMissingBudget] = useState(false)
+
+  const applyPack = useCallback(
+    (pack: OfflinePack) => {
+      const snap = pack.budget
+      setPackMissingBudget(!snap)
+      setCurrency((snap?.currency ?? 'EUR').trim() || 'EUR')
+      setTotalStr(moneyToInput(snap?.total_budget ?? null))
+      setProductionStr(moneyToInput(snap?.production_budget ?? null))
+      setLines(
+        (snap?.lines ?? []).map((r) => ({
+          id: r.id,
+          label: r.label ?? '',
+          plannedStr: moneyToInput(r.planned_amount),
+          spentStr: moneyToInput(r.spent_amount),
+          sort_order: r.sort_order ?? 0,
+        }))
+      )
+      setMembers(hideCrewBudgeting ? [] : snap?.members ?? [])
+      setEquipmentRows(equipmentSpendFromPack(pack))
+      setUsingOfflinePack(true)
+      setPackDownloadedAt(pack.downloadedAt)
+      setDeletedLineIds([])
+      setLoading(false)
+    },
+    [hideCrewBudgeting]
+  )
 
   const load = useCallback(async () => {
     setLoading(true)
     setDeletedLineIds([])
+    const offline = await resolveOfflineRead(projectId)
+    if (offline) {
+      applyPack(offline.pack)
+      return
+    }
     const emptyMembers = {
       data: [] as CrewSpendMemberRow[],
       error: null as { message: string } | null,
@@ -117,6 +160,14 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
       fetchProductionEquipment(projectId),
     ])
 
+    const liveErr = planRes.error || linesRes.error || membersRes.error
+    if (liveErr && isOfflineFetchError(liveErr)) {
+      const pack = await readOfflinePack(projectId)
+      if (pack) {
+        applyPack(pack)
+        return
+      }
+    }
     if (planRes.error) {
       Alert.alert('Budget', planRes.error.message)
       setLoading(false)
@@ -132,6 +183,9 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
       setLoading(false)
       return
     }
+    setUsingOfflinePack(false)
+    setPackDownloadedAt(null)
+    setPackMissingBudget(false)
 
     const plan = planRes.data as BudgetPlanRow | null
     setCurrency((plan?.currency ?? 'EUR').trim() || 'EUR')
@@ -181,11 +235,14 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
     }
     setEquipmentRows(gearRes.rows)
     setLoading(false)
-  }, [projectId, hideCrewBudgeting])
+  }, [projectId, hideCrewBudgeting, applyPack])
 
   useEffect(() => {
     void load()
-  }, [load])
+    return subscribeOfflinePack((id) => {
+      if (id === projectId) void load()
+    })
+  }, [load, projectId])
 
   const crew = useMemo(() => computeCrewSpendLines(members, currency), [members, currency])
   const equipment = useMemo(() => computeEquipmentSpend(equipmentRows), [equipmentRows])
@@ -220,6 +277,10 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
   }
 
   const savePlan = async () => {
+    if (usingOfflinePack) {
+      Alert.alert('Downloaded version', 'Connect to the internet to edit the budget.')
+      return
+    }
     setSavingPlan(true)
     const payload = {
       project_id: projectId,
@@ -251,6 +312,10 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
   }
 
   const saveLines = async () => {
+    if (usingOfflinePack) {
+      Alert.alert('Downloaded version', 'Connect to the internet to edit the budget.')
+      return
+    }
     setSavingLines(true)
     if (deletedLineIds.length > 0) {
       const { error: delErr } = await supabase.from('project_budget_lines').delete().in('id', deletedLineIds)
@@ -308,6 +373,7 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
   }
 
   const addLine = (label?: string) => {
+    if (usingOfflinePack) return
     setOtherOpen(true)
     const nextSort = lines.length ? Math.max(...lines.map((l) => l.sort_order)) + 1 : 0
     setLines((prev) => [
@@ -323,6 +389,7 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
   }
 
   const removeLine = (id: string) => {
+    if (usingOfflinePack) return
     if (/^[0-9a-f-]{36}$/i.test(id)) {
       setDeletedLineIds((d) => [...d, id])
     }
@@ -339,6 +406,13 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      {usingOfflinePack ? <OfflinePackBanner downloadedAt={packDownloadedAt} /> : null}
+      {packMissingBudget ? (
+        <Text style={styles.lead}>
+          This copy was downloaded before budget was included. Connect and tap Update on Overview to save the numbers
+          for set.
+        </Text>
+      ) : null}
       <Text style={styles.lead}>
         {hideCrewBudgeting
           ? 'Internal planning only. Equipment cost uses kit-list qty × unit price. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'
@@ -355,6 +429,7 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
           placeholder="EUR"
           placeholderTextColor="rgba(255,255,255,0.3)"
           autoCapitalize="characters"
+          editable={!usingOfflinePack}
         />
         <Text style={styles.hint}>Total project budget</Text>
         <TextInput
@@ -364,6 +439,7 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
           placeholder="e.g. 20000"
           placeholderTextColor="rgba(255,255,255,0.3)"
           keyboardType="decimal-pad"
+          editable={!usingOfflinePack}
         />
         {!hideCrewBudgeting ? (
           <>
@@ -375,12 +451,15 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
               placeholder="e.g. 10000 — optional"
               placeholderTextColor="rgba(255,255,255,0.3)"
               keyboardType="decimal-pad"
+              editable={!usingOfflinePack}
             />
           </>
         ) : null}
-        <TouchableOpacity style={[styles.primaryBtn, savingPlan && styles.dim]} onPress={() => void savePlan()} disabled={savingPlan}>
-          <Text style={styles.primaryBtnText}>{savingPlan ? 'Saving…' : 'Save targets'}</Text>
-        </TouchableOpacity>
+        {!usingOfflinePack ? (
+          <TouchableOpacity style={[styles.primaryBtn, savingPlan && styles.dim]} onPress={() => void savePlan()} disabled={savingPlan}>
+            <Text style={styles.primaryBtnText}>{savingPlan ? 'Saving…' : 'Save targets'}</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <View style={styles.card}>
@@ -593,13 +672,15 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
             <Text style={styles.muted}>
               Manual lines (catering, travel, cars, etc.). Kit-list prices are already in Equipment (auto).
             </Text>
-            <View style={styles.presetRow}>
-              {PRESETS.map((p) => (
-                <TouchableOpacity key={p} style={styles.presetChip} onPress={() => addLine(p)}>
-                  <Text style={styles.presetChipText}>+ {p}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {!usingOfflinePack ? (
+              <View style={styles.presetRow}>
+                {PRESETS.map((p) => (
+                  <TouchableOpacity key={p} style={styles.presetChip} onPress={() => addLine(p)}>
+                    <Text style={styles.presetChipText}>+ {p}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
             {lines.map((l) => (
               <View key={l.id} style={styles.lineBlock}>
                 <TextInput
@@ -608,6 +689,7 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
                   onChangeText={(t) => setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, label: t } : x)))}
                   placeholder="Label"
                   placeholderTextColor="rgba(255,255,255,0.3)"
+                  editable={!usingOfflinePack}
                 />
                 <View style={styles.lineInputs}>
                   <View style={{ flex: 1 }}>
@@ -620,6 +702,7 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
                       }
                       keyboardType="decimal-pad"
                       placeholderTextColor="rgba(255,255,255,0.3)"
+                      editable={!usingOfflinePack}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
@@ -632,24 +715,31 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
                       }
                       keyboardType="decimal-pad"
                       placeholderTextColor="rgba(255,255,255,0.3)"
+                      editable={!usingOfflinePack}
                     />
                   </View>
                 </View>
-                <TouchableOpacity onPress={() => removeLine(l.id)}>
-                  <Text style={styles.remove}>Remove</Text>
-                </TouchableOpacity>
+                {!usingOfflinePack ? (
+                  <TouchableOpacity onPress={() => removeLine(l.id)}>
+                    <Text style={styles.remove}>Remove</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             ))}
-            <TouchableOpacity style={styles.secondaryBtn} onPress={() => addLine()}>
-              <Text style={styles.secondaryBtnText}>+ Add line</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.primaryBtn, savingLines && styles.dim]}
-              onPress={() => void saveLines()}
-              disabled={savingLines}
-            >
-              <Text style={styles.primaryBtnText}>{savingLines ? 'Saving…' : 'Save expense lines'}</Text>
-            </TouchableOpacity>
+            {!usingOfflinePack ? (
+              <>
+                <TouchableOpacity style={styles.secondaryBtn} onPress={() => addLine()}>
+                  <Text style={styles.secondaryBtnText}>+ Add line</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, savingLines && styles.dim]}
+                  onPress={() => void saveLines()}
+                  disabled={savingLines}
+                >
+                  <Text style={styles.primaryBtnText}>{savingLines ? 'Saving…' : 'Save expense lines'}</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
           </View>
         ) : null}
       </View>

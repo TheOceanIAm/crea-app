@@ -63,7 +63,7 @@ export async function probePackFreshness(projectId: string): Promise<PackFreshne
   const pending = await pendingShotStatuses(projectId)
   const downloadedMs = isoMs(pack.downloadedAt)
 
-  const [shotsRes, daysRes, membersRes, manualRes, milesRes] = await Promise.all([
+  const [shotsRes, daysRes, membersRes, manualRes, milesRes, planRes, linesRes, attachRes] = await Promise.all([
     supabase.from('production_shots').select('id, updated_at, status').eq('project_id', projectId),
     supabase.from('production_days').select('id, date, updated_at').eq('project_id', projectId),
     supabase.from('project_members').select('id').eq('project_id', projectId),
@@ -71,6 +71,15 @@ export async function probePackFreshness(projectId: string): Promise<PackFreshne
     pack.jobId
       ? supabase.from('milestones').select('id, status').eq('job_id', pack.jobId)
       : Promise.resolve({ data: [] as Array<{ id: string; status: string }>, error: null }),
+    supabase
+      .from('project_budget_plans')
+      .select('updated_at, total_budget, production_budget, currency')
+      .eq('project_id', projectId)
+      .maybeSingle(),
+    supabase.from('project_budget_lines').select('id, planned_amount, spent_amount, label').eq('project_id', projectId),
+    pack.jobId
+      ? supabase.from('job_attachments').select('id').eq('job_id', pack.jobId)
+      : Promise.resolve({ data: [] as Array<{ id: string }>, error: null }),
   ])
 
   if (shotsRes.error || daysRes.error) return { changes: 0, ...soon }
@@ -128,6 +137,58 @@ export async function probePackFreshness(projectId: string): Promise<PackFreshne
     for (const id of packMiles.keys()) {
       if (!remoteIds.has(id)) changes += 1
     }
+  }
+
+  const snap = pack.budget
+  if (!planRes.error) {
+    const remotePlan = planRes.data as {
+      updated_at?: string
+      total_budget?: number | null
+      production_budget?: number | null
+      currency?: string | null
+    } | null
+    if (isoMs(remotePlan?.updated_at) > downloadedMs + 1500) changes += 1
+    else if (snap) {
+      const cur = (remotePlan?.currency ?? 'EUR').trim() || 'EUR'
+      if (cur !== snap.currency) changes += 1
+      if (Number(remotePlan?.total_budget ?? 0) !== Number(snap.total_budget ?? 0)) changes += 1
+      if (Number(remotePlan?.production_budget ?? 0) !== Number(snap.production_budget ?? 0)) changes += 1
+    } else if (remotePlan) {
+      changes += 1
+    }
+  }
+  if (!linesRes.error) {
+    const remoteLines = (linesRes.data ?? []) as Array<{
+      id: string
+      planned_amount?: number
+      spent_amount?: number
+      label?: string
+    }>
+    const local = new Map((snap?.lines ?? []).map((l) => [l.id, l]))
+    if (remoteLines.length !== local.size) {
+      changes += Math.abs(remoteLines.length - local.size)
+    } else {
+      for (const row of remoteLines) {
+        const packed = local.get(row.id)
+        if (!packed) {
+          changes += 1
+          continue
+        }
+        if (
+          packed.label !== (row.label ?? '') ||
+          Number(packed.planned_amount) !== Number(row.planned_amount ?? 0) ||
+          Number(packed.spent_amount) !== Number(row.spent_amount ?? 0)
+        ) {
+          changes += 1
+        }
+      }
+    }
+  }
+
+  if (!attachRes.error) {
+    const remoteFiles = (attachRes.data ?? []).length
+    const packedJobFiles = (pack.files ?? []).filter((f) => f.source === 'job').length
+    if (remoteFiles !== packedJobFiles) changes += Math.abs(remoteFiles - packedJobFiles)
   }
 
   return { changes, ...soon }
