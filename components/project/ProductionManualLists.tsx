@@ -16,6 +16,7 @@ import { KeyboardFormModal } from '@/components/KeyboardFormModal'
 import {
   assigneeFromTask,
   assigneeKey,
+  deleteAllProductionEquipment,
   deleteProductionEquipment,
   deleteProductionTask,
   fetchProductionEquipment,
@@ -381,6 +382,7 @@ export function ProductionEquipmentSection({ projectId, readOnly = false, offlin
   const [editPrice, setEditPrice] = useState('')
   const [editBusy, setEditBusy] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
+  const [clearBusy, setClearBusy] = useState(false)
 
   const load = useCallback(async () => {
     if (offlineEquipment) {
@@ -470,6 +472,35 @@ export function ProductionEquipmentSection({ projectId, readOnly = false, offlin
         },
       },
     ])
+  }
+
+  const clearList = () => {
+    if (readOnly || clearBusy || rows.length === 0) return
+    const n = rows.length
+    Alert.alert(
+      'Clear equipment list',
+      n === 1 ? 'Delete this item? This cannot be undone.' : `Delete all ${n} items? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear list',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setClearBusy(true)
+              const { error } = await deleteAllProductionEquipment(projectId)
+              setClearBusy(false)
+              if (error) {
+                Alert.alert('Equipment', error)
+                return
+              }
+              setEditRow(null)
+              setRows([])
+            })()
+          },
+        },
+      ]
+    )
   }
 
   const importPdf = async () => {
@@ -583,6 +614,16 @@ export function ProductionEquipmentSection({ projectId, readOnly = false, offlin
         <Text style={styles.empty}>No equipment yet.</Text>
       ) : (
         <>
+          {!readOnly ? (
+            <TouchableOpacity
+              style={[styles.clearAllBtn, clearBusy && styles.dim]}
+              onPress={clearList}
+              disabled={clearBusy}
+            >
+              <Trash2 size={14} color="#f87171" strokeWidth={ICON_STROKE} />
+              <Text style={styles.clearAllText}>{clearBusy ? 'Clearing…' : 'Clear list'}</Text>
+            </TouchableOpacity>
+          ) : null}
           {sharedPeriod ? (
             <View style={styles.periodBanner}>
               <Text style={styles.periodKicker}>Rental period</Text>
@@ -733,6 +774,16 @@ const styles = StyleSheet.create({
   periodText: { color: '#FFDC00', fontSize: 14, fontWeight: '700' },
   periodRow: { color: '#FFDC00', fontSize: 12, fontWeight: '600', marginTop: 4 },
   deleteBtn: { padding: 4 },
+  clearAllBtn: {
+    alignSelf: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    marginBottom: 8,
+  },
+  clearAllText: { color: '#f87171', fontWeight: '700', fontSize: 13 },
   assigneeBlock: { gap: 8 },
   assigneeLabel: {
     fontSize: 11,

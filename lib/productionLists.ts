@@ -369,6 +369,11 @@ export async function deleteProductionEquipment(id: string): Promise<{ error: st
   return { error: error?.message ?? null }
 }
 
+export async function deleteAllProductionEquipment(projectId: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('production_equipment').delete().eq('project_id', projectId)
+  return { error: error?.message ?? null }
+}
+
 export async function importRentalPdf(
   projectId: string,
   file: { uri: string; name: string; mimeType?: string }
