@@ -66,7 +66,7 @@ drop policy if exists "production_days_select" on public.production_days;
 create policy "production_days_select" on public.production_days
   for select using (public.user_in_project(project_id, auth.uid()));
 
--- Company owner (projects.company_id) creates shoot days; all members may update rows (notes, call sheet).
+-- Company owner (projects.company_id) creates shoot days; only the host may update call sheet rows.
 drop policy if exists "production_days_insert" on public.production_days;
 create policy "production_days_insert" on public.production_days
   for insert with check (
@@ -79,7 +79,13 @@ create policy "production_days_insert" on public.production_days
 
 drop policy if exists "production_days_update" on public.production_days;
 create policy "production_days_update" on public.production_days
-  for update using (public.user_in_project(project_id, auth.uid()));
+  for update using (
+    exists (
+      select 1 from public.projects p
+      where p.id = project_id
+        and p.company_id = auth.uid()
+    )
+  );
 
 drop policy if exists "production_days_delete" on public.production_days;
 create policy "production_days_delete" on public.production_days

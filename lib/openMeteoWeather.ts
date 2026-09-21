@@ -158,6 +158,72 @@ export async function fetchForecast7Days(lat: number, lon: number): Promise<Dail
   return out
 }
 
+export type CallSheetAtmosphere = {
+  place: string
+  summary: string
+  high: number
+  low: number
+  precipProbMax: number | null
+  sunrise: string | null
+  sunset: string | null
+}
+
+function clockFromIso(isoLike: string | undefined): string | null {
+  if (!isoLike) return null
+  const d = new Date(isoLike)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+/** One-day weather + sunrise/sunset for the call sheet header. */
+export async function fetchCallSheetAtmosphere(opts: {
+  locationQuery: string
+  date: string
+}): Promise<CallSheetAtmosphere | null> {
+  const date = opts.date.trim().slice(0, 10)
+  const q = opts.locationQuery.trim()
+  if (!q || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
+  const geo = await geocodeLocation(q)
+  if (!geo) return null
+  const params = new URLSearchParams({
+    latitude: String(geo.lat),
+    longitude: String(geo.lon),
+    daily:
+      'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset',
+    timezone: 'auto',
+    start_date: date,
+    end_date: date,
+  })
+  const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`)
+  if (!res.ok) throw new Error('Could not load weather data')
+  const data = (await res.json()) as {
+    daily?: {
+      weather_code?: number[]
+      weathercode?: number[]
+      temperature_2m_max?: number[]
+      temperature_2m_min?: number[]
+      precipitation_probability_max?: (number | null)[]
+      sunrise?: string[]
+      sunset?: string[]
+    }
+  }
+  const d = data.daily
+  const code = d?.weather_code?.[0] ?? d?.weathercode?.[0] ?? 0
+  const high = d?.temperature_2m_max?.[0]
+  const low = d?.temperature_2m_min?.[0]
+  if (high == null || low == null) return null
+  const precip = d?.precipitation_probability_max?.[0]
+  return {
+    place: geo.label,
+    summary: wmoWeatherSummary(typeof code === 'number' ? code : 0),
+    high: Math.round(high),
+    low: Math.round(low),
+    precipProbMax: precip != null && typeof precip === 'number' ? Math.round(precip) : null,
+    sunrise: clockFromIso(d?.sunrise?.[0]),
+    sunset: clockFromIso(d?.sunset?.[0]),
+  }
+}
+
 /** WMO Weather interpretation codes (Open-Meteo). */
 function wmoWeatherSummary(code: number): string {
   if (code === 0) return 'Clear'

@@ -13,6 +13,7 @@ import { fetchWorkspaceMilestones, type WorkspaceMilestoneUi } from '@/lib/works
 import { fetchProductionEquipment, fetchProductionTasks, type ProductionEquipmentItem, type ProductionTask } from '@/lib/productionLists'
 import { overlayPendingStatuses, type OfflineShotStatus } from '@/lib/offlineShotOutbox'
 import { buildCallSheetHtml, generateCallSheetPdfFile } from '@/lib/offlineCallSheetPdf'
+import { parseCallSheet, type CallSheetDocument } from '@/lib/callSheet'
 import type { CrewSpendMemberRow, EquipmentSpendRow } from '@/lib/projectInternalBudget'
 
 export type { OfflineShotStatus }
@@ -49,7 +50,7 @@ export type OfflineProductionDay = {
   date: string
   wrap_time: string | null
   notes: string | null
-  call_sheet: Record<string, OfflineCallOverride>
+  call_sheet: CallSheetDocument
 }
 
 export type OfflineCallSheetCrew = {
@@ -413,7 +414,7 @@ function parseProductionDay(raw: Record<string, unknown>): OfflineProductionDay 
     date: String(raw.date ?? '').slice(0, 10),
     wrap_time: (raw.wrap_time as string | null) ?? null,
     notes: (raw.notes as string | null) ?? null,
-    call_sheet: (raw.call_sheet as Record<string, OfflineCallOverride>) ?? {},
+    call_sheet: parseCallSheet(raw.call_sheet),
   }
 }
 
@@ -976,6 +977,8 @@ async function writeCallSheetPdfsForPack(
       locationFallback,
       crew,
       callSheet: day?.call_sheet ?? {},
+      dayNumber: pack.shootDates.indexOf(date) >= 0 ? pack.shootDates.indexOf(date) + 1 : null,
+      dayCount: pack.shootDates.length || null,
     })
     const fileName = `call-sheet-${date}.pdf`
     const dest = `${destDir}${fileName}`

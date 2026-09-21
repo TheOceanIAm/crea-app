@@ -51,6 +51,25 @@ import {
 } from '@/lib/offlinePack'
 import { overlayPendingStatuses, queueShotStatus, flushShotStatusOutbox, pendingShotStatusCount } from '@/lib/offlineShotOutbox'
 import { buildCallSheetHtml } from '@/lib/offlineCallSheetPdf'
+import { CallSheetDayHeader } from '@/components/project/CallSheetDayHeader'
+import {
+  emptyCallSheet,
+  parseCallSheet,
+  personCallTime,
+  personLocation,
+  serializeCallSheet,
+  type CallSheetBackgroundRow,
+  type CallSheetContacts,
+  type CallSheetDayTimes,
+  type CallSheetDepartments,
+  type CallSheetDocument,
+  type CallSheetPersonCell,
+  type CallSheetPlaces,
+  EMPTY_CALL_SHEET_CONTACTS,
+  EMPTY_CALL_SHEET_DAY,
+  EMPTY_CALL_SHEET_DEPARTMENTS,
+  EMPTY_CALL_SHEET_PLACES,
+} from '@/lib/callSheet'
 
 type ShotStatus = 'open' | 'rolling' | 'done' | 'pick'
 
@@ -103,7 +122,105 @@ function manualCallSheetKey(manualId: string) {
   return `manual:${manualId}`
 }
 
-type CallOverride = { call_time?: string; location?: string }
+function CrewCallCard({
+  name,
+  roleLabel,
+  source,
+  mine,
+  callVal,
+  locVal,
+  callPlaceholder,
+  locPlaceholder,
+  editable,
+  onCallChange,
+  onLocChange,
+}: {
+  name: string
+  roleLabel: string
+  source: 'member' | 'manual'
+  mine?: boolean
+  callVal: string
+  locVal: string
+  callPlaceholder: string
+  locPlaceholder: string
+  editable: boolean
+  onCallChange: (v: string) => void
+  onLocChange: (v: string) => void
+}) {
+  const [open, setOpen] = useState(Boolean(mine))
+  const preview = [callVal.trim() || callPlaceholder, locVal.trim()].filter((p) => p && p !== 'e.g. 07:00').join(' · ')
+  return (
+    <View style={[styles.csMemberCard, mine && styles.csMemberCardMine]}>
+      <TouchableOpacity
+        style={[styles.csMemberHead, !open && styles.csMemberHeadClosed]}
+        onPress={() => setOpen((v) => !v)}
+        activeOpacity={0.8}
+      >
+        <View style={styles.csFieldGrow}>
+          <View style={styles.csNameRow}>
+            {mine ? (
+              <View style={styles.csYouPill}>
+                <Text style={styles.csYouPillText}>YOU</Text>
+              </View>
+            ) : null}
+            <Text style={styles.csName}>
+              {name}
+              {source === 'manual' ? ' · external' : ''}
+            </Text>
+          </View>
+          {!open ? (
+            <Text style={[styles.csMemberPreview, mine && styles.csMemberPreviewMine]} numberOfLines={1}>
+              {preview || 'Call time & location'}
+            </Text>
+          ) : null}
+        </View>
+        <View style={styles.csRolePill}>
+          <Text style={styles.csRolePillText}>{roleLabel}</Text>
+        </View>
+        <ChevronDown
+          size={18}
+          color="rgba(255,255,255,0.4)"
+          strokeWidth={ICON_STROKE}
+          style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
+        />
+      </TouchableOpacity>
+      {open ? (
+        <>
+          <View style={styles.csFieldRow}>
+            <Clock size={14} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
+            <View style={styles.csFieldGrow}>
+              <Text style={styles.csFieldLabel}>Call time</Text>
+              <TextInput
+                style={styles.csInputBlock}
+                placeholder={callPlaceholder}
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={callVal}
+                editable={editable}
+                onChangeText={onCallChange}
+              />
+            </View>
+          </View>
+          <View style={[styles.csFieldRow, { marginBottom: 0 }]}>
+            <MapPin size={14} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
+            <View style={styles.csFieldGrow}>
+              <Text style={styles.csFieldLabel}>Location / set</Text>
+              <TextInput
+                style={[styles.csInputBlock, styles.csInputBlockTall]}
+                placeholder={locPlaceholder}
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={locVal}
+                editable={editable}
+                multiline
+                textAlignVertical="top"
+                onChangeText={onLocChange}
+              />
+            </View>
+          </View>
+        </>
+      ) : null}
+    </View>
+  )
+}
 
 type ProductionDayRow = {
   id: string
@@ -111,7 +228,7 @@ type ProductionDayRow = {
   date: string
   wrap_time: string | null
   notes: string | null
-  call_sheet: Record<string, CallOverride>
+  call_sheet: CallSheetDocument | Record<string, CallSheetPersonCell>
 }
 
 const STATUS_ORDER: ShotStatus[] = ['open', 'rolling', 'done', 'pick']
@@ -239,7 +356,7 @@ const PRODUCTION_SECTIONS = [
   {
     id: 'call_sheet' as const,
     label: 'Call Sheet',
-    sub: 'Crew calls, locations, PDF export, and daily wrap',
+    sub: 'Crew call, locations, hospital, weather, PDF, and daily wrap',
   },
   {
     id: 'tasks' as const,
@@ -324,6 +441,11 @@ export function ProductionTab({
 
   const [shots, setShots] = useState<ProductionShot[]>([])
   const [crew, setCrew] = useState<CallSheetCrewRow[]>([])
+  const callSheetCrew = useMemo(() => {
+    const mine = crew.filter((row) => row.key === userId)
+    const rest = crew.filter((row) => row.key !== userId)
+    return [...mine, ...rest]
+  }, [crew, userId])
   const [addManualOpen, setAddManualOpen] = useState(false)
   const [manualName, setManualName] = useState('')
   const [manualRole, setManualRole] = useState('')
@@ -338,10 +460,28 @@ export function ProductionTab({
   const [savingNewShot, setSavingNewShot] = useState(false)
   const [creatingDay, setCreatingDay] = useState(false)
   const [savingCallSheet, setSavingCallSheet] = useState(false)
-  const [callDraft, setCallDraft] = useState<Record<string, CallOverride>>({})
+  const [callDraft, setCallDraft] = useState<Record<string, CallSheetPersonCell>>({})
+  const [dayTimesDraft, setDayTimesDraft] = useState<CallSheetDayTimes>({ ...EMPTY_CALL_SHEET_DAY })
+  const [placesDraft, setPlacesDraft] = useState<CallSheetPlaces>({ ...EMPTY_CALL_SHEET_PLACES })
+  const [specialDraft, setSpecialDraft] = useState('')
+  const [departmentsDraft, setDepartmentsDraft] = useState<CallSheetDepartments>({
+    ...EMPTY_CALL_SHEET_DEPARTMENTS,
+  })
+  const [contactsDraft, setContactsDraft] = useState<CallSheetContacts>({ ...EMPTY_CALL_SHEET_CONTACTS })
+  const [backgroundDraft, setBackgroundDraft] = useState<CallSheetBackgroundRow[]>([])
   const [wrapDraft, setWrapDraft] = useState('')
   const [notesDraft, setNotesDraft] = useState('')
   const [callSheetDirty, setCallSheetDirty] = useState(false)
+  const youHighlight = useMemo(() => {
+    const me = callSheetCrew.find((row) => row.key === userId)
+    const cell = callDraft[userId]
+    return {
+      name: me?.name ?? '',
+      roleLabel: me?.roleLabel ?? '',
+      call: personCallTime(cell, dayTimesDraft.general_call),
+      location: personLocation(cell, [placesDraft.basecamp, projectLocation]),
+    }
+  }, [callSheetCrew, userId, callDraft, dayTimesDraft.general_call, placesDraft.basecamp, projectLocation])
   const callSheetDirtyRef = useRef(false)
   const prevCallSheetOpenRef = useRef(false)
   const [exportingPdf, setExportingPdf] = useState(false)
@@ -491,20 +631,21 @@ export function ProductionTab({
       source: 'manual' as const,
     }))
 
-    let callSheet: Record<string, CallOverride> = {}
+    let callSheet: Record<string, CallSheetPersonCell> = {}
     if (dayRes.error) {
       Alert.alert('Production day', dayRes.error.message)
       setProdDay(null)
     } else if (dayRes.data) {
       const row = dayRes.data as Record<string, unknown>
-      callSheet = (row.call_sheet as Record<string, CallOverride>) ?? {}
+      const parsedSheet = parseCallSheet(row.call_sheet)
+      callSheet = parsedSheet.people
       setProdDay({
         id: row.id as string,
         project_id: row.project_id as string,
         date: row.date as string,
         wrap_time: (row.wrap_time as string | null) ?? null,
         notes: (row.notes as string | null) ?? null,
-        call_sheet: callSheet,
+        call_sheet: parsedSheet,
       })
     } else {
       setProdDay(null)
@@ -551,13 +692,52 @@ export function ProductionTab({
     setLoading(false)
   }, [projectId, shootDay, applyPack])
 
-  const applyProdDayToDrafts = useCallback((row: ProductionDayRow) => {
-    setProdDay(row)
-    if (callSheetDirtyRef.current) return
-    setCallDraft(row.call_sheet ?? {})
-    setWrapDraft(row.wrap_time ?? '')
-    setNotesDraft(row.notes ?? '')
+  const applyCallSheetDocToDrafts = useCallback((doc: CallSheetDocument) => {
+    setCallDraft(doc.people)
+    setDayTimesDraft(doc.day)
+    setPlacesDraft(doc.places)
+    setSpecialDraft(doc.special)
+    setDepartmentsDraft(doc.departments)
+    setContactsDraft(doc.contacts)
+    setBackgroundDraft(doc.background)
   }, [])
+
+  const currentCallSheetDoc = useCallback((): CallSheetDocument => {
+    return serializeCallSheet({
+      v: 2,
+      people: callDraft,
+      day: dayTimesDraft,
+      places: placesDraft,
+      special: specialDraft,
+      departments: departmentsDraft,
+      background: backgroundDraft,
+      contacts: contactsDraft,
+    })
+  }, [
+    callDraft,
+    dayTimesDraft,
+    placesDraft,
+    specialDraft,
+    departmentsDraft,
+    backgroundDraft,
+    contactsDraft,
+  ])
+
+  const markCallSheetDirty = useCallback(() => {
+    setCallSheetDirty(true)
+    callSheetDirtyRef.current = true
+  }, [])
+
+  const applyProdDayToDrafts = useCallback(
+    (row: ProductionDayRow) => {
+      setProdDay(row)
+      if (callSheetDirtyRef.current) return
+      applyCallSheetDocToDrafts(parseCallSheet(row.call_sheet))
+      setWrapDraft(row.wrap_time ?? '')
+      setNotesDraft(row.notes ?? '')
+    },
+    [applyCallSheetDocToDrafts]
+  )
 
   const parseProdDayRow = (raw: Record<string, unknown>): ProductionDayRow | null => {
     const id = raw.id
@@ -569,7 +749,7 @@ export function ProductionTab({
       date: String(raw.date ?? '').slice(0, 10),
       wrap_time: (raw.wrap_time as string | null) ?? null,
       notes: (raw.notes as string | null) ?? null,
-      call_sheet: (raw.call_sheet as Record<string, CallOverride>) ?? {},
+      call_sheet: parseCallSheet(raw.call_sheet),
     }
   }
 
@@ -579,7 +759,7 @@ export function ProductionTab({
 
   useEffect(() => {
     if (!prodDay) {
-      setCallDraft({})
+      applyCallSheetDocToDrafts(emptyCallSheet())
       setWrapDraft('')
       setNotesDraft('')
       setCallSheetDirty(false)
@@ -587,10 +767,10 @@ export function ProductionTab({
       return
     }
     if (callSheetDirty) return
-    setCallDraft(prodDay.call_sheet ?? {})
+    applyCallSheetDocToDrafts(parseCallSheet(prodDay.call_sheet))
     setWrapDraft(prodDay.wrap_time ?? '')
     setNotesDraft(prodDay.notes ?? '')
-  }, [prodDay, shootDay, callSheetDirty])
+  }, [prodDay, shootDay, callSheetDirty, applyCallSheetDocToDrafts])
 
   const fetchProdDayOnly = useCallback(async () => {
     if (!projectId || !shootDay) return
@@ -860,13 +1040,18 @@ export function ProductionTab({
 
   const saveCallSheet = async () => {
     if (!prodDay) return
+    if (!isCompany) {
+      Alert.alert('Call sheet', 'Only the project host can edit the call sheet.')
+      return
+    }
     if (!requireOnlineEdits()) return
     setSavingCallSheet(true)
     const wrap_time = wrapDraft.trim() || null
+    const call_sheet = currentCallSheetDoc()
     const { error } = await supabase
       .from('production_days')
       .update({
-        call_sheet: callDraft,
+        call_sheet,
         notes: notesDraft,
         wrap_time,
       })
@@ -876,7 +1061,7 @@ export function ProductionTab({
       Alert.alert('Call sheet', error.message)
       return
     }
-    const saved: ProductionDayRow = { ...prodDay, call_sheet: callDraft, notes: notesDraft, wrap_time }
+    const saved: ProductionDayRow = { ...prodDay, call_sheet, notes: notesDraft, wrap_time }
     setProdDay(saved)
     setCallSheetDirty(false)
     callSheetDirtyRef.current = false
@@ -930,7 +1115,9 @@ export function ProductionTab({
         wrapTime: wrapDraft || prodDay?.wrap_time,
         locationFallback: projectLocation,
         crew,
-        callSheet: callDraft,
+        callSheet: currentCallSheetDoc(),
+        dayNumber: productionDays.indexOf(shootDay) >= 0 ? productionDays.indexOf(shootDay) + 1 : null,
+        dayCount: productionDays.length || null,
       })
 
       const { uri } = await Print.printToFileAsync({ html })
@@ -1317,38 +1504,77 @@ export function ProductionTab({
         </TouchableOpacity>
       ) : null}
 
-      {prodDay && (notesDraft.trim() || (prodDay.notes ?? '').trim()) ? (
-        <View style={styles.csLogisticsCard}>
-          <View style={styles.csLogisticsHeader}>
-            <View style={styles.csLogisticsIcon}>
-              <MapPin size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-            </View>
-            <View style={styles.csLogisticsHeaderText}>
-              <Text style={styles.csLogisticsKicker}>Day logistics</Text>
-              <Text style={styles.csLogisticsTitle}>Schedule & travel</Text>
-              <Text style={styles.csLogisticsHint}>
-                Synced with Daily wrap → Notes.
-              </Text>
-            </View>
+      <CallSheetDayHeader
+          projectTitle={projectTitle}
+          shootDay={shootDay}
+          projectLocation={projectLocation}
+          dayNumber={productionDays.indexOf(shootDay) >= 0 ? productionDays.indexOf(shootDay) + 1 : null}
+          dayCount={productionDays.length || null}
+          wrapTime={wrapDraft}
+          notes={notesDraft}
+          day={dayTimesDraft}
+          places={placesDraft}
+          special={specialDraft}
+          departments={departmentsDraft}
+          contacts={contactsDraft}
+          editable={isCompany && !!prodDay && !usingOfflinePack}
+          weatherEnabled={canUseProductionWeather}
+          onChangeDay={(patch) => {
+            if (!isCompany) return
+            markCallSheetDirty()
+            setDayTimesDraft((prev) => ({ ...prev, ...patch }))
+          }}
+          onChangePlaces={(patch) => {
+            if (!isCompany) return
+            markCallSheetDirty()
+            setPlacesDraft((prev) => ({ ...prev, ...patch }))
+          }}
+          onChangeSpecial={(value) => {
+            if (!isCompany) return
+            markCallSheetDirty()
+            setSpecialDraft(value)
+          }}
+          onChangeDepartments={(patch) => {
+            if (!isCompany) return
+            markCallSheetDirty()
+            setDepartmentsDraft((prev) => ({ ...prev, ...patch }))
+          }}
+          onChangeContacts={(patch) => {
+            if (!isCompany) return
+            markCallSheetDirty()
+            setContactsDraft((prev) => ({ ...prev, ...patch }))
+          }}
+          onChangeWrap={(value) => {
+            if (!isCompany) return
+            markCallSheetDirty()
+            setWrapDraft(value)
+          }}
+          onChangeNotes={(value) => {
+            if (!isCompany) return
+            markCallSheetDirty()
+            setNotesDraft(value)
+          }}
+          you={youHighlight}
+        >
+      {(crew.length > 0 || (prodDay && isCompany)) ? (
+        <View style={styles.csCrewSection}>
+          <View style={styles.csCrewSectionHead}>
+            <Users size={18} color="rgba(255,255,255,0.45)" strokeWidth={ICON_STROKE} />
+            <Text style={styles.csCrewSectionTitle}>Crew calls</Text>
+            {prodDay && isCompany ? (
+              <TouchableOpacity
+                style={styles.csCrewAddBtn}
+                onPress={() => setAddManualOpen((o) => !o)}
+                disabled={addingManual}
+              >
+                <Text style={styles.csCrewAddBtnText}>
+                  {addManualOpen ? 'Cancel' : '+ Person'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
-          <Text style={styles.muted}>{(notesDraft || prodDay.notes || '').trim()}</Text>
-        </View>
-      ) : null}
-
-      {prodDay && isCompany ? (
-        <View style={{ marginBottom: 12 }}>
-          <TouchableOpacity
-            style={styles.addRowBtn}
-            onPress={() => setAddManualOpen((o) => !o)}
-            disabled={addingManual}
-          >
-            <Plus size={18} color="#0a0a0a" strokeWidth={ICON_STROKE} />
-            <Text style={styles.addRowBtnText}>
-              {addManualOpen ? 'Cancel' : 'Add person (no Crea account)'}
-            </Text>
-          </TouchableOpacity>
-          {addManualOpen ? (
-            <View style={[styles.csMemberCard, { marginTop: 10 }]}>
+          {addManualOpen && prodDay && isCompany ? (
+            <View style={[styles.csMemberCard, { marginBottom: 12 }]}>
               <Text style={styles.csFieldLabel}>Name</Text>
               <TextInput
                 style={styles.csInputBlock}
@@ -1366,7 +1592,7 @@ export function ProductionTab({
                 onChangeText={setManualRole}
               />
               <TouchableOpacity
-                style={[styles.accentBtn, { marginTop: 12 }, addingManual && styles.dim]}
+                style={[styles.accentBtn, { marginTop: 12, marginBottom: 0 }, addingManual && styles.dim]}
                 onPress={() => void addManualToCallSheet()}
                 disabled={addingManual}
               >
@@ -1374,78 +1600,50 @@ export function ProductionTab({
               </TouchableOpacity>
             </View>
           ) : null}
-        </View>
-      ) : null}
-
-      {crew.length > 0 ? (
-        <View style={styles.csCrewSection}>
-          <View style={styles.csCrewSectionHead}>
-            <Users size={18} color="rgba(255,255,255,0.45)" strokeWidth={ICON_STROKE} />
-            <Text style={styles.csCrewSectionTitle}>Crew calls</Text>
-          </View>
-          {crew.map((m) => {
+          {crew.length === 0 ? (
+            <Text style={styles.subtle}>No crew on this project yet. Add someone without a Crea account above.</Text>
+          ) : null}
+          {callSheetCrew.map((m) => {
             const ov = callDraft[m.key]
-            const callVal = ov?.call_time ?? ''
-            const locVal = ov?.location ?? ''
             return (
-              <View key={`${m.key}-${prodDay?.id ?? 'none'}`} style={styles.csMemberCard}>
-                <View style={styles.csMemberHead}>
-                  <Text style={styles.csName}>
-                    {m.name}
-                    {m.source === 'manual' ? ' · external' : ''}
-                  </Text>
-                  <View style={styles.csRolePill}>
-                    <Text style={styles.csRolePillText}>{m.roleLabel}</Text>
-                  </View>
-                </View>
-                <View style={styles.csFieldRow}>
-                  <Clock size={14} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
-                  <View style={styles.csFieldGrow}>
-                    <Text style={styles.csFieldLabel}>Call time</Text>
-                    <TextInput
-                      style={styles.csInputBlock}
-                      placeholder="e.g. 07:00"
-                      placeholderTextColor="rgba(255,255,255,0.25)"
-                      value={callVal}
-                      editable={!!prodDay}
-                      onChangeText={(v) => {
-                        setCallSheetDirty(true)
-                        callSheetDirtyRef.current = true
-                        setCallDraft((prev) => ({
-                          ...prev,
-                          [m.key]: { ...(prev[m.key] ?? {}), call_time: v },
-                        }))
-                      }}
-                    />
-                  </View>
-                </View>
-                <View style={styles.csFieldRow}>
-                  <MapPin size={14} color="rgba(255,255,255,0.35)" strokeWidth={ICON_STROKE} />
-                  <View style={styles.csFieldGrow}>
-                    <Text style={styles.csFieldLabel}>Location / set</Text>
-                    <TextInput
-                      style={[styles.csInputBlock, styles.csInputBlockTall]}
-                      placeholder="Address, stage, parking note…"
-                      placeholderTextColor="rgba(255,255,255,0.25)"
-                      value={locVal}
-                      editable={!!prodDay}
-                      multiline
-                      textAlignVertical="top"
-                      onChangeText={(v) => {
-                        setCallSheetDirty(true)
-                        callSheetDirtyRef.current = true
-                        setCallDraft((prev) => ({
-                          ...prev,
-                          [m.key]: { ...(prev[m.key] ?? {}), location: v },
-                        }))
-                      }}
-                    />
-                  </View>
-                </View>
-              </View>
+              <CrewCallCard
+                key={`${m.key}-${prodDay?.id ?? 'none'}`}
+                name={m.name}
+                roleLabel={m.roleLabel}
+                source={m.source}
+                mine={m.key === userId}
+                callVal={ov?.call_time ?? ''}
+                locVal={ov?.location ?? ''}
+                callPlaceholder={dayTimesDraft.general_call.trim() || 'e.g. 07:00'}
+                locPlaceholder={
+                  placesDraft.basecamp.trim() || projectLocation || 'Address, stage, parking note…'
+                }
+                editable={isCompany && !!prodDay && !usingOfflinePack}
+                onCallChange={(v) => {
+                  if (!isCompany) return
+                  markCallSheetDirty()
+                  setCallDraft((prev) => ({
+                    ...prev,
+                    [m.key]: { ...(prev[m.key] ?? {}), call_time: v },
+                  }))
+                }}
+                onLocChange={(v) => {
+                  if (!isCompany) return
+                  markCallSheetDirty()
+                  setCallDraft((prev) => ({
+                    ...prev,
+                    [m.key]: { ...(prev[m.key] ?? {}), location: v },
+                  }))
+                }}
+              />
             )
           })}
         </View>
+      ) : null}
+        </CallSheetDayHeader>
+
+      {!isCompany ? (
+        <Text style={styles.banner}>Only the project host can edit this call sheet. You can still read and export it.</Text>
       ) : null}
 
       <TouchableOpacity
@@ -1456,37 +1654,8 @@ export function ProductionTab({
         <Text style={styles.outlineBtnText}>{exportingPdf ? 'PDF…' : 'Export call sheet as PDF'}</Text>
       </TouchableOpacity>
 
-      {/* —— Daily wrap —— */}
-      <Text style={[styles.sectionHead, styles.sectionSp]}>DAILY WRAP</Text>
-      <Text style={styles.fieldLabel}>Wrap (optional)</Text>
-      {prodDay ? (
+      {prodDay && isCompany ? (
         <>
-          <TextInput
-            style={styles.wrapInput}
-            placeholder="e.g. 7:30 PM"
-            placeholderTextColor="rgba(255,255,255,0.25)"
-            value={wrapDraft}
-            onChangeText={(v) => {
-              setCallSheetDirty(true)
-              callSheetDirtyRef.current = true
-              setWrapDraft(v)
-            }}
-            editable={!savingCallSheet}
-          />
-          <Text style={styles.fieldLabel}>Notes</Text>
-          <TextInput
-            style={styles.notesInput}
-            placeholder="What happened, what's next…"
-            placeholderTextColor="rgba(255,255,255,0.25)"
-            value={notesDraft}
-            onChangeText={(v) => {
-              setCallSheetDirty(true)
-              callSheetDirtyRef.current = true
-              setNotesDraft(v)
-            }}
-            multiline
-            editable={!savingCallSheet}
-          />
           <TouchableOpacity
             style={[
               styles.saveCallSheetBtn,
@@ -1503,9 +1672,7 @@ export function ProductionTab({
             <Text style={styles.subtle}>Saved — syncs to web automatically.</Text>
           ) : null}
         </>
-      ) : (
-        <Text style={styles.muted}>Notes are available after a production day has been created.</Text>
-      )}
+      ) : null}
         </>
       ) : null}
       </ScrollView>
@@ -1958,11 +2125,24 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   csCrewSectionTitle: {
+    flex: 1,
     fontSize: 11,
     fontWeight: '800',
     color: 'rgba(255,255,255,0.45)',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
+  },
+  csCrewAddBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  csCrewAddBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.7)',
   },
   csMemberCard: {
     marginBottom: 12,
@@ -1971,6 +2151,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
     backgroundColor: '#111',
+  },
+  csMemberCardMine: {
+    borderColor: 'rgba(255,220,0,0.45)',
+    backgroundColor: '#16140a',
   },
   csMemberHead: {
     flexDirection: 'row',
@@ -1982,7 +2166,28 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.06)',
   },
+  csMemberHeadClosed: { marginBottom: 0, paddingBottom: 0, borderBottomWidth: 0 },
+  csNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 },
+  csYouPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 100,
+    backgroundColor: '#FFDC00',
+  },
+  csYouPillText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#0a0a0a',
+    letterSpacing: 0.7,
+  },
   csName: { fontSize: 16, fontWeight: '800', color: '#fff', flex: 1, minWidth: 0 },
+  csMemberPreview: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.55)',
+  },
+  csMemberPreviewMine: { color: '#FFDC00' },
   csRolePill: {
     paddingHorizontal: 10,
     paddingVertical: 4,

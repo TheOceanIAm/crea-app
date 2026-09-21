@@ -209,6 +209,36 @@ function normalizeName(s: string) {
   return s.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+function mergeCallSheetPeopleRaw(
+  prevRaw: unknown,
+  nextPeople: Record<string, { call_time?: string; location?: string }>
+) {
+  const obj =
+    prevRaw && typeof prevRaw === 'object' && !Array.isArray(prevRaw)
+      ? (prevRaw as Record<string, unknown>)
+      : {}
+  if (obj.v === 2 && obj.people && typeof obj.people === 'object' && !Array.isArray(obj.people)) {
+    const people = { ...(obj.people as Record<string, unknown>) }
+    for (const [pid, patch] of Object.entries(nextPeople)) {
+      const prev =
+        people[pid] && typeof people[pid] === 'object' && !Array.isArray(people[pid])
+          ? (people[pid] as Record<string, unknown>)
+          : {}
+      people[pid] = { ...prev, ...patch }
+    }
+    return { ...obj, v: 2, people }
+  }
+  const merged = { ...obj }
+  for (const [pid, patch] of Object.entries(nextPeople)) {
+    const prev =
+      merged[pid] && typeof merged[pid] === 'object' && !Array.isArray(merged[pid])
+        ? (merged[pid] as Record<string, unknown>)
+        : {}
+    merged[pid] = { ...prev, ...patch }
+  }
+  return merged
+}
+
 function matchCrewCalls(
   entries: { name?: string; call_time?: string; location?: string }[],
   members: { profile_id: string; name: string }[]
@@ -484,11 +514,8 @@ Rules:
       })
     }
 
-    const prevSheet = (existing.call_sheet as Record<string, { call_time?: string; location?: string }>) ?? {}
-    const mergedSheet: Record<string, { call_time?: string; location?: string }> = { ...prevSheet }
-    for (const [pid, patch] of Object.entries(nextSheet)) {
-      mergedSheet[pid] = { ...(prevSheet[pid] ?? {}), ...patch }
-    }
+    const prevSheet = existing.call_sheet
+    const mergedSheet = mergeCallSheetPeopleRaw(prevSheet, nextSheet)
 
     let mergedNotes = (existing.notes as string | null) ?? ''
     if (notesAi) {
