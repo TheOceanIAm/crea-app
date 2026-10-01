@@ -199,7 +199,7 @@ export async function loadNotificationAccessContext(
 }
 
 export function filterNotificationRowByAccess<
-  T extends { kind: string; projectId: string; jobId?: string; targetId?: string },
+  T extends { id: string; kind: string; projectId: string; jobId?: string; targetId?: string },
 >(row: T, ctx: NotificationAccessContext, myRole: string): boolean {
   if (row.kind === 'project_completed') {
     if (row.projectId && ctx.recentlyCompletedProjectIds.has(row.projectId)) return true
