@@ -40,6 +40,8 @@ export type NotificationAccessContext = {
   crewMemberProjectIds: Set<string>
   recentlyCompletedProjectIds: Set<string>
   recentlyCompletedJobIds: Set<string>
+  /** Alert ids (`project-msg-…`) that @mention this user. Shown even on completed jobs. */
+  mentionedAlertIds?: Set<string>
 }
 
 function projectAccessibleForJob(
@@ -208,6 +210,8 @@ export function filterNotificationRowByAccess<
   // Pending crew invitations reference a project the user cannot access yet —
   // they're scoped to the user by the SECURITY DEFINER RPC, so always show.
   if (row.kind === 'crew_invite') return true
+
+  if (row.kind === 'project_message' && ctx.mentionedAlertIds?.has(row.id)) return true
 
   if (row.projectId && !ctx.accessibleProjectIds.has(row.projectId)) return false
 

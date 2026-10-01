@@ -239,6 +239,29 @@ export async function fetchMentionLabelsForMessage(
   return [...new Set(data.map((row) => cleanMentionName(String((row as { label?: string }).label ?? ''))).filter(Boolean))]
 }
 
+/** Project chat rows that @mention this user, including on completed jobs. */
+export async function listMentionedProjectMessageIds(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<string[]> {
+  if (!userId) return []
+  const { data, error } = await supabase
+    .from('workspace_message_mentions')
+    .select('project_message_id')
+    .eq('profile_id', userId)
+    .not('project_message_id', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(40)
+  if (error || !data) return []
+  return [
+    ...new Set(
+      data
+        .map((row) => String((row as { project_message_id?: string | null }).project_message_id ?? ''))
+        .filter((id) => MESSAGE_UUID.test(id))
+    ),
+  ]
+}
+
 export async function mentionedProjectMessageIdSet(
   supabase: SupabaseClient,
   userId: string,

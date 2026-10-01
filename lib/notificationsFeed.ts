@@ -10,7 +10,7 @@ import {
   loadWorkspaceReviewLinkAlertRows,
 } from '@/lib/workspaceActivityAlertRows'
 import { supabaseTimestampMs } from '@/lib/supabaseTimestamp'
-import { mentionedProjectMessageIdSet } from '@/lib/workspaceMessageMentions'
+import { listMentionedProjectMessageIds } from '@/lib/workspaceMessageMentions'
 
 export type NotificationKind =
   | 'invite'
@@ -364,12 +364,39 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
 
   const milestoneRows = [...nativeMilestoneRows, ...jobMilestoneRows]
 
-  const mentionedMessageIds = await mentionedProjectMessageIdSet(
-    supabase,
-    userId,
-    (projectMessages ?? []).map((m) => String(m.id))
-  )
-  const messageRows: NotificationRow[] = (projectMessages ?? []).map((m) => {
+  const mentionedMessageIds = new Set(await listMentionedProjectMessageIds(supabase, userId))
+  const loadedMessages = [...(projectMessages ?? [])]
+  const loadedIds = new Set(loadedMessages.map((m) => String(m.id)))
+  const missingMentionIds = [...mentionedMessageIds].filter((id) => !loadedIds.has(id))
+  if (missingMentionIds.length) {
+    const { data: extraMessages } = await supabase
+      .from('project_messages')
+      .select('id, project_id, sender_id, body, created_at')
+      .in('id', missingMentionIds)
+      .neq('sender_id', userId)
+    for (const row of extraMessages ?? []) loadedMessages.push(row)
+    const extraProjectIds = [
+      ...new Set(
+        (extraMessages ?? [])
+          .map((row) => String(row.project_id ?? ''))
+          .filter((id) => id && !projectTitle.has(id))
+      ),
+    ]
+    if (extraProjectIds.length) {
+      const { data: extraProjects } = await supabase
+        .from('projects')
+        .select('id, title, job_id')
+        .in('id', extraProjectIds)
+      for (const project of extraProjects ?? []) {
+        const id = String(project.id)
+        projectTitle.set(id, String(project.title || 'Project'))
+        const jid = project.job_id != null ? String(project.job_id).trim() : ''
+        if (jid) projectJobId.set(id, jid)
+      }
+    }
+  }
+  accessCtx.mentionedAlertIds = new Set([...mentionedMessageIds].map((id) => `project-msg-${id}`))
+  const messageRows: NotificationRow[] = loadedMessages.map((m) => {
     const pid = String(m.project_id)
     return {
       id: `project-msg-${m.id}`,
