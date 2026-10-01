@@ -7,20 +7,24 @@ export async function mirrorProjectMessageToJob(opts: {
   body: string
   /** Copy project row timestamp so merge/realtime dedupe matches. */
   createdAt?: string | null
-}): Promise<{ error: string | null }> {
+}): Promise<{ error: string | null; jobMessageId: string | null }> {
   const createdAt =
     typeof opts.createdAt === 'string' && !Number.isNaN(Date.parse(opts.createdAt))
       ? new Date(opts.createdAt).toISOString()
       : null
-  const { error } = await supabase.from('job_messages').insert({
-    job_id: opts.jobId,
-    sender_id: opts.senderId,
-    content: opts.body,
-    ...(createdAt ? { created_at: createdAt } : {}),
-  })
+  const { data, error } = await supabase
+    .from('job_messages')
+    .insert({
+      job_id: opts.jobId,
+      sender_id: opts.senderId,
+      content: opts.body,
+      ...(createdAt ? { created_at: createdAt } : {}),
+    })
+    .select('id')
+    .single()
   if (error) {
     console.warn('[mirrorProjectMessageToJob]', error.message)
-    return { error: error.message }
+    return { error: error.message, jobMessageId: null }
   }
-  return { error: null }
+  return { error: null, jobMessageId: data?.id ? String(data.id) : null }
 }

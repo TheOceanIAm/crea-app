@@ -99,6 +99,21 @@ async function workspaceRecipientIds(
   return { recipientIds: [...ids], projectTitle: title, projectId, jobId }
 }
 
+async function mentionedProfileIds(
+  admin: ReturnType<typeof createClient>,
+  column: 'project_message_id' | 'job_message_id',
+  messageId: string,
+): Promise<Set<string>> {
+  const { data, error } = await admin.from('workspace_message_mentions').select('profile_id').eq(column, messageId)
+  if (error || !data) return new Set()
+  return new Set(data.map((row) => String((row as { profile_id?: string }).profile_id ?? '')).filter(Boolean))
+}
+
+function workspacePushBody(mentioned: boolean, preview: string): string {
+  const text = mentioned ? `You were mentioned: ${preview}` : preview
+  return text.length > 140 ? `${text.slice(0, 137)}…` : text
+}
+
 async function sendExpoPush(opts: {
   recipientId: string
   admin: ReturnType<typeof createClient>
@@ -366,14 +381,16 @@ Deno.serve(async (req) => {
           ? `${msg.body.trim().slice(0, 117)}…`
           : msg.body.trim()
         : 'New project message'
+    const mentionedIds = await mentionedProfileIds(admin, 'project_message_id', messageId)
     const results: unknown[] = []
     for (const rid of recipientIds) {
+      const mentioned = mentionedIds.has(rid)
       const r = await sendExpoPush({
         recipientId: rid,
         admin,
         title: pt,
-        body: preview,
-        data: { type: 'project_message', projectId, messageId, jobId: jobId ?? undefined },
+        body: workspacePushBody(mentioned, preview),
+        data: { type: 'project_message', projectId, messageId, jobId: jobId ?? undefined, mentioned },
         allow: (s) => Boolean(s.pushProjectChat ?? true),
       })
       results.push(r)
@@ -414,14 +431,16 @@ Deno.serve(async (req) => {
           ? `${msg.content.trim().slice(0, 117)}…`
           : msg.content.trim()
         : 'New workspace message'
+    const mentionedIds = await mentionedProfileIds(admin, 'job_message_id', messageId)
     const results: unknown[] = []
     for (const rid of recipientIds) {
+      const mentioned = mentionedIds.has(rid)
       const r = await sendExpoPush({
         recipientId: rid,
         admin,
         title: pt,
-        body: preview,
-        data: { type: 'project_message', projectId: projectId ?? undefined, jobId, messageId },
+        body: workspacePushBody(mentioned, preview),
+        data: { type: 'project_message', projectId: projectId ?? undefined, jobId, messageId, mentioned },
         allow: (s) => Boolean(s.pushProjectChat ?? true),
       })
       results.push(r)

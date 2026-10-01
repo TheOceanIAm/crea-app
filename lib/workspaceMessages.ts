@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import { loadWorkspaceMentionIndex } from '@/lib/workspaceMessageMentions'
+
 /** Keep in sync with crea-services/lib/workspace-messages.ts */
 
 export type WorkspaceMessageRaw = {
@@ -8,6 +10,8 @@ export type WorkspaceMessageRaw = {
   content: string
   created_at: string
   profiles?: { name: string | null } | { name: string | null }[] | null
+  mention_profile_ids?: string[]
+  mention_labels?: string[]
 }
 
 /** Mirror insert can land a second later — treat nearby same-body rows as one message. */
@@ -45,6 +49,16 @@ export function workspaceMessagesNearDuplicate(
   return Math.abs(ta - tb) <= windowMs
 }
 
+function mergeWorkspaceMentions(
+  a: WorkspaceMessageRaw,
+  b: WorkspaceMessageRaw
+): Pick<WorkspaceMessageRaw, 'mention_profile_ids' | 'mention_labels'> {
+  return {
+    mention_profile_ids: [...new Set([...(a.mention_profile_ids ?? []), ...(b.mention_profile_ids ?? [])])],
+    mention_labels: [...new Set([...(a.mention_labels ?? []), ...(b.mention_labels ?? [])])],
+  }
+}
+
 function dedupeWorkspaceMessages(rows: WorkspaceMessageRaw[]): WorkspaceMessageRaw[] {
   const kept: WorkspaceMessageRaw[] = []
   for (const row of rows) {
@@ -58,9 +72,28 @@ function dedupeWorkspaceMessages(rows: WorkspaceMessageRaw[]): WorkspaceMessageR
       kept.push(row)
       continue
     }
-    if (row.id < kept[dupIdx].id) kept[dupIdx] = row
+    const merged = mergeWorkspaceMentions(kept[dupIdx], row)
+    if (row.id < kept[dupIdx].id) kept[dupIdx] = { ...row, ...merged }
+    else kept[dupIdx] = { ...kept[dupIdx], ...merged }
   }
   return kept.sort((a, b) => a.created_at.localeCompare(b.created_at))
+}
+
+async function withWorkspaceMentions(
+  supabase: SupabaseClient,
+  fromProject: WorkspaceMessageRaw[],
+  fromJob: WorkspaceMessageRaw[]
+): Promise<WorkspaceMessageRaw[]> {
+  const index = await loadWorkspaceMentionIndex(supabase, {
+    projectMessageIds: fromProject.map((row) => row.id),
+    jobMessageIds: fromJob.map((row) => row.id),
+  })
+  const stamp = (row: WorkspaceMessageRaw): WorkspaceMessageRaw => {
+    const hit = index.get(row.id)
+    if (!hit) return row
+    return { ...row, mention_profile_ids: hit.profileIds, mention_labels: hit.labels }
+  }
+  return [...fromProject.map(stamp), ...fromJob.map(stamp)]
 }
 
 export async function fetchMergedWorkspaceMessages(
@@ -91,7 +124,7 @@ export async function fetchMergedWorkspaceMessages(
 
   if (!opts.jobId) {
     return {
-      rows: dedupeWorkspaceMessages(fromProject),
+      rows: dedupeWorkspaceMessages(await withWorkspaceMentions(supabase, fromProject, [])),
       error: projRes.error ? projRes.error.message : null,
     }
   }
@@ -117,7 +150,7 @@ export async function fetchMergedWorkspaceMessages(
   })
 
   return {
-    rows: dedupeWorkspaceMessages([...fromProject, ...fromJob]),
+    rows: dedupeWorkspaceMessages(await withWorkspaceMentions(supabase, fromProject, fromJob)),
     error: projRes.error ? projRes.error.message : null,
   }
 }

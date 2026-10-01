@@ -10,6 +10,7 @@ import {
   loadWorkspaceReviewLinkAlertRows,
 } from '@/lib/workspaceActivityAlertRows'
 import { supabaseTimestampMs } from '@/lib/supabaseTimestamp'
+import { mentionedProjectMessageIdSet } from '@/lib/workspaceMessageMentions'
 
 export type NotificationKind =
   | 'invite'
@@ -363,6 +364,11 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
 
   const milestoneRows = [...nativeMilestoneRows, ...jobMilestoneRows]
 
+  const mentionedMessageIds = await mentionedProjectMessageIdSet(
+    supabase,
+    userId,
+    (projectMessages ?? []).map((m) => String(m.id))
+  )
   const messageRows: NotificationRow[] = (projectMessages ?? []).map((m) => {
     const pid = String(m.project_id)
     return {
@@ -371,7 +377,7 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       projectId: pid,
       jobId: projectJobId.get(pid),
       title: projectTitle.get(pid) ?? 'Project',
-      body: 'New message.',
+      body: mentionedMessageIds.has(String(m.id)) ? 'You were mentioned.' : 'New message.',
       at: String(m.created_at),
     }
   })

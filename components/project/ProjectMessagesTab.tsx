@@ -22,6 +22,16 @@ import { loadProfileAvatarsByIds, normalizeProfileAvatarUrl } from '@/lib/profil
 import { mirrorProjectMessageToJob } from '@/lib/syncWorkspaceMessage'
 import { deleteOwnWorkspaceMessage, filterRowsAfterDelete } from '@/lib/deleteWorkspaceMessage'
 import { fetchMergedWorkspaceMessages, workspaceMessagesNearDuplicate } from '@/lib/workspaceMessages'
+import {
+  activeMentionQuery,
+  fetchTaggableWorkspacePeople,
+  insertMentionToken,
+  insertWorkspaceMessageMentions,
+  mentionsStillInBody,
+  splitBodyByMentions,
+  type MentionDraft,
+  type TaggablePerson,
+} from '@/lib/workspaceMessageMentions'
 
 type Row = {
   id: string
@@ -31,6 +41,7 @@ type Row = {
   created_at: string
   avatar_url: string | null
   profiles?: { name: string | null; avatar_url?: string | null } | null
+  mentionLabels: string[]
 }
 
 type Props = { projectId: string; userId: string }
@@ -68,6 +79,7 @@ function mapMergedToRows(
       created_at: r.created_at,
       avatar_url,
       profiles: p ? { name: p.name ?? null, avatar_url } : null,
+      mentionLabels: r.mention_labels ?? [],
     }
   })
 }
@@ -83,8 +95,22 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [taggable, setTaggable] = useState<TaggablePerson[]>([])
+  const [mentionDrafts, setMentionDrafts] = useState<MentionDraft[]>([])
+  const [cursor, setCursor] = useState(0)
   const listRef = useRef<FlatList>(null)
+  const inputRef = useRef<TextInput>(null)
   const sendingLockRef = useRef(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchTaggableWorkspacePeople(supabase, { projectId, viewerId: userId }).then((people) => {
+      if (!cancelled) setTaggable(people)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [projectId, userId])
 
   useEffect(() => {
     let cancelled = false
@@ -186,6 +212,7 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
   const send = async () => {
     const t = body.trim()
     if (!t || sending || sendingLockRef.current) return
+    const drafts = mentionsStillInBody(t, mentionDrafts)
     sendingLockRef.current = true
     setSending(true)
     try {
@@ -202,32 +229,64 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
         Alert.alert('Send failed', error.message)
         return
       }
-      if (insertedMsg?.id) {
-        void notifyExpoEvent({ kind: 'project_message', messageId: insertedMsg.id })
+      const inserted = insertedMsg as {
+        id: string
+        project_id: string
+        sender_id: string
+        body: string
+        created_at: string
+        profiles?: { name?: string | null; avatar_url?: string | null } | { name?: string | null; avatar_url?: string | null }[] | null
+      } | null
+      let mentionError: string | null = null
+      if (drafts.length && inserted?.id) {
+        const saved = await insertWorkspaceMessageMentions(supabase, {
+          projectMessageId: inserted.id,
+          mentions: drafts,
+        })
+        mentionError = saved.error
       }
-      const inserted = insertedMsg as Row | null
       if (inserted) {
-        const prof = inserted.profiles as { name?: string | null; avatar_url?: string | null } | null
+        const profRaw = inserted.profiles
+        const prof = Array.isArray(profRaw) ? profRaw[0] : profRaw
         const avatar_url = normalizeProfileAvatarUrl(prof?.avatar_url) ?? null
         setRows((prev) =>
           appendMessageRow(prev, {
-            ...inserted,
+            id: inserted.id,
+            project_id: inserted.project_id,
+            sender_id: inserted.sender_id,
+            body: inserted.body,
+            created_at: inserted.created_at,
             avatar_url,
             profiles: prof ? { name: prof.name ?? null, avatar_url } : null,
+            mentionLabels: drafts.map((draft) => draft.label),
           })
         )
       }
       setBody('')
-      if (jobId) {
+      setMentionDrafts([])
+      setCursor(0)
+      if (jobId && inserted?.id) {
         const mirrored = await mirrorProjectMessageToJob({
           jobId,
           senderId: userId,
           body: t,
-          createdAt: inserted?.created_at ?? null,
+          createdAt: inserted.created_at ?? null,
         })
         if (mirrored.error) {
           Alert.alert('Sync warning', `Message sent, but web workspace sync failed: ${mirrored.error}`)
+        } else if (drafts.length && mirrored.jobMessageId) {
+          const saved = await insertWorkspaceMessageMentions(supabase, {
+            jobMessageId: mirrored.jobMessageId,
+            mentions: drafts,
+          })
+          mentionError = mentionError ?? saved.error
         }
+      }
+      if (mentionError) {
+        Alert.alert('Tags', `Message sent, but tags could not be saved: ${mentionError}`)
+      }
+      if (insertedMsg?.id) {
+        void notifyExpoEvent({ kind: 'project_message', messageId: insertedMsg.id })
       }
       // Realtime + focus refresh; avoid an immediate load() race that can flash a mirror duplicate.
     } finally {
@@ -263,6 +322,32 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
       },
     ])
   }
+
+  const applyMention = (person: TaggablePerson) => {
+    const next = insertMentionToken(body, cursor, person.label)
+    setBody(next.text)
+    setCursor(next.cursor)
+    setMentionDrafts((prev) => [
+      ...prev.filter((draft) => draft.profileId !== person.profileId),
+      { profileId: person.profileId, label: person.label },
+    ])
+    setTimeout(() => {
+      inputRef.current?.setNativeProps({ selection: { start: next.cursor, end: next.cursor } })
+    }, 0)
+  }
+
+  const activeMention = activeMentionQuery(body, cursor)
+  const mentionQuery = activeMention?.query.trim().toLowerCase() ?? ''
+  const mentionMatches = activeMention
+    ? taggable
+        .filter((person) => {
+          if (!mentionQuery) return true
+          return (
+            person.label.toLowerCase().includes(mentionQuery) || person.name.toLowerCase().includes(mentionQuery)
+          )
+        })
+        .slice(0, 6)
+    : []
 
   if (loading) {
     return (
@@ -300,7 +385,17 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
                   {!mine ? '' : ' · you'}
                 </Text>
                 <View style={[styles.bubble, mine && styles.bubbleMine]}>
-                  <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{item.body}</Text>
+                  <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>
+                    {splitBodyByMentions(item.body, item.mentionLabels).map((part, index) =>
+                      part.mention ? (
+                        <Text key={`${item.id}-m-${index}`} style={styles.mention}>
+                          {part.text}
+                        </Text>
+                      ) : (
+                        <Text key={`${item.id}-t-${index}`}>{part.text}</Text>
+                      )
+                    )}
+                  </Text>
                 </View>
               </View>
               {mine ? (
@@ -326,18 +421,46 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
         ListEmptyComponent={<Text style={styles.empty}>No messages yet — start the thread.</Text>}
       />
       <View style={[styles.composer, { paddingBottom: composerPadBottom }]}>
-        <TextInput
-          style={styles.input}
-          placeholder="Message the crew…"
-          placeholderTextColor="rgba(255,255,255,0.25)"
-          value={body}
-          onChangeText={setBody}
-          multiline
-          maxLength={4000}
-        />
-        <TouchableOpacity style={[styles.sendBtn, sending && styles.dim]} onPress={send} disabled={sending}>
-          <Send size={20} color="#0a0a0a" strokeWidth={ICON_STROKE} />
-        </TouchableOpacity>
+        {mentionMatches.length > 0 ? (
+          <View style={styles.mentionPicker}>
+            {mentionMatches.map((person) => {
+              const avatar = normalizeProfileAvatarUrl(person.avatarUrl)
+              return (
+                <TouchableOpacity
+                  key={person.profileId}
+                  style={styles.mentionRow}
+                  onPress={() => applyMention(person)}
+                  accessibilityLabel={`Tag ${person.label}`}
+                >
+                  {avatar ? <Image source={{ uri: avatar }} style={styles.mentionAvatar} /> : <View style={styles.mentionAvatar} />}
+                  <View style={styles.mentionMeta}>
+                    <Text style={styles.mentionName}>{person.label}</Text>
+                    {person.role ? <Text style={styles.mentionRole}>{person.role}</Text> : null}
+                  </View>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+        ) : null}
+        <View style={styles.composerRow}>
+          <TextInput
+            ref={inputRef}
+            style={styles.input}
+            placeholder="Message the crew…  @ to tag"
+            placeholderTextColor="rgba(255,255,255,0.25)"
+            value={body}
+            onChangeText={(text) => {
+              setBody(text)
+              setCursor((prev) => (prev >= body.length ? text.length : Math.min(prev, text.length)))
+            }}
+            onSelectionChange={(event) => setCursor(event.nativeEvent.selection.end)}
+            multiline
+            maxLength={4000}
+          />
+          <TouchableOpacity style={[styles.sendBtn, sending && styles.dim]} onPress={send} disabled={sending}>
+            <Send size={20} color="#0a0a0a" strokeWidth={ICON_STROKE} />
+          </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   )
@@ -379,14 +502,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 4,
   },
+  mention: { color: '#FFDC00', fontWeight: '600' },
   composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
+    gap: 8,
   },
+  composerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  mentionPicker: {
+    backgroundColor: '#141414',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  mentionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mentionAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#222' },
+  mentionMeta: { flex: 1, minWidth: 0 },
+  mentionName: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  mentionRole: { color: 'rgba(255,255,255,0.4)', fontSize: 12, marginTop: 1 },
   input: {
     flex: 1,
     minHeight: 44,
