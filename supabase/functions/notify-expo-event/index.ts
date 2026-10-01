@@ -114,6 +114,17 @@ function workspacePushBody(mentioned: boolean, preview: string): string {
   return text.length > 140 ? `${text.slice(0, 137)}…` : text
 }
 
+/** Absolute home-screen badge. iOS only shows the red number when the push carries it. */
+async function nextIconBadge(
+  admin: ReturnType<typeof createClient>,
+  recipientId: string,
+): Promise<number> {
+  const { data, error } = await admin.rpc('bump_app_icon_badge', { p_profile_id: recipientId })
+  const n = typeof data === 'number' ? data : Number(data)
+  if (error || !Number.isFinite(n) || n < 1) return 1
+  return Math.min(99, Math.round(n))
+}
+
 async function sendExpoPush(opts: {
   recipientId: string
   admin: ReturnType<typeof createClient>
@@ -144,6 +155,8 @@ async function sendExpoPush(opts: {
   }
   if (expoTokenEnv) pushHeaders.Authorization = `Bearer ${expoTokenEnv}`
 
+  const badge = await nextIconBadge(admin, recipientId)
+
   const pushRes = await fetch('https://exp.host/--/api/v2/push/send', {
     method: 'POST',
     headers: pushHeaders,
@@ -153,6 +166,7 @@ async function sendExpoPush(opts: {
       body: body || 'Crea',
       sound: 'default',
       priority: 'high',
+      badge,
       data,
     }),
   })

@@ -40,6 +40,8 @@ export default function TabLayout() {
   const [goodNewsPopup, setGoodNewsPopup] = useState<{ body: string; source?: string } | null>(null)
   const [pendingGoodNews, setPendingGoodNews] = useState<{ body: string; source?: string } | null>(null)
   const [unreadAlertsCount, setUnreadAlertsCount] = useState(0)
+  /** Bumps after an alerts recount so the icon badge is written back once counts exist. */
+  const [iconBadgeRevision, setIconBadgeRevision] = useState(0)
   /** Company: workspace projects tab. Freelancer/CEO: marketplace job pool tab. */
   const [showWorkspaceProjectsTab, setShowWorkspaceProjectsTab] = useState(false)
   const [showMarketplaceJobsTab, setShowMarketplaceJobsTab] = useState(false)
@@ -61,8 +63,10 @@ export default function TabLayout() {
       try {
         const n = await refreshNotificationsAndCount(uid)
         setUnreadAlertsCount(n)
+        setIconBadgeRevision((rev) => rev + 1)
       } catch {
         setUnreadAlertsCount(countUnreadAlertsCached(uid) ?? 0)
+        setIconBadgeRevision((rev) => rev + 1)
       }
     })()
     try {
@@ -142,7 +146,10 @@ export default function TabLayout() {
     if (Platform.OS === 'web') return
     const total = unreadDmCount + unreadAlertsCount
     void Notifications.setBadgeCountAsync(total).catch(() => {})
-  }, [unreadDmCount, unreadAlertsCount])
+    // Skip the first paint (counts are still 0) so a push badge is not wiped before the recount.
+    if (!userId || iconBadgeRevision === 0) return
+    void supabase.from('profiles').update({ app_icon_badge: total }).eq('id', userId)
+  }, [unreadDmCount, unreadAlertsCount, userId, iconBadgeRevision])
 
   /** Prefetch daily headline while splash/feed load; show only after bootstrap overlay is gone. */
   useEffect(() => {

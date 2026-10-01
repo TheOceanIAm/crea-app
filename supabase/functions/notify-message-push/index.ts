@@ -22,6 +22,17 @@ function messageBody(row: Record<string, unknown>): string {
   return typeof raw === 'string' ? raw : ''
 }
 
+/** Absolute home-screen badge. iOS only shows the red number when the push carries it. */
+async function nextIconBadge(
+  admin: ReturnType<typeof createClient>,
+  recipientId: string,
+): Promise<number> {
+  const { data, error } = await admin.rpc('bump_app_icon_badge', { p_profile_id: recipientId })
+  const n = typeof data === 'number' ? data : Number(data)
+  if (error || !Number.isFinite(n) || n < 1) return 1
+  return Math.min(99, Math.round(n))
+}
+
 function parseNotif(raw: unknown): NotificationSettings {
   const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   /** Missing keys treated as opted-in (legacy rows often only stored expoPushToken + pushEnabled). */
@@ -187,6 +198,8 @@ Deno.serve(async (req) => {
     pushHeaders.Authorization = `Bearer ${expoToken}`
   }
 
+  const badge = await nextIconBadge(admin, recipientId)
+
   const pushRes = await fetch('https://exp.host/--/api/v2/push/send', {
     method: 'POST',
     headers: pushHeaders,
@@ -196,6 +209,7 @@ Deno.serve(async (req) => {
       body: preview || 'New message',
       sound: 'default',
       priority: 'high',
+      badge,
       data: {
         type: 'message',
         conversationId,

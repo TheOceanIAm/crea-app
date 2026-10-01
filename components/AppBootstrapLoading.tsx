@@ -61,9 +61,13 @@ export function AppBootstrapLoading({ quick = false }: { quick?: boolean }) {
   const pulseOpacity = useRef(new Animated.Value(1)).current
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null)
 
-  const shadowRadius = softReveal.interpolate({
+  const haloRadius = softReveal.interpolate({
     inputRange: [0, 1],
-    outputRange: [22, 8],
+    outputRange: [34, 18],
+  })
+  const coreRadius = softReveal.interpolate({
+    inputRange: [0, 1],
+    outputRange: [16, 8],
   })
 
   const smearOpacity = smearReveal.interpolate({
@@ -132,19 +136,32 @@ export function AppBootstrapLoading({ quick = false }: { quick?: boolean }) {
             opacity: pulseOpacity,
           }}
         >
-          <Animated.Text
-            style={[
-              logoStyle,
-              {
-                textShadowColor: 'rgba(255, 220, 0, 0.85)',
-                textShadowOffset: { width: 0, height: 0 },
-                textShadowRadius: shadowRadius,
-              },
-            ]}
-            allowFontScaling={false}
-          >
-            CREA
-          </Animated.Text>
+          <View style={styles.wordmark}>
+            <Animated.Text
+              style={[
+                logoStyle,
+                styles.halo,
+                {
+                  textShadowRadius: haloRadius,
+                },
+              ]}
+              allowFontScaling={false}
+            >
+              CREA
+            </Animated.Text>
+            <Animated.Text
+              style={[
+                logoStyle,
+                styles.core,
+                {
+                  textShadowRadius: coreRadius,
+                },
+              ]}
+              allowFontScaling={false}
+            >
+              CREA
+            </Animated.Text>
+          </View>
         </Animated.View>
       </View>
     </View>
@@ -165,6 +182,12 @@ const styles = StyleSheet.create({
     zIndex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'visible',
+  },
+  wordmark: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
   },
   logo: {
     fontFamily: 'ClimateCrisis_400Regular',
@@ -173,6 +196,22 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     color: CREA_YELLOW,
     textTransform: 'uppercase',
+    paddingHorizontal: 72,
+    paddingVertical: 48,
+    textShadowOffset: { width: 0, height: 0 },
+  },
+  halo: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+    color: 'rgba(255, 220, 0, 0.28)',
+    textShadowColor: '#FFDC00',
+  },
+  core: {
+    color: CREA_YELLOW,
+    textShadowColor: 'rgba(255, 220, 0, 0.95)',
   },
   webFallbackScrim: {
     backgroundColor: 'rgba(10,10,10,0.52)',
