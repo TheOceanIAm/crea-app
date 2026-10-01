@@ -9,6 +9,7 @@ export type CreatePrivateWorkspaceProjectInput = {
   budget_type?: JobListingBudgetType
   budget_amount?: number | null
   budget_currency?: string
+  duration?: string | null
 }
 
 export type CreatePrivateWorkspaceProjectResult =
@@ -50,6 +51,7 @@ export async function createPrivateWorkspaceProject(
       budget_type: budgetType,
       budget_amount: budgetAmount,
       budget_currency: budgetCurrency,
+      duration: (input.duration ?? '').trim() || null,
       budget_max: null,
       description,
       skills: [],

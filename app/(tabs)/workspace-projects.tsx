@@ -130,6 +130,8 @@ export default function WorkspaceProjectsScreen() {
   const [budgetType, setBudgetType] = useState<JobListingBudgetType>('negotiable')
   const [budgetAmount, setBudgetAmount] = useState('')
   const [budgetCurrency, setBudgetCurrency] = useState('EUR')
+  const [durationAmount, setDurationAmount] = useState('')
+  const [durationUnit, setDurationUnit] = useState<'hours' | 'days' | 'weeks' | 'months' | 'ongoing' | ''>('')
   const [creating, setCreating] = useState(false)
   const [actingId, setActingId] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -253,6 +255,8 @@ export default function WorkspaceProjectsScreen() {
     setBudgetType('negotiable')
     setBudgetAmount('')
     setBudgetCurrency('EUR')
+    setDurationAmount('')
+    setDurationUnit('')
   }
 
   const onCreate = async () => {
@@ -287,12 +291,20 @@ export default function WorkspaceProjectsScreen() {
     const ownerCompanyId = isCompany ? (await resolveActingCompanyId(u.id)) ?? u.id : u.id
     setCreating(true)
     setError(null)
+    const durationCount = Number.parseInt(durationAmount.trim(), 10)
+    const duration =
+      durationUnit === 'ongoing'
+        ? 'Ongoing'
+        : durationUnit && Number.isFinite(durationCount) && durationCount > 0
+          ? `${durationCount} ${durationCount === 1 ? durationUnit.slice(0, -1) : durationUnit}`
+          : null
     const result = await createPrivateWorkspaceProject(supabase, ownerCompanyId, {
       title: t,
       notes: notes.trim() || undefined,
       budget_type: budgetParsed.budget_type,
       budget_amount: budgetParsed.budget_amount,
       budget_currency: budgetParsed.budget_currency,
+      duration,
     })
     setCreating(false)
     if (!result.ok) {
@@ -702,16 +714,22 @@ export default function WorkspaceProjectsScreen() {
             </View>
             {budgetType !== 'negotiable' ? (
               <>
-                <Text style={styles.fieldLabel}>Currency (ISO)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={budgetCurrency}
-                  onChangeText={(x) => setBudgetCurrency(x.toUpperCase().replace(/[^A-Za-z]/g, '').slice(0, 3))}
-                  placeholder="EUR"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  autoCapitalize="characters"
-                  maxLength={3}
-                />
+                <Text style={styles.fieldLabel}>Currency</Text>
+                <View style={styles.chipRow}>
+                  {(['EUR', 'USD', 'GBP', 'CHF'] as const).map((code) => {
+                    const sel = budgetCurrency === code
+                    return (
+                      <TouchableOpacity
+                        key={code}
+                        style={[styles.chip, sel && styles.chipSelected]}
+                        onPress={() => setBudgetCurrency(code)}
+                      >
+                        <Text style={[styles.chipText, sel && styles.chipTextSelected]}>{code}</Text>
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+                <Text style={styles.fieldHint}>This project only. It does not change the site display currency.</Text>
                 <Text style={styles.fieldLabel}>{budgetType === 'day_rate' ? 'Day rate' : 'Fixed budget'}</Text>
                 <TextInput
                   style={styles.input}
@@ -722,6 +740,33 @@ export default function WorkspaceProjectsScreen() {
                   keyboardType="decimal-pad"
                 />
               </>
+            ) : null}
+
+            <Text style={styles.fieldLabel}>Duration (optional)</Text>
+            <View style={styles.chipRow}>
+              {(['hours', 'days', 'weeks', 'months', 'ongoing'] as const).map((unit) => {
+                const sel = durationUnit === unit
+                const label = unit === 'hours' ? 'Hours' : unit === 'days' ? 'Days' : unit === 'weeks' ? 'Weeks' : unit === 'months' ? 'Months' : 'Ongoing'
+                return (
+                  <TouchableOpacity
+                    key={unit}
+                    style={[styles.chip, sel && styles.chipSelected]}
+                    onPress={() => setDurationUnit(sel ? '' : unit)}
+                  >
+                    <Text style={[styles.chipText, sel && styles.chipTextSelected]}>{label}</Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+            {durationUnit === 'hours' || durationUnit === 'days' || durationUnit === 'weeks' || durationUnit === 'months' ? (
+              <TextInput
+                style={styles.input}
+                value={durationAmount}
+                onChangeText={setDurationAmount}
+                placeholder={durationUnit === 'hours' ? 'e.g. 6' : 'e.g. 2'}
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                keyboardType="number-pad"
+              />
             ) : null}
 
             <Text style={styles.fieldLabel}>Notes (optional)</Text>
@@ -985,6 +1030,7 @@ const styles = StyleSheet.create({
   blockSub: { fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 20 },
   modalTitle: { fontSize: 30, fontWeight: '900', color: '#FFDC00', textTransform: 'uppercase', marginBottom: 6 },
   modalSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', lineHeight: 18, marginBottom: 14 },
+  fieldHint: { color: 'rgba(255,255,255,0.35)', fontSize: 12, marginTop: -6, marginBottom: 8 },
   fieldLabel: {
     fontSize: 11,
     color: 'rgba(255,255,255,0.45)',
