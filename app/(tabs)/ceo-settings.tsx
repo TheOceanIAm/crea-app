@@ -19,6 +19,7 @@ import { ChevronLeft, ExternalLink } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { useCeoAccess } from '@/lib/useCeoAccess'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { getCreaWebBaseUrl } from '@/lib/creaWeb'
 
 type PlatformSettings = {
@@ -94,6 +95,7 @@ function explainSettingsRpcError(raw: string): string {
 
 export default function CeoSettingsScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const { ready, allowed } = useCeoAccess()
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -251,6 +253,7 @@ export default function CeoSettingsScreen() {
       ) : null}
 
       <ScrollView
+        style={{ flex: 1, marginBottom: tabBarInset + 12 }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         refreshControl={

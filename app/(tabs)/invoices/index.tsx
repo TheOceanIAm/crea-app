@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
 import { supabase } from '@/lib/supabase'
 import { PreviousScreenButton } from '@/components/PreviousScreenButton'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { formatDate, invoiceStatusLabel, money, statusVariant } from '@/lib/invoiceFormatting'
 import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
 import {
@@ -125,6 +126,7 @@ function applyInvoicesCache(
 
 export default function InvoicesListScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const boot = useRef(readInitialInvoices()).current
   const lastFetchedAt = useRef(boot.loading ? 0 : Date.now())
   const [rows, setRows] = useState<InvoiceRow[]>(boot.rows)
@@ -348,6 +350,7 @@ export default function InvoicesListScreen() {
       </View>
 
       <FlatList
+        style={{ flex: 1, marginBottom: tabBarInset + 12 }}
         data={rows}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}

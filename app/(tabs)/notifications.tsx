@@ -11,6 +11,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { useFocusEffect } from '@react-navigation/native'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
@@ -45,6 +46,7 @@ let alertsRealtimeTopicSeq = 0
 
 export default function NotificationsScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const [refreshing, setRefreshing] = useState(false)
   const [busyInviteId, setBusyInviteId] = useState<string | null>(null)
   const [nowTick, setNowTick] = useState(() => Date.now())
@@ -251,6 +253,7 @@ export default function NotificationsScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <TabScreenHeader title="Alerts" showMessages />
       <FlatList
+        style={{ flex: 1, marginBottom: tabBarInset + 12 }}
         data={rows}
         keyExtractor={(r) => r.id}
         initialNumToRender={14}

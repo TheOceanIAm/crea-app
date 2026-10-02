@@ -16,6 +16,7 @@ import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { useCeoAccess } from '@/lib/useCeoAccess'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 
 type CompanyRow = {
   id: string
@@ -49,6 +50,7 @@ function parseCompaniesPayload(raw: unknown): { ok: boolean; companies: CompanyR
 
 export default function CeoCompaniesScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const { ready, allowed } = useCeoAccess()
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
@@ -146,7 +148,7 @@ export default function CeoCompaniesScreen() {
         </View>
       ) : (
         <FlatList
-          style={styles.listFlex}
+          style={[styles.listFlex, { marginBottom: tabBarInset + 12 }]}
           data={rows}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}

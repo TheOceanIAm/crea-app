@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { PreviousScreenButton } from '@/components/PreviousScreenButton'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { PlusCircle, Lock } from 'lucide-react-native'
 import * as Linking from 'expo-linking'
 import { getAuthUser } from '@/lib/getAuthUser'
@@ -98,6 +99,7 @@ function readInitialJobsFeed(): { jobs: Job[]; externalJobs: ExternalJob[]; load
 
 export default function JobsListScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const bootJobs = useRef(readInitialJobsFeed()).current
   const hasLoadedRef = useRef(!bootJobs.loading)
   const lastLoadedAtRef = useRef(bootJobs.loading ? 0 : Date.now())
@@ -377,6 +379,7 @@ export default function JobsListScreen() {
       </View>
 
       <FlatList<Job | ExternalJob>
+        style={{ flex: 1, marginBottom: tabBarInset + 12 }}
         data={feedListData}
         keyExtractor={(j) => j.id}
         initialNumToRender={8}

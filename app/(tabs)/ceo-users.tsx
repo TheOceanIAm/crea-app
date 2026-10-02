@@ -16,6 +16,7 @@ import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { useCeoAccess } from '@/lib/useCeoAccess'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 
 type UserRow = {
   id: string
@@ -47,6 +48,7 @@ function parseUsersPayload(raw: unknown): { ok: boolean; users: UserRow[] } {
 
 export default function CeoUsersScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const { view } = useLocalSearchParams<{ view?: string }>()
   const recentView = view === 'recent'
   const { ready, allowed } = useCeoAccess()
@@ -152,7 +154,7 @@ export default function CeoUsersScreen() {
         </View>
       ) : (
         <FlatList
-          style={styles.listFlex}
+          style={[styles.listFlex, { marginBottom: tabBarInset + 12 }]}
           data={rows}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}

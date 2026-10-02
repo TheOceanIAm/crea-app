@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { returnToPreviousScreen } from '@/lib/screenReturn'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { ChevronLeft, MapPin, Plus, Star } from 'lucide-react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getAuthUser } from '@/lib/getAuthUser'
@@ -269,6 +270,7 @@ function readInitialTalentPool(): {
 
 export default function TalentPoolScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const boot = useRef(readInitialTalentPool()).current
   const [loading, setLoading] = useState(boot.loading)
   const [allowed, setAllowed] = useState<boolean | null>(null)
@@ -765,6 +767,7 @@ export default function TalentPoolScreen() {
       ) : null}
 
       <FlatList
+        style={{ flex: 1, marginBottom: tabBarInset + 12 }}
         data={displayRows}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}

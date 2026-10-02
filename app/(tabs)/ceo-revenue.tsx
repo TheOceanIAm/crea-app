@@ -15,6 +15,7 @@ import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { useCeoAccess } from '@/lib/useCeoAccess'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import {
   COMPANY_PLAN_PRICE_EUR,
   FREELANCER_PLAN_PRICE_EUR,
@@ -66,6 +67,7 @@ function PlanBreakdown({
 
 export default function CeoRevenueScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const { ready, allowed } = useCeoAccess()
   const [loading, setLoading] = useState(true)
   const [mrr, setMrr] = useState<CeoMrrTotals | null>(null)
@@ -165,6 +167,7 @@ export default function CeoRevenueScreen() {
       ) : null}
 
       <ScrollView
+        style={{ flex: 1, marginBottom: tabBarInset + 12 }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         refreshControl={

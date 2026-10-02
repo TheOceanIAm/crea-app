@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter, type Href } from 'expo-router'
 import { returnToPreviousScreen } from '@/lib/screenReturn'
+import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { ChevronLeft, ChevronRight } from 'lucide-react-native'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -74,6 +75,7 @@ function readInitialApplications(): {
 
 export default function CompanyApplicationsScreen() {
   const router = useRouter()
+  const tabBarInset = useFloatingTabBarBottomInset()
   const boot = useRef(readInitialApplications()).current
   const lastFetchedAt = useRef(boot.loading ? 0 : Date.now())
   const [loading, setLoading] = useState(boot.loading)
@@ -305,6 +307,7 @@ export default function CompanyApplicationsScreen() {
       </View>
 
       <FlatList
+        style={{ flex: 1, marginBottom: tabBarInset + 12 }}
         data={visibleRows}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
