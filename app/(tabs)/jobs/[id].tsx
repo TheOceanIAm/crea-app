@@ -20,6 +20,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { getCreaWebBaseUrl, openCreaWebPath } from '@/lib/creaWeb'
 import { jobShareUrl } from '@/lib/shareLinks'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
+import { formatJobListingMeta } from '@/lib/jobListingMeta'
 import { freelancerCanApplyToJobs, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
 import {
   findBookingReplyStatus,
@@ -56,6 +57,8 @@ type JobRow = {
   budget_amount: number | null
   budget_currency: string | null
   location_type: string
+  location: string | null
+  start_date: string | null
   description: string | null
   company_id: string
   status: string
@@ -188,15 +191,14 @@ export default function JobDetailScreen() {
 
     const cid = String((row as JobRow).company_id || '').trim()
     if (cid) {
-      const { data: cp } = await supabase.from('profiles').select('name, avatar_url').eq('id', cid).maybeSingle()
-      if (cp) {
-        setCompanyName((cp.name || 'Company').trim() || 'Company')
-        const u = cp.avatar_url?.trim()
-        setCompanyLogoUrl(u && /^https?:\/\//i.test(u) ? u : null)
-      } else {
-        setCompanyName('Company')
-        setCompanyLogoUrl(null)
-      }
+      const [{ data: cp }, { data: company }] = await Promise.all([
+        supabase.from('profiles').select('name, avatar_url').eq('id', cid).maybeSingle(),
+        supabase.from('company_profiles').select('company_name, logo_url').eq('id', cid).maybeSingle(),
+      ])
+      const logo = (company?.logo_url || cp?.avatar_url || '').trim()
+      const name = (company?.company_name || cp?.name || 'Company').trim() || 'Company'
+      setCompanyName(name)
+      setCompanyLogoUrl(logo && /^https?:\/\//i.test(logo) ? logo : null)
     } else {
       setCompanyName('Company')
       setCompanyLogoUrl(null)
@@ -751,8 +753,17 @@ export default function JobDetailScreen() {
           })}
         </Text>
         <Text style={styles.meta}>
-          {job.category} · {job.location_type}
-          {isOwner ? ' · Your listing' : ''}
+          {[
+            formatJobListingMeta({
+              location: job.location,
+              locationType: job.location_type,
+              startDate: job.start_date,
+            }),
+            job.category,
+            isOwner ? 'Your listing' : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </Text>
 
         {job.description ? <Text style={styles.body}>{job.description}</Text> : null}

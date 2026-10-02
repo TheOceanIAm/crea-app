@@ -27,6 +27,7 @@ import { CreaFeedPostSkeleton, CreaInlineLoader } from '@/components/CreaLoading
 import { ResponsiveScreen } from '@/components/ResponsiveScreen'
 import { PlatformTrialBanners } from '@/components/PlatformTrialBanners'
 import { TabScreenHeader } from '@/components/TabScreenHeader'
+import { JobListingCard } from '@/components/JobListingCard'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import {
   canFreelancerCreatePrivateProjects,
@@ -271,6 +272,14 @@ export function PinboardFeedScreen() {
         project_id: vars.projectId,
         job_title: vars.jobTitle,
         job_company_id: null,
+        job_company_name: displayName,
+        job_company_logo_url: avatarUrl,
+        job_location: null,
+        job_location_type: null,
+        job_start_date: null,
+        job_budget_type: null,
+        job_budget_amount: null,
+        job_budget_currency: null,
         job_is_solo_workspace: false,
         project_title: vars.projectTitle,
         project_company_id: null,
@@ -392,8 +401,37 @@ export function PinboardFeedScreen() {
       const hasLink = pinboardPostHasLink(p)
       const kindLabel = pinboardPostLinkKindLabel(p)
       const canMod = canModeratePinboardPost(p, userId)
+      if (p.job_id && p.job_title) {
+        return (
+          <View style={styles.jobCardWrap}>
+            <JobListingCard
+              companyName={p.job_company_name || p.author_name}
+              companyLogoUrl={p.job_company_logo_url || p.author_avatar_url}
+              title={p.job_title}
+              location={p.job_location}
+              locationType={p.job_location_type}
+              startDate={p.job_start_date}
+              budgetType={p.job_budget_type}
+              budgetAmount={p.job_budget_amount}
+              budgetCurrency={p.job_budget_currency}
+              onPress={() => openPostLink(p)}
+            />
+            {canMod ? (
+              <TouchableOpacity onPress={() => onDeletePost(p)} hitSlop={8}>
+                <Text style={styles.postRemove}>Remove</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )
+      }
+      const openCard = hasLink ? () => openPostLink(p) : undefined
       return (
-        <View style={styles.postCard}>
+        <TouchableOpacity
+          style={styles.postCard}
+          activeOpacity={hasLink ? 0.86 : 1}
+          disabled={!hasLink}
+          onPress={openCard}
+        >
           <View style={styles.postRow}>
             <View style={styles.postAvatar}>
               {p.author_avatar_url ? (
@@ -412,12 +450,10 @@ export function PinboardFeedScreen() {
               {kindLabel ? (
                 <Text style={styles.postKind}>{kindLabel}</Text>
               ) : null}
-              {hasLink ? (
-                <TouchableOpacity onPress={() => openPostLink(p)} activeOpacity={0.7}>
-                  <Text style={styles.postJobLink} numberOfLines={1}>
-                    {linkLabel} →
-                  </Text>
-                </TouchableOpacity>
+              {hasLink && linkLabel ? (
+                <Text style={styles.postJobLink} numberOfLines={1}>
+                  {linkLabel} →
+                </Text>
               ) : null}
               <Text style={styles.postText}>{p.body}</Text>
               {canMod ? (
@@ -427,7 +463,7 @@ export function PinboardFeedScreen() {
               ) : null}
             </View>
           </View>
-        </View>
+        </TouchableOpacity>
       )
     },
     [onDeletePost, openPostLink, userId]
@@ -742,6 +778,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textTransform: 'uppercase',
   },
+  jobCardWrap: { marginBottom: 10, gap: 6 },
   postCard: {
     marginBottom: 10,
     borderRadius: 14,

@@ -6,6 +6,7 @@ import {
   canFreelancerCreatePrivateProjects,
   type FreelancerPlan,
 } from '@/lib/freelancerPlan'
+import { isMarketplaceExcludedCompanyId } from '@/lib/marketplaceExcludedCompanies'
 
 export type PinboardPostRow = {
   id: string
@@ -14,7 +15,18 @@ export type PinboardPostRow = {
   job_id: string | null
   project_id: string | null
   author_id: string
-  jobs: { id: string; title: string; company_id: string; is_solo_workspace?: boolean | null } | null
+  jobs: {
+    id: string
+    title: string
+    company_id: string
+    is_solo_workspace?: boolean | null
+    location?: string | null
+    location_type?: string | null
+    start_date?: string | null
+    budget_type?: string | null
+    budget_amount?: number | null
+    budget_currency?: string | null
+  } | null
   projects: { id: string; title: string; company_id: string; freelancer_id: string | null } | null
 }
 
@@ -26,6 +38,14 @@ export type PinboardPost = {
   project_id: string | null
   job_title: string | null
   job_company_id: string | null
+  job_company_name: string | null
+  job_company_logo_url: string | null
+  job_location: string | null
+  job_location_type: string | null
+  job_start_date: string | null
+  job_budget_type: string | null
+  job_budget_amount: number | null
+  job_budget_currency: string | null
   job_is_solo_workspace: boolean
   project_title: string | null
   project_company_id: string | null
@@ -186,7 +206,7 @@ export async function loadPinboardFeedPage(opts?: {
       job_id,
       project_id,
       author_id,
-      jobs ( id, title, company_id, is_solo_workspace ),
+      jobs ( id, title, company_id, is_solo_workspace, location, location_type, start_date, budget_type, budget_amount, budget_currency ),
       projects ( id, title, company_id, freelancer_id )
     `
     )
@@ -202,24 +222,50 @@ export async function loadPinboardFeedPage(opts?: {
 
   const rows = (data ?? []) as unknown as PinboardPostRow[]
   const authorIds = [...new Set(rows.map((r) => r.author_id))]
+  const companyIds = [
+    ...new Set(
+      rows
+        .map((r) => r.jobs?.company_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    ),
+  ]
   const authorMap: Record<string, { name: string | null; avatar_url: string | null }> = {}
+  const companyMap: Record<string, { name: string | null; logo_url: string | null }> = {}
 
-  if (authorIds.length > 0) {
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, name, avatar_url')
-      .in('id', authorIds)
+  if (authorIds.length > 0 || companyIds.length > 0) {
+    const [{ data: profiles }, { data: companies }] = await Promise.all([
+      authorIds.length > 0
+        ? supabase.from('profiles').select('id, name, avatar_url').in('id', authorIds)
+        : Promise.resolve({ data: [] as { id: string; name: string | null; avatar_url: string | null }[] }),
+      companyIds.length > 0
+        ? supabase.from('company_profiles').select('id, company_name, logo_url').in('id', companyIds)
+        : Promise.resolve({ data: [] as { id: string; company_name: string | null; logo_url: string | null }[] }),
+    ])
     for (const p of profiles ?? []) {
       authorMap[String(p.id)] = {
         name: (p.name as string | null) ?? null,
         avatar_url: (p.avatar_url as string | null) ?? null,
       }
     }
+    for (const c of companies ?? []) {
+      const logo = typeof c.logo_url === 'string' ? c.logo_url.trim() : ''
+      companyMap[String(c.id)] = {
+        name: (c.company_name as string | null) ?? null,
+        logo_url: logo && /^https?:\/\//i.test(logo) ? logo : null,
+      }
+    }
   }
 
   const posts: PinboardPost[] = rows.flatMap((r) => {
     if (r.jobs?.is_solo_workspace) return []
+    if (isMarketplaceExcludedCompanyId(r.jobs?.company_id)) return []
     const au = authorMap[r.author_id]
+    const companyId = r.jobs?.company_id ?? null
+    const company = companyId ? companyMap[companyId] : undefined
+    const authorAvatar = au?.avatar_url?.trim()
+    const logo =
+      company?.logo_url ||
+      (authorAvatar && /^https?:\/\//i.test(authorAvatar) ? authorAvatar : null)
     return [
       {
         id: r.id,
@@ -228,7 +274,15 @@ export async function loadPinboardFeedPage(opts?: {
         job_id: r.job_id,
         project_id: r.project_id,
         job_title: r.jobs?.title ?? null,
-        job_company_id: r.jobs?.company_id ?? null,
+        job_company_id: companyId,
+        job_company_name: company?.name?.trim() || au?.name?.trim() || null,
+        job_company_logo_url: logo,
+        job_location: r.jobs?.location ?? null,
+        job_location_type: r.jobs?.location_type ?? null,
+        job_start_date: r.jobs?.start_date ?? null,
+        job_budget_type: r.jobs?.budget_type ?? null,
+        job_budget_amount: typeof r.jobs?.budget_amount === 'number' ? r.jobs.budget_amount : null,
+        job_budget_currency: r.jobs?.budget_currency ?? null,
         job_is_solo_workspace: false,
         project_title: r.projects?.title ?? null,
         project_company_id: r.projects?.company_id ?? null,

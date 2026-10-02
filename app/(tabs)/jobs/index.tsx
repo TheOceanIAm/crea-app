@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Image,
   TextInput,
   Modal,
   ScrollView,
@@ -19,18 +18,18 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { PreviousScreenButton } from '@/components/PreviousScreenButton'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
-import { PlusCircle, Lock } from 'lucide-react-native'
+import { PlusCircle } from 'lucide-react-native'
 import * as Linking from 'expo-linking'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
+import { isCeoUserId } from '@/lib/ceo'
+import { isMarketplaceExcludedCompanyId } from '@/lib/marketplaceExcludedCompanies'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
-import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 import {
   freelancerCanApplyToJobs,
   resolveFreelancerPlanFromUserAndProfileTier,
 } from '@/lib/freelancerPlan'
-import { ensureMarketplaceJobWorkspaceRow } from '@/lib/ensureMarketplaceJobWorkspace'
 import { publishCeoExternalJob } from '@/lib/ceoExternalJobsApi'
 import { instagramUrl, linkedinUrl, normalizeExternalUrl } from '@/lib/profilePublicLinks'
 import {
@@ -46,6 +45,7 @@ import {
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { readCachedDashboardOverview } from '@/lib/dashboardOverview'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
+import { JobListingCard } from '@/components/JobListingCard'
 
 type Job = JobFeedRow
 type ExternalJob = ExternalJobRow
@@ -53,14 +53,6 @@ type ExternalJob = ExternalJobRow
 function companyInitial(name: string) {
   const t = name.trim()
   return t ? t.charAt(0).toUpperCase() : '?'
-}
-
-function jobStatusLabel(s: string) {
-  const t = (s || '').toLowerCase()
-  if (t === 'active') return 'Active'
-  if (t === 'closed' || t === 'filled') return 'Closed'
-  if (t === 'draft') return 'Draft'
-  return s ? s : '—'
 }
 
 function openExternalUrl(url: string, label: string) {
@@ -163,7 +155,12 @@ export default function JobsListScreen() {
       /** Paint cache immediately (memory, then disk) before any network. */
       const best = await hydrateJobsFeedBestEffort(user.id, feedTab)
       if (best) {
-        setJobs(best.data.jobs)
+        const viewerIsCeo = isCeoUserId(user.id) || isCeoProfile(role)
+        setJobs(
+          best.companyOnly || viewerIsCeo
+            ? best.data.jobs
+            : best.data.jobs.filter((j) => !isMarketplaceExcludedCompanyId(j.company_id))
+        )
         setExternalJobs(best.data.externalJobs)
         setLoading(false)
         hasLoadedRef.current = true
@@ -236,6 +233,7 @@ export default function JobsListScreen() {
       j.title.toLowerCase().includes(needle) ||
       j.category.toLowerCase().includes(needle) ||
       j.location_type.toLowerCase().includes(needle) ||
+      String(j.location ?? '').toLowerCase().includes(needle) ||
       j.company_name.toLowerCase().includes(needle)
     )
   }, [jobs, search])
@@ -391,7 +389,28 @@ export default function JobsListScreen() {
         }
         contentContainerStyle={[styles.list, feedListData.length === 0 && styles.listEmpty]}
         showsVerticalScrollIndicator={false}
-        renderItem={({ item }) => (
+        renderItem={({ item }) => {
+          const openCreaJob = () => {
+            if (!isCreaJobItem(item)) return
+            router.push(`/(tabs)/jobs/${item.id}`)
+          }
+          if (isCreaJobItem(item) && !showExternalFeed) {
+            return (
+              <JobListingCard
+                companyName={item.company_name}
+                companyLogoUrl={item.company_logo_url}
+                title={item.title}
+                location={item.location}
+                locationType={item.location_type}
+                startDate={item.start_date}
+                budgetType={item.budget_type}
+                budgetAmount={item.budget_amount}
+                budgetCurrency={item.budget_currency}
+                onPress={openCreaJob}
+              />
+            )
+          }
+          return (
           <TouchableOpacity
             style={styles.card}
             activeOpacity={0.7}
@@ -400,23 +419,7 @@ export default function JobsListScreen() {
                 setActiveExternalJob(item)
                 return
               }
-              if (isCompanyUser && isCreaJobItem(item)) {
-                void (async () => {
-                  const { data: { user } } = await supabase.auth.getUser()
-                  if (user) {
-                    const ensured = await ensureMarketplaceJobWorkspaceRow(supabase, {
-                      jobId: item.id,
-                      userId: user.id,
-                    })
-                    const pid = ensured.projectId ?? item.id
-                    router.push(`/project/${pid}`)
-                  } else {
-                    router.push(`/(tabs)/jobs/${item.id}`)
-                  }
-                })()
-                return
-              }
-              router.push(`/(tabs)/jobs/${item.id}`)
+              openCreaJob()
             }}
           >
             {showExternalFeed && !isCreaJobItem(item) ? (
@@ -463,49 +466,10 @@ export default function JobsListScreen() {
                   ) : null}
                 </View>
               </>
-            ) : isCreaJobItem(item) ? (
-              <>
-                <View style={styles.companyRow}>
-                  {item.company_logo_url ? (
-                    <Image source={{ uri: item.company_logo_url }} style={styles.companyLogo} />
-                  ) : (
-                    <View style={styles.companyLogoPlaceholder}>
-                      <Text style={styles.companyLogoLetter}>{companyInitial(item.company_name)}</Text>
-                    </View>
-                  )}
-                  <Text style={styles.companyName} numberOfLines={1}>
-                    {item.company_name}
-                  </Text>
-                  {isCompanyUser ? (
-                    <View style={styles.statusPill}>
-                      <Text style={styles.statusPillText}>{jobStatusLabel(item.status)}</Text>
-                    </View>
-                  ) : isFreeFreelancer ? (
-                    <View style={styles.lockPill}>
-                      <Lock size={11} color="#FFDC00" strokeWidth={ICON_STROKE} />
-                      <Text style={styles.lockPillText}>Pro</Text>
-                    </View>
-                  ) : null}
-                </View>
-                <View style={styles.cardTop}>
-                  <Text style={styles.jobTitle}>{item.title}</Text>
-                  <View style={styles.budgetBadge}>
-                    <Text style={styles.budgetText}>
-                      {formatBudgetDisplay({
-                        budget_type: item.budget_type,
-                        budget_amount: item.budget_amount,
-                        budget_currency: item.budget_currency,
-                      })}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={styles.jobMeta}>
-                  {item.category} · {item.location_type}
-                </Text>
-              </>
             ) : null}
           </TouchableOpacity>
-        )}
+          )
+        }}
         ListHeaderComponent={
           isFreeFreelancer ? (
             <View style={styles.freePlanBanner}>

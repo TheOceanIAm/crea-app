@@ -1,6 +1,8 @@
 import type { User } from '@supabase/supabase-js'
 import { getCache, setCache } from '@/lib/appCache'
-import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
+import { isCeoUserId } from '@/lib/ceo'
+import { isMarketplaceExcludedCompanyId } from '@/lib/marketplaceExcludedCompanies'
+import { isCompanyProfile, isCeoProfile, resolveAppRole } from '@/lib/profileRole'
 import { supabase } from '@/lib/supabase'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { LIST_DISK_TTL_MS, LIST_MEM_TTL_MS } from '@/lib/cachePolicy'
@@ -13,6 +15,8 @@ export type JobFeedRow = {
   budget_amount: number | null
   budget_currency: string | null
   location_type: string
+  location: string | null
+  start_date: string | null
   company_id: string | null
   company_name: string
   company_logo_url: string | null
@@ -148,7 +152,7 @@ export async function loadJobsFeed(
   let q = supabase
     .from('jobs')
     .select(
-      'id, title, category, budget_type, budget_amount, budget_currency, location_type, company_id, status, is_solo_workspace'
+      'id, title, category, budget_type, budget_amount, budget_currency, location, location_type, start_date, company_id, status, is_solo_workspace'
     )
     .order('created_at', { ascending: false })
     .limit(companyOnly ? 100 : 30)
@@ -202,6 +206,8 @@ export async function loadJobsFeed(
       budget_amount: typeof j.budget_amount === 'number' ? j.budget_amount : null,
       budget_currency: typeof j.budget_currency === 'string' ? j.budget_currency : null,
       location_type: String(j.location_type ?? ''),
+      location: typeof j.location === 'string' ? j.location : null,
+      start_date: typeof j.start_date === 'string' ? j.start_date : null,
       company_id: cid,
       company_name: c?.name ?? 'Company',
       company_logo_url: c?.avatar_url ?? null,
@@ -210,7 +216,13 @@ export async function loadJobsFeed(
     }
   })
 
-  return { cacheKey, data: { jobs, externalJobs: [] }, companyOnly, feedTab }
+  const viewerIsCeo = isCeoUserId(user.id) || isCeoProfile(role)
+  const visibleJobs =
+    companyOnly || viewerIsCeo
+      ? jobs
+      : jobs.filter((j) => !isMarketplaceExcludedCompanyId(j.company_id))
+
+  return { cacheKey, data: { jobs: visibleJobs, externalJobs: [] }, companyOnly, feedTab }
 }
 
 const inflightByKey = new Map<string, Promise<void>>()
