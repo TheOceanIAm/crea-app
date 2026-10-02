@@ -14,6 +14,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter, type Href } from 'expo-router'
+import { returnToPreviousScreen } from '@/lib/screenReturn'
 import { ChevronLeft, MapPin, Plus, Star } from 'lucide-react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getAuthUser } from '@/lib/getAuthUser'
@@ -597,7 +598,7 @@ export default function TalentPoolScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ResponsiveScreen>
-        <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
+        <TouchableOpacity style={styles.backRow} onPress={() => returnToPreviousScreen(router)} hitSlop={12}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
@@ -615,7 +616,7 @@ export default function TalentPoolScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ResponsiveScreen>
-      <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
+      <TouchableOpacity style={styles.backRow} onPress={() => returnToPreviousScreen(router)} hitSlop={12}>
         <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
         <Text style={styles.backText}>Dashboard</Text>
       </TouchableOpacity>

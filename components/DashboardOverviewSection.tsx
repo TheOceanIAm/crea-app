@@ -138,6 +138,11 @@ export function DashboardOverviewSection({
   if (isCeoProfile(role ?? undefined)) {
     const snap = overview.ceoSnap ?? parseCeoSnapshot(null)
     const ceoRpcError = sanitizeCeoRpcError(overview.ceoRpcError)
+    const openFromDashboard = (go: () => void) => {
+      setScreenReturn('/(tabs)/dashboard')
+      go()
+    }
+
     const statDefs: {
       label: string
       value: string
@@ -150,7 +155,7 @@ export function DashboardOverviewSection({
         value: String(snap.all_users),
         sub: 'Freelancers + companies',
         Icon: Users,
-        onPress: () => router.push('/(tabs)/ceo-users' as Href),
+        onPress: () => openFromDashboard(() => router.push('/(tabs)/ceo-users' as Href)),
       },
       {
         label: 'New users',
@@ -158,31 +163,45 @@ export function DashboardOverviewSection({
         sub: 'Last 7 days',
         Icon: UserPlus,
         onPress: () =>
-          router.push({ pathname: '/(tabs)/ceo-users', params: { view: 'recent' } } as Href),
+          openFromDashboard(() =>
+            router.push({ pathname: '/(tabs)/ceo-users', params: { view: 'recent' } } as Href)
+          ),
       },
       {
         label: 'Active projects',
         value: String(snap.active_jobs),
         sub: 'Open listings',
         Icon: Briefcase,
-        onPress: () => router.navigate('/(tabs)/jobs'),
+        onPress: () => openFromDashboard(() => router.push('/(tabs)/jobs')),
       },
       {
         label: 'Completed',
         value: String(snap.completed_jobs),
         sub: 'Closed / filled',
         Icon: CircleCheck,
-        onPress: () => router.navigate('/(tabs)/jobs'),
+        onPress: () => openFromDashboard(() => router.push('/(tabs)/jobs')),
       },
     ]
 
     const ceoQuick: CeoQuick[] = [
-      { label: 'Users', icon: Users, onPress: () => router.push('/(tabs)/ceo-users' as Href) },
-      { label: 'Companies', icon: Building2, onPress: () => router.push('/(tabs)/ceo-companies' as Href) },
-      { label: 'Subscriptions', icon: CircleDollarSign, onPress: () => router.push('/(tabs)/ceo-revenue' as Href) },
-      { label: 'Messages', icon: MessageCircle, onPress: () => router.navigate('/(tabs)/messages') },
-      { label: 'Job pool', icon: Briefcase, onPress: () => router.navigate('/(tabs)/jobs') },
-      { label: 'Settings', icon: Settings2, onPress: () => router.push('/(tabs)/ceo-settings' as Href) },
+      { label: 'Users', icon: Users, onPress: () => openFromDashboard(() => router.push('/(tabs)/ceo-users' as Href)) },
+      {
+        label: 'Companies',
+        icon: Building2,
+        onPress: () => openFromDashboard(() => router.push('/(tabs)/ceo-companies' as Href)),
+      },
+      {
+        label: 'Subscriptions',
+        icon: CircleDollarSign,
+        onPress: () => openFromDashboard(() => router.push('/(tabs)/ceo-revenue' as Href)),
+      },
+      { label: 'Messages', icon: MessageCircle, onPress: () => openFromDashboard(() => router.push('/(tabs)/messages')) },
+      { label: 'Job pool', icon: Briefcase, onPress: () => openFromDashboard(() => router.push('/(tabs)/jobs')) },
+      {
+        label: 'Settings',
+        icon: Settings2,
+        onPress: () => openFromDashboard(() => router.push('/(tabs)/ceo-settings' as Href)),
+      },
     ]
 
     return (
@@ -237,27 +256,22 @@ export function DashboardOverviewSection({
           })}
         </View>
 
-        <Text style={styles.sectionTitle}>Quick actions</Text>
-        <View style={styles.actionsGrid}>
-          {ceoQuick.map((a) => {
-            const Icon = a.icon
-            return (
-              <TouchableOpacity
-                key={a.label}
-                style={styles.actionCard}
-                onPress={a.onPress}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconWrap}>
-                  <Icon size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-                </View>
-                <Text style={styles.actionLabel}>{a.label}</Text>
-              </TouchableOpacity>
-            )
-          })}
+        <View style={styles.actionList}>
+          {ceoQuick.map((a, index) => (
+            <TouchableOpacity
+              key={a.label}
+              style={styles.actionRow}
+              onPress={a.onPress}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.actionIndex}>[{String(index + 1).padStart(2, '0')}]</Text>
+              <View style={styles.actionCopy}>
+                <Text style={styles.actionTitle}>{a.label}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
         </View>
         {collapseToggle}
-        <View style={styles.divider} />
       </View>
     )
   }

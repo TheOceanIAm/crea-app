@@ -11,6 +11,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router'
+import { returnToPreviousScreen } from '@/lib/screenReturn'
 import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -101,7 +102,7 @@ export default function CeoUsersScreen() {
   if (!allowed) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
+        <TouchableOpacity style={styles.backRow} onPress={() => returnToPreviousScreen(router)} hitSlop={12}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
@@ -115,7 +116,7 @@ export default function CeoUsersScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
+      <TouchableOpacity style={styles.backRow} onPress={() => returnToPreviousScreen(router)} hitSlop={12}>
         <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
         <Text style={styles.backText}>Dashboard</Text>
       </TouchableOpacity>

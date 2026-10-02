@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView'
 import { useFocusEffect, useRouter } from 'expo-router'
+import { returnToPreviousScreen } from '@/lib/screenReturn'
 import { ChevronLeft, Plus } from 'lucide-react-native'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
@@ -244,7 +245,7 @@ export default function CompanyPostJobScreen() {
   if (!allowed) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
+        <TouchableOpacity style={styles.backRow} onPress={() => returnToPreviousScreen(router)} hitSlop={12}>
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
@@ -261,7 +262,7 @@ export default function CompanyPostJobScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={12}>
+      <TouchableOpacity style={styles.backRow} onPress={() => returnToPreviousScreen(router)} hitSlop={12}>
         <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
         <Text style={styles.backText}>Tools</Text>
       </TouchableOpacity>

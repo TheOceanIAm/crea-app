@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView'
 import { useRouter } from 'expo-router'
+import { returnToPreviousScreen } from '@/lib/screenReturn'
 import { ChevronLeft, ChevronRight } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -320,7 +321,7 @@ export default function AvailabilityScreen() {
         <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => router.replace('/(tabs)/feed')}
+            onPress={() => returnToPreviousScreen(router)}
             hitSlop={12}
           >
             <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
@@ -341,7 +342,7 @@ export default function AvailabilityScreen() {
         <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => router.replace('/(tabs)/feed')}
+            onPress={() => returnToPreviousScreen(router)}
             hitSlop={12}
           >
             <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />

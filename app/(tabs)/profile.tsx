@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect } from '@react-navigation/native'
 import { router, type Href } from 'expo-router'
 import { setScreenReturn } from '@/lib/screenReturn'
+import { PreviousScreenButton } from '@/components/PreviousScreenButton'
 import type { LucideIcon } from 'lucide-react-native'
 import {
   Bell,
@@ -1449,6 +1450,7 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.flex}>
+        <PreviousScreenButton />
         <View style={styles.headerRow}>
           <Text style={styles.brand}>Crea</Text>
           <View style={styles.headerRight}>

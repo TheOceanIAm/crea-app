@@ -4,7 +4,7 @@ import { useFocusEffect } from '@react-navigation/native'
 import { useRouter, type Href } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
-import { peekScreenReturn, takeScreenReturn } from '@/lib/screenReturn'
+import { peekScreenReturn, returnToPreviousScreen } from '@/lib/screenReturn'
 
 /** Small back chevron. Returns to the screen that opened this one. */
 export function PreviousScreenButton({ always = false }: { always?: boolean }) {
@@ -22,18 +22,7 @@ export function PreviousScreenButton({ always = false }: { always?: boolean }) {
   return (
     <TouchableOpacity
       style={styles.btn}
-      onPress={() => {
-        const target = takeScreenReturn()
-        if (target) {
-          router.navigate(target)
-          return
-        }
-        if (router.canGoBack()) {
-          router.back()
-          return
-        }
-        router.navigate('/(tabs)/dashboard')
-      }}
+      onPress={() => returnToPreviousScreen(router)}
       hitSlop={12}
       accessibilityRole="button"
       accessibilityLabel="Back"

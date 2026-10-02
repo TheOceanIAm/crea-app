@@ -17,6 +17,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
+import { PreviousScreenButton } from '@/components/PreviousScreenButton'
 import { PlusCircle, Lock } from 'lucide-react-native'
 import * as Linking from 'expo-linking'
 import { getAuthUser } from '@/lib/getAuthUser'
@@ -310,6 +311,7 @@ export default function JobsListScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <PreviousScreenButton />
       <View style={styles.headerRow}>
         <Text style={styles.title}>{isCompanyUser ? 'Projects' : 'Jobs'}</Text>
         <View style={styles.badge}>
