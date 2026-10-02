@@ -54,6 +54,12 @@ export const PINBOARD_UPDATES_COPY = {
   attachLabel: 'Link to job or project (required)',
   attachSelectPlaceholder: 'Choose a listing or project…',
   attachRequiredError: 'Link a job listing or workspace project.',
+  announcementKind: 'Announcement',
+  sectionSubtitleCeo: 'Share an announcement, a new feature, or a listing.',
+  composerPlaceholderCeo: 'Share an announcement…',
+  messagePlaceholderCeo: 'e.g. Invoicing just got faster — here’s what changed.',
+  attachOptionalLabel: 'Link to a job or project (optional)',
+  noLinkOption: 'No link',
   bodyRequiredError: 'Add a short note for your update.',
   emptyFeed:
     'No updates yet. Share a listing or crew search and link it to a job or project.',
@@ -84,9 +90,11 @@ export function validatePinboardUpdateInput(opts: {
   body: string
   jobId: string | null
   projectId: string | null
+  /** CEO announcements do not need a listing or project. */
+  allowUnlinked?: boolean
 }): { ok: true } | { ok: false; error: string } {
   const trimmed = opts.body.trim()
-  if (!opts.jobId && !opts.projectId) {
+  if (!opts.allowUnlinked && !opts.jobId && !opts.projectId) {
     return { ok: false, error: PINBOARD_UPDATES_COPY.attachRequiredError }
   }
   if (opts.jobId && opts.projectId) {
@@ -209,23 +217,26 @@ export async function loadPinboardFeedPage(opts?: {
     }
   }
 
-  const posts: PinboardPost[] = rows.map((r) => {
+  const posts: PinboardPost[] = rows.flatMap((r) => {
+    if (r.jobs?.is_solo_workspace) return []
     const au = authorMap[r.author_id]
-    return {
-      id: r.id,
-      body: r.body,
-      created_at: r.created_at,
-      job_id: r.job_id,
-      project_id: r.project_id,
-      job_title: r.jobs?.title ?? null,
-      job_company_id: r.jobs?.company_id ?? null,
-      job_is_solo_workspace: Boolean(r.jobs?.is_solo_workspace),
-      project_title: r.projects?.title ?? null,
-      project_company_id: r.projects?.company_id ?? null,
-      author_id: r.author_id,
-      author_name: au?.name?.trim() || 'Member',
-      author_avatar_url: au?.avatar_url ?? null,
-    }
+    return [
+      {
+        id: r.id,
+        body: r.body,
+        created_at: r.created_at,
+        job_id: r.job_id,
+        project_id: r.project_id,
+        job_title: r.jobs?.title ?? null,
+        job_company_id: r.jobs?.company_id ?? null,
+        job_is_solo_workspace: false,
+        project_title: r.projects?.title ?? null,
+        project_company_id: r.projects?.company_id ?? null,
+        author_id: r.author_id,
+        author_name: au?.name?.trim() || 'Member',
+        author_avatar_url: au?.avatar_url ?? null,
+      },
+    ]
   })
 
   return { posts, error: null }
@@ -236,8 +247,9 @@ export async function loadPinboardAttachOptions(ownerId: string): Promise<Pinboa
   const [{ data: jobs, error: jobsErr }, { data: projects, error: projectsErr }] = await Promise.all([
     supabase
       .from('jobs')
-      .select('id, title')
+      .select('id, title, is_solo_workspace')
       .eq('company_id', ownerId)
+      .or('is_solo_workspace.is.null,is_solo_workspace.eq.false')
       .order('created_at', { ascending: false })
       .limit(100),
     supabase
@@ -288,11 +300,13 @@ export async function createPinboardPost(opts: {
   body: string
   jobId: string | null
   projectId: string | null
+  allowUnlinked?: boolean
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const validation = validatePinboardUpdateInput({
     body: opts.body,
     jobId: opts.jobId,
     projectId: opts.projectId,
+    allowUnlinked: opts.allowUnlinked,
   })
   if (!validation.ok) return validation
   const trimmed = opts.body.trim()
@@ -328,7 +342,7 @@ export function pinboardPostLinkKindLabel(post: PinboardPost): string | null {
   if (post.project_id && post.project_title) return PINBOARD_UPDATES_COPY.linkKindProject
   if (post.job_id && post.job_title) return PINBOARD_UPDATES_COPY.linkKindJob
   if (post.project_id || post.job_id) return PINBOARD_UPDATES_COPY.legacyUnlinked
-  return null
+  return PINBOARD_UPDATES_COPY.announcementKind
 }
 
 export function canModeratePinboardPost(

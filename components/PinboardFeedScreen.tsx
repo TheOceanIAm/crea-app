@@ -20,7 +20,8 @@ import { ChevronDown, X } from 'lucide-react-native'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { queryClient } from '@/lib/queryClient'
 import { setCache, deleteCache } from '@/lib/appCache'
-import { isCompanyProfile, isFreelancerProfile } from '@/lib/profileRole'
+import { isCeoUserId } from '@/lib/ceo'
+import { isCeoProfile, isCompanyProfile, isFreelancerProfile } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { CreaFeedPostSkeleton, CreaInlineLoader } from '@/components/CreaLoading'
 import { ResponsiveScreen } from '@/components/ResponsiveScreen'
@@ -203,6 +204,7 @@ export function PinboardFeedScreen() {
 
   const freelancerPlan = overview?.freelancerPlan ?? 'free'
   const canCompose = canComposePinboardUpdates({ role, freelancerPlan })
+  const allowUnlinked = isCeoProfile(role) || isCeoUserId(userId)
   const canPostJobs =
     isCompanyProfile(role ?? undefined) ||
     (isFreelancerProfile(role ?? undefined) && freelancerCanPostJobs(freelancerPlan))
@@ -235,9 +237,11 @@ export function PinboardFeedScreen() {
     setAttachLoading(true)
     const options = await loadPinboardAttachOptions(userId)
     setAttachOptions(options)
-    setComposeAttachKey(options[0]?.key ?? PINBOARD_NO_ATTACH)
+    setComposeAttachKey(
+      allowUnlinked ? PINBOARD_NO_ATTACH : (options[0]?.key ?? PINBOARD_NO_ATTACH)
+    )
     setAttachLoading(false)
-  }, [canCompose, userId])
+  }, [allowUnlinked, canCompose, userId])
 
   const createMutation = useMutation({
     mutationFn: async (vars: {
@@ -252,6 +256,7 @@ export function PinboardFeedScreen() {
         body: vars.body,
         jobId: vars.jobId,
         projectId: vars.projectId,
+        allowUnlinked,
       })
       if (!result.ok) throw new Error(result.error)
     },
@@ -304,7 +309,12 @@ export function PinboardFeedScreen() {
     const parsed = parsePinboardAttachKey(composeAttachKey)
     const jobId = parsed?.kind === 'job' ? parsed.id : null
     const projectId = parsed?.kind === 'project' ? parsed.id : null
-    const validation = validatePinboardUpdateInput({ body: composeBody, jobId, projectId })
+    const validation = validatePinboardUpdateInput({
+      body: composeBody,
+      jobId,
+      projectId,
+      allowUnlinked,
+    })
     if (!validation.ok) {
       setComposeError(validation.error)
       return
@@ -317,7 +327,7 @@ export function PinboardFeedScreen() {
       jobTitle: opt?.kind === 'job' ? opt.title : null,
       projectTitle: opt?.kind === 'project' ? opt.title : null,
     })
-  }, [attachOptions, composeAttachKey, composeBody, createMutation, userId])
+  }, [allowUnlinked, attachOptions, composeAttachKey, composeBody, createMutation, userId])
 
   const deleteMutation = useMutation({
     mutationFn: async (post: PinboardPost) => {
@@ -425,7 +435,7 @@ export function PinboardFeedScreen() {
 
   const hasAttachOptions = attachOptions.length > 0
   const canSubmit =
-    composeAttachKey !== PINBOARD_NO_ATTACH &&
+    (allowUnlinked || composeAttachKey !== PINBOARD_NO_ATTACH) &&
     composeBody.trim().length > 0 &&
     !composeSubmitting
 
@@ -439,12 +449,16 @@ export function PinboardFeedScreen() {
           hasStripeCustomer={overview.hasStripeCustomer}
         />
       ) : null}
-      <Text style={styles.sectionSubtitle}>{PINBOARD_UPDATES_COPY.sectionSubtitle}</Text>
+      <Text style={styles.sectionSubtitle}>
+        {allowUnlinked
+          ? PINBOARD_UPDATES_COPY.sectionSubtitleCeo
+          : PINBOARD_UPDATES_COPY.sectionSubtitle}
+      </Text>
       {!canCompose ? (
         <View style={styles.blockedCard}>
           <Text style={styles.blockedText}>{PINBOARD_UPDATES_COPY.starterBlocked}</Text>
         </View>
-      ) : !hasAttachOptions && !attachLoading && userId ? (
+      ) : !allowUnlinked && !hasAttachOptions && !attachLoading && userId ? (
         <View style={styles.blockedCard}>
           <Text style={styles.noLinkTitle}>{PINBOARD_UPDATES_COPY.noLinkOptionsTitle}</Text>
           <Text style={styles.blockedText}>{PINBOARD_UPDATES_COPY.noLinkOptionsBody}</Text>
@@ -498,7 +512,11 @@ export function PinboardFeedScreen() {
             activeOpacity={0.75}
             disabled={!userId || attachLoading}
           >
-            <Text style={styles.composerPlaceholder}>{PINBOARD_UPDATES_COPY.composerPlaceholder}</Text>
+            <Text style={styles.composerPlaceholder}>
+              {allowUnlinked
+                ? PINBOARD_UPDATES_COPY.composerPlaceholderCeo
+                : PINBOARD_UPDATES_COPY.composerPlaceholder}
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -571,7 +589,11 @@ export function PinboardFeedScreen() {
                 <X size={24} color="rgba(255,255,255,0.5)" strokeWidth={ICON_STROKE} />
               </TouchableOpacity>
             </View>
-            <Text style={styles.attachFieldLabel}>{PINBOARD_UPDATES_COPY.attachLabel}</Text>
+            <Text style={styles.attachFieldLabel}>
+              {allowUnlinked
+                ? PINBOARD_UPDATES_COPY.attachOptionalLabel
+                : PINBOARD_UPDATES_COPY.attachLabel}
+            </Text>
             {attachLoading ? (
               <View style={{ marginVertical: 8, alignItems: 'flex-start' }}>
                 <CreaInlineLoader size="sm" />
@@ -581,11 +603,13 @@ export function PinboardFeedScreen() {
                 <TouchableOpacity
                   style={styles.jobAttachBtn}
                   onPress={() => setAttachPickerOpen((o) => !o)}
-                  disabled={composeSubmitting || attachOptions.length === 0}
+                  disabled={composeSubmitting || (!allowUnlinked && attachOptions.length === 0)}
                 >
                   <Text style={styles.jobAttachLabel} numberOfLines={2}>
                     {composeAttachKey === PINBOARD_NO_ATTACH
-                      ? PINBOARD_UPDATES_COPY.attachSelectPlaceholder
+                      ? allowUnlinked
+                        ? PINBOARD_UPDATES_COPY.noLinkOption
+                        : PINBOARD_UPDATES_COPY.attachSelectPlaceholder
                       : (() => {
                           const opt = attachOptions.find((o) => o.key === composeAttachKey)
                           return opt
@@ -597,6 +621,17 @@ export function PinboardFeedScreen() {
                 </TouchableOpacity>
                 {attachPickerOpen ? (
                   <View style={styles.jobAttachList}>
+                    {allowUnlinked ? (
+                      <TouchableOpacity
+                        style={styles.jobAttachItem}
+                        onPress={() => {
+                          setComposeAttachKey(PINBOARD_NO_ATTACH)
+                          setAttachPickerOpen(false)
+                        }}
+                      >
+                        <Text style={styles.jobAttachItemText}>{PINBOARD_UPDATES_COPY.noLinkOption}</Text>
+                      </TouchableOpacity>
+                    ) : null}
                     {attachOptions.map((opt) => (
                       <TouchableOpacity
                         key={opt.key}
@@ -621,7 +656,11 @@ export function PinboardFeedScreen() {
             <TextInput
               value={composeBody}
               onChangeText={setComposeBody}
-              placeholder={PINBOARD_UPDATES_COPY.messagePlaceholder}
+              placeholder={
+                allowUnlinked
+                  ? PINBOARD_UPDATES_COPY.messagePlaceholderCeo
+                  : PINBOARD_UPDATES_COPY.messagePlaceholder
+              }
               placeholderTextColor="rgba(255,255,255,0.28)"
               multiline
               maxLength={6000}
