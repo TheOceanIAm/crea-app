@@ -8,6 +8,7 @@ import {
   FLOATING_TAB_BAR_PILL_HEIGHT,
   focusedTabHasNestedDetail,
 } from '@/lib/floatingTabBarLayout'
+import { clearScreenReturn } from '@/lib/screenReturn'
 
 /** Only these routes may appear in the floating bar (expo-router hides others via tabBarItemStyle). */
 const MAIN_TAB_ROUTE_NAMES = new Set([
@@ -67,6 +68,7 @@ export function FloatingGlassTabBar({ state, descriptors, navigation }: BottomTa
             const color = isFocused ? '#FFDC00' : 'rgba(255,255,255,0.42)'
 
             const onPress = () => {
+              clearScreenReturn()
               const event = navigation.emit({
                 type: 'tabPress',
                 target: route.key,

@@ -11,11 +11,10 @@ import {
   Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter, useSegments } from 'expo-router'
+import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/native'
-import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
-import { ICON_STROKE } from '@/lib/iconTheme'
+import { PreviousScreenButton } from '@/components/PreviousScreenButton'
 import { formatDate, invoiceStatusLabel, money, statusVariant } from '@/lib/invoiceFormatting'
 import { invoiceBadgeStyles, statusBadgeFor } from '@/lib/invoiceStyles'
 import {
@@ -126,7 +125,6 @@ function applyInvoicesCache(
 
 export default function InvoicesListScreen() {
   const router = useRouter()
-  const segments = useSegments()
   const boot = useRef(readInitialInvoices()).current
   const lastFetchedAt = useRef(boot.loading ? 0 : Date.now())
   const [rows, setRows] = useState<InvoiceRow[]>(boot.rows)
@@ -300,6 +298,7 @@ export default function InvoicesListScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
+        <PreviousScreenButton always />
         <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
           <ScreenListSkeleton rows={6} />
         </View>
@@ -310,16 +309,7 @@ export default function InvoicesListScreen() {
   if (perspective === 'freelancer' && !invoicingAllowed) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.topBar}>
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={() => router.replace('/(tabs)/feed')}
-            hitSlop={12}
-          >
-            <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-            <Text style={styles.backLabel}>Dashboard</Text>
-          </TouchableOpacity>
-        </View>
+        <PreviousScreenButton always />
         <View style={styles.upgradeCenter}>
           <Text style={styles.upgradeTitle}>Invoicing is a Pro feature</Text>
           <Text style={styles.upgradeSub}>
@@ -337,26 +327,9 @@ export default function InvoicesListScreen() {
     )
   }
 
-  const hideFinanceDashboardBack =
-    perspective === 'freelancer' &&
-    segments[0] === '(tabs)' &&
-    segments.length === 2 &&
-    segments[1] === 'invoices'
-
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {hideFinanceDashboardBack ? null : (
-        <View style={styles.topBar}>
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={() => router.replace('/(tabs)/feed')}
-            hitSlop={12}
-          >
-            <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-            <Text style={styles.backLabel}>Dashboard</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      <PreviousScreenButton always />
 
       <View style={styles.headerRow}>
         <View style={styles.titleBlock}>
@@ -633,9 +606,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   upgradeBtnText: { fontSize: 14, fontWeight: '800', color: '#0a0a0a' },
-  topBar: { paddingHorizontal: 12, paddingBottom: 4 },
-  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 8 },
-  backLabel: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',

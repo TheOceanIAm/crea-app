@@ -24,6 +24,7 @@ import {
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { money } from '@/lib/invoiceFormatting'
 import { openCreaWebPath } from '@/lib/creaWeb'
+import { setScreenReturn } from '@/lib/screenReturn'
 import {
   isCeoProfile,
   isCompanyProfile,
@@ -336,41 +337,35 @@ export function DashboardOverviewSection({
         </View>
       ) : null}
 
-      <Text style={styles.sectionTitle}>Quick actions</Text>
-      <View style={styles.actionsGrid}>
-        {quickActions.map((a) => {
-          const Icon = a.icon
-          return (
-            <TouchableOpacity
-              key={a.label}
-              style={[styles.actionCard, a.disabled && styles.actionCardDisabled]}
-              activeOpacity={0.7}
-              disabled={!!a.disabled}
-              onPress={() => {
-                if (a.disabled) return
-                if (a.href) {
-                  router.push(a.href as Href)
-                  return
-                }
-                if (a.webPath) void openCreaWebPath(a.webPath)
-              }}
-            >
-              <View style={styles.actionIconWrap}>
-                <Icon
-                  size={20}
-                  color={a.disabled ? 'rgba(255,220,0,0.22)' : '#FFDC00'}
-                  strokeWidth={ICON_STROKE}
-                />
-              </View>
-              <Text style={[styles.actionLabel, a.disabled && styles.actionLabelMuted]}>{a.label}</Text>
-              {a.hint ? <Text style={styles.actionHint}>{a.hint}</Text> : null}
-            </TouchableOpacity>
-          )
-        })}
+      <View style={styles.actionList}>
+        {quickActions.map((a, index) => (
+          <TouchableOpacity
+            key={a.label}
+            style={styles.actionRow}
+            activeOpacity={0.7}
+            disabled={!!a.disabled}
+            onPress={() => {
+              if (a.disabled) return
+              if (a.href) {
+                setScreenReturn('/(tabs)/dashboard')
+                router.push(a.href as Href)
+                return
+              }
+              if (a.webPath) void openCreaWebPath(a.webPath)
+            }}
+          >
+            <Text style={[styles.actionIndex, a.disabled && styles.actionIndexMuted]}>
+              [{String(index + 1).padStart(2, '0')}]
+            </Text>
+            <View style={styles.actionCopy}>
+              <Text style={[styles.actionTitle, a.disabled && styles.actionTitleMuted]}>{a.label}</Text>
+              {a.hint ? <Text style={styles.actionRowHint}>{a.hint}</Text> : null}
+            </View>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {collapseToggle}
-      <View style={styles.divider} />
     </View>
   )
 }
@@ -472,6 +467,43 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 8 },
+  actionList: {
+    marginHorizontal: -16,
+    marginTop: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.16)',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 22,
+    paddingHorizontal: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.16)',
+  },
+  actionIndex: {
+    width: 40,
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.38)',
+    letterSpacing: 0.2,
+  },
+  actionIndexMuted: { color: 'rgba(255,255,255,0.22)' },
+  actionCopy: { flex: 1, minWidth: 0 },
+  actionTitle: {
+    fontSize: 30,
+    fontWeight: '700',
+    color: '#F4F0E6',
+    letterSpacing: -0.4,
+  },
+  actionTitleMuted: { color: 'rgba(244,240,230,0.32)' },
+  actionRowHint: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.32)',
+    marginTop: 2,
+    letterSpacing: 0.2,
+  },
   actionCard: {
     width: '47%',
     backgroundColor: '#111',

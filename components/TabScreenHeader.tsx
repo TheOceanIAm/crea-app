@@ -1,6 +1,7 @@
 import { ReactNode } from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import { useRouter } from 'expo-router'
+import { usePathname, useRouter, type Href } from 'expo-router'
+import { setScreenReturn } from '@/lib/screenReturn'
 import { MessageCircle } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
@@ -16,6 +17,7 @@ type Props = {
 
 export function TabScreenHeader({ title, left, showMessages = true }: Props) {
   const router = useRouter()
+  const pathname = usePathname()
   const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -34,7 +36,10 @@ export function TabScreenHeader({ title, left, showMessages = true }: Props) {
       </Text>
       {showMessages ? (
         <TouchableOpacity
-          onPress={() => router.push('/(tabs)/messages')}
+          onPress={() => {
+            setScreenReturn((pathname || '/(tabs)/dashboard') as Href)
+            router.push('/(tabs)/messages')
+          }}
           style={styles.iconBtn}
           accessibilityRole="button"
           accessibilityLabel="Messages"

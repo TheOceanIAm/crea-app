@@ -18,6 +18,7 @@ import * as Device from 'expo-device'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect } from '@react-navigation/native'
 import { router, type Href } from 'expo-router'
+import { setScreenReturn } from '@/lib/screenReturn'
 import type { LucideIcon } from 'lucide-react-native'
 import {
   Bell,
@@ -1453,7 +1454,10 @@ export default function ProfileScreen() {
           <View style={styles.headerRight}>
             <TouchableOpacity
               style={styles.headerShareBtn}
-              onPress={() => router.push('/(tabs)/messages')}
+              onPress={() => {
+                setScreenReturn('/(tabs)/profile')
+                router.push('/(tabs)/messages')
+              }}
               hitSlop={10}
               accessibilityLabel="Messages"
             >

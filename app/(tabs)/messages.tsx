@@ -14,6 +14,7 @@ import { Swipeable } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { useRouter } from 'expo-router'
+import { PreviousScreenButton } from '@/components/PreviousScreenButton'
 import { useFocusEffect } from '@react-navigation/native'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
@@ -72,6 +73,13 @@ function removeConversation(data: MessagesData, conversationId: string): Message
 export default function MessagesScreen() {
   const router = useRouter()
   const tabBarInset = useFloatingTabBarBottomInset()
+
+  const header = (
+    <>
+      <PreviousScreenButton always />
+      <Text style={styles.title}>Messages</Text>
+    </>
+  )
   const [showArchived, setShowArchived] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -349,7 +357,7 @@ export default function MessagesScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
-        <Text style={styles.title}>Messages</Text>
+        {header}
         <ScreenListSkeleton rows={6} />
       </SafeAreaView>
     )
@@ -358,7 +366,7 @@ export default function MessagesScreen() {
   if (!signedIn) {
     return (
       <SafeAreaView style={styles.safe}>
-        <Text style={styles.title}>Messages</Text>
+        {header}
         <View style={styles.center}>
           <Text style={styles.emptyText}>Sign in to see your messages.</Text>
           <TouchableOpacity style={styles.loginBtn} onPress={() => router.push('/login')} activeOpacity={0.85}>
@@ -371,7 +379,7 @@ export default function MessagesScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <Text style={styles.title}>Messages</Text>
+      {header}
       <View style={styles.topActions}>
         <TouchableOpacity
           style={styles.archivedToggle}
@@ -430,7 +438,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     letterSpacing: 1,
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 2,
     paddingBottom: 16,
   },
   topActions: {
