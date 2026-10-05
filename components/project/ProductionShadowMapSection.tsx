@@ -150,7 +150,7 @@ export function ProductionShadowMapSection({
       <View style={styles.fallback}>
         <Text style={styles.fallbackTitle}>Sun Planner</Text>
         <Text style={styles.fallbackText}>
-          The shadow map needs a current iOS build with WebView. Shot list, call sheet, crew and sun metrics still work.
+          The shadow map needs a current iOS build with WebView. Shot list, call sheet, and crew still work.
         </Text>
       </View>
     )

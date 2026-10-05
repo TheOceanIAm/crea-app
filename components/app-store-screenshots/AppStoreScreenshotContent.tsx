@@ -262,8 +262,7 @@ function ProjectOverviewScreen() {
 
 function ProductionScreen() {
   const items = [
-    ['Sun Planner', 'Sunrise, sunset, golden hour, and sun-angle preview for your shoot'],
-    ['Weather', '7-day forecast for your shoot location'],
+    ['Sun Planner', 'Map, sun path, and a 7-day forecast for your shoot location'],
     ['Shotlist', 'Scene-by-scene list for the calendar day you load'],
     ['Call Sheet', 'Crew calls, locations, PDF export, and daily wrap'],
     ['Tasks', 'Manual checklist for prep, shoot, and wrap'],
@@ -280,7 +279,7 @@ function ProductionScreen() {
       </View>
       <ProjectTabs active="Production" />
       <Text style={styles.hint}>
-        Choose a category to open weather, shotlist, call sheet, tasks, or equipment. Visible to the whole team.
+        Choose a category to open sun planner, shotlist, call sheet, tasks, or equipment. Visible to the whole team.
       </Text>
       {items.map(([title, sub]) => (
         <View key={title} style={styles.listCard}>

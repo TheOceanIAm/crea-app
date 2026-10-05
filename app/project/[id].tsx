@@ -141,7 +141,6 @@ export default function ProjectWorkspaceScreen() {
   const [sunPlannerEnabled, setSunPlannerEnabled] = useState(false)
   const [productionWeatherEnabled, setProductionWeatherEnabled] = useState(false)
   const [sunPlannerLockedHint, setSunPlannerLockedHint] = useState<string | null>(null)
-  const [productionWeatherLockedHint, setProductionWeatherLockedHint] = useState<string | null>(null)
   const [isPrivateWorkspace, setIsPrivateWorkspace] = useState(Boolean(bootShell?.isPrivateWorkspace))
   const [jobShareOpen, setJobShareOpen] = useState(false)
   const { shareStory, busy: storyBusy, holder: storyHolder } = useJobStoryShare()
@@ -247,7 +246,6 @@ export default function ProjectWorkspaceScreen() {
       setSunPlannerEnabled(false)
       setProductionWeatherEnabled(false)
       setSunPlannerLockedHint(null)
-      setProductionWeatherLockedHint(null)
       setLoading(false)
       return
     }
@@ -259,7 +257,6 @@ export default function ProjectWorkspaceScreen() {
       setSunPlannerEnabled(false)
       setProductionWeatherEnabled(false)
       setSunPlannerLockedHint(null)
-      setProductionWeatherLockedHint(null)
       setLoading(false)
       return
     }
@@ -421,7 +418,6 @@ export default function ProjectWorkspaceScreen() {
           let nextSun = false
           let nextWeather = false
           let nextSunHint: string | null = null
-          let nextWeatherHint: string | null = null
           if (role === 'company') {
             nextSun = companySunAccess
             nextWeather = companySunAccess
@@ -435,15 +431,10 @@ export default function ProjectWorkspaceScreen() {
                   ? 'Sun Planner is available on Pro. Upgrade to unlock production scheduling.'
                   : 'Sun Planner is not available on your current plan.'
             }
-            if (!nextWeather) {
-              nextWeatherHint =
-                'Weather in production tools is available on Pro. Upgrade to unlock full access.'
-            }
           }
           setSunPlannerEnabled(nextSun)
           setProductionWeatherEnabled(nextWeather)
           setSunPlannerLockedHint(nextSunHint)
-          setProductionWeatherLockedHint(nextWeatherHint)
         }
         setForbidden(false)
         setLoading(false)
@@ -468,7 +459,6 @@ export default function ProjectWorkspaceScreen() {
       setSunPlannerEnabled(false)
       setProductionWeatherEnabled(false)
       setSunPlannerLockedHint(null)
-      setProductionWeatherLockedHint(null)
       setLoading(false)
       return
     }
@@ -502,7 +492,6 @@ export default function ProjectWorkspaceScreen() {
     let nextSun = false
     let nextWeather = false
     let nextSunHint: string | null = null
-    let nextWeatherHint: string | null = null
     if (role === 'company') {
       nextSun = companySunAccess
       nextWeather = companySunAccess
@@ -520,15 +509,10 @@ export default function ProjectWorkspaceScreen() {
           nextSunHint = 'Sun Planner is not available on your current plan.'
         }
       }
-      if (!nextWeather) {
-        nextWeatherHint =
-          'Weather in production tools is available on Pro. Upgrade to unlock full access.'
-      }
     }
     setSunPlannerEnabled(nextSun)
     setProductionWeatherEnabled(nextWeather)
     setSunPlannerLockedHint(nextSunHint)
-    setProductionWeatherLockedHint(nextWeatherHint)
     setProject({ ...p, status: mergedStatus })
     const workspaceSummary =
       p.brief_ai_outputs && typeof p.brief_ai_outputs.workspace_summary === 'string'
@@ -1194,7 +1178,6 @@ export default function ProjectWorkspaceScreen() {
                       companyId={project.company_id}
                       canUseProductionWeather={productionWeatherEnabled}
                       canUseSunPlanner={sunPlannerEnabled}
-                      productionWeatherLockedHint={productionWeatherLockedHint}
                       sunPlannerLockedHint={sunPlannerLockedHint}
                       productionWindowStart={scheduleStart}
                       productionWindowEnd={scheduleEnd}
@@ -1211,7 +1194,7 @@ export default function ProjectWorkspaceScreen() {
                                 : tool === 'sun'
                                   ? 'sun'
                                   : tool === 'weather'
-                                    ? 'weather'
+                                    ? 'sun'
                                     : null
                       }
                       initialShootDay={shootDayParam || null}

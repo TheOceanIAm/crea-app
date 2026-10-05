@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, NativeModules, Platform, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native'
 import Slider from '@react-native-community/slider'
-import { geocodeLocation, suggestLocations, type GeocodeHit } from '@/lib/openMeteoWeather'
+import {
+  fetchForecast7Days,
+  geocodeLocation,
+  suggestLocations,
+  type DailyForecastDay,
+  type GeocodeHit,
+} from '@/lib/openMeteoWeather'
 import { canShowShadowMap, isShadowMapFeatureEnabled } from '@/lib/mapboxConfig'
 import { ProductionShadowMapSection } from '@/components/project/ProductionShadowMapSection'
 
@@ -81,18 +87,6 @@ function isoToHHmm(isoLike: string): string | null {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-function minutesOfDay(isoLike: string): number | null {
-  const d = new Date(isoLike)
-  if (Number.isNaN(d.getTime())) return null
-  return d.getHours() * 60 + d.getMinutes()
-}
-
-function compassFromBearing(bearing: number): string {
-  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
-  const idx = Math.round((((bearing % 360) + 360) % 360) / 45) % 8
-  return dirs[idx]
-}
-
 function solarPositionApprox(lat: number, lon: number, date: Date) {
   const rad = Math.PI / 180
   const dayMs = 1000 * 60 * 60 * 24
@@ -160,8 +154,9 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
   const [suggestions, setSuggestions] = useState<GeocodeHit[]>([])
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const [subjectHeightM, setSubjectHeightM] = useState('2.0')
-  const [plannerView, setPlannerView] = useState<'metrics' | 'shadow'>('metrics')
   const [subjectLatLon, setSubjectLatLon] = useState<{ lat: number; lon: number } | null>(null)
+  const [forecast, setForecast] = useState<DailyForecastDay[]>([])
+  const [forecastError, setForecastError] = useState<string | null>(null)
   const sliderNativeAvailable =
     Platform.OS === 'web' ||
     !!(NativeModules as Record<string, unknown>).RNCSlider ||
@@ -174,10 +169,6 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
   useEffect(() => {
     if (latLon) setSubjectLatLon(latLon)
     else setSubjectLatLon(null)
-  }, [latLon])
-
-  useEffect(() => {
-    if (!latLon) setPlannerView('metrics')
   }, [latLon])
 
   useEffect(() => {
@@ -228,15 +219,30 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
         setLabel(null)
         setLatLon(null)
         setSun(null)
+        setForecast([])
+        setForecastError(null)
         return
       }
-      const s = await fetchSunDaily(geo.lat, geo.lon, d)
+      const [s, forecastResult] = await Promise.all([
+        fetchSunDaily(geo.lat, geo.lon, d),
+        fetchForecast7Days(geo.lat, geo.lon).then(
+          (days) => ({ days, error: null as string | null }),
+          (err: unknown) => ({
+            days: [] as DailyForecastDay[],
+            error: err instanceof Error ? err.message : 'Could not load weather.',
+          })
+        ),
+      ])
       setLabel(geo.label)
       setLatLon({ lat: geo.lat, lon: geo.lon })
       setSun(s)
+      setForecast(forecastResult.days)
+      setForecastError(forecastResult.error)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load sun planner data.')
       setSun(null)
+      setForecast([])
+      setForecastError(null)
     } finally {
       setLoading(false)
     }
@@ -253,79 +259,11 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
     return {
       altitude: Math.round(pos.altitudeDeg * 10) / 10,
       azimuth: Math.round(pos.bearingDeg * 10) / 10,
-      dir: compassFromBearing(pos.bearingDeg),
     }
   }, [latLon, dateInput, timeInput])
 
   const daylightHours =
     sun?.daylightSeconds != null ? `${(sun.daylightSeconds / 3600).toFixed(1)} h` : '—'
-
-  const sunVisual = useMemo(() => {
-    if (!angleData) return null
-    const radius = 62
-    const r = (angleData.azimuth * Math.PI) / 180
-    const x = Math.sin(r) * radius
-    const y = -Math.cos(r) * radius
-    return {
-      dotLeft: radius + x,
-      dotTop: radius + y,
-      beamAngle: angleData.azimuth,
-      altitudeHint: angleData.altitude <= 0 ? 'Below horizon' : angleData.altitude < 15 ? 'Low sun angle' : 'High sun angle',
-    }
-  }, [angleData])
-
-  const dayTimeline = useMemo(() => {
-    if (!sun) return null
-    const sunriseMin = minutesOfDay(sun.sunrise)
-    const sunsetMin = minutesOfDay(sun.sunset)
-    const selected = parseTime(timeInput)
-    if (sunriseMin == null || sunsetMin == null || !selected) return null
-    const [hh, mm] = selected.split(':').map((v) => Number(v))
-    const selectedMin = hh * 60 + mm
-    if (sunsetMin <= sunriseMin) return null
-    const clamp = (v: number) => Math.max(0, Math.min(1, v))
-    const selectedRatio = clamp((selectedMin - sunriseMin) / (sunsetMin - sunriseMin))
-    const morningGoldenEnd = clamp(((sunriseMin + 60) - sunriseMin) / (sunsetMin - sunriseMin))
-    const eveningGoldenStart = clamp(((sunsetMin - 60) - sunriseMin) / (sunsetMin - sunriseMin))
-    return {
-      selectedRatio,
-      morningGoldenEnd,
-      eveningGoldenStart,
-      inDaylight: selectedMin >= sunriseMin && selectedMin <= sunsetMin,
-    }
-  }, [sun, timeInput])
-
-  const shadowPreview = useMemo(() => {
-    if (!angleData) return null
-    if (angleData.altitude <= 0) {
-      return {
-        visible: false,
-        lengthMeters: null as number | null,
-        left: 0,
-        top: 0,
-        rotation: 0,
-        lengthPx: 0,
-      }
-    }
-    const h = Number(subjectHeightM.replace(',', '.'))
-    const height = Number.isFinite(h) && h > 0 ? h : 2
-    const altitudeRad = (angleData.altitude * Math.PI) / 180
-    const lengthMeters = height / Math.tan(altitudeRad)
-    const shadowBearing = (angleData.azimuth + 180) % 360
-    const r = (shadowBearing * Math.PI) / 180
-    const center = 92
-    const lengthPx = Math.max(12, Math.min(96, lengthMeters * 4.2))
-    const tipX = center + Math.sin(r) * lengthPx
-    const tipY = center - Math.cos(r) * lengthPx
-    return {
-      visible: true,
-      lengthMeters,
-      left: tipX,
-      top: tipY,
-      rotation: shadowBearing,
-      lengthPx,
-    }
-  }, [angleData, subjectHeightM])
 
   const presetTimes = useMemo(() => {
     const sunrise = sun ? isoToHHmm(sun.sunrise) : null
@@ -350,12 +288,18 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
   }, [sun])
 
   const sliderMinutes = useMemo(() => hhmmToMinutes(timeInput) ?? 12 * 60, [timeInput])
+  const mapReady = isShadowMapFeatureEnabled() && !!latLon && !!subjectLatLon && !!angleData
+  const mapHasScrub = mapReady && canShowShadowMap()
+  const subjectHeight = (() => {
+    const h = Number(subjectHeightM.replace(',', '.'))
+    return Number.isFinite(h) && h > 0 ? h : 2
+  })()
 
   return (
     <View style={styles.wrap}>
       <Text style={styles.sectionHead}>SUN PLANNER</Text>
       <Text style={styles.sub}>
-        Plan natural light by location, day, and time. Sunrise/sunset from Open-Meteo, sun angles are approximate.
+        Plan natural light on the map. Sunrise, sunset, and a 7-day forecast come from Open-Meteo.
       </Text>
       <View style={styles.row}>
         <TextInput
@@ -408,7 +352,7 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
           onChangeText={setTimeInput}
         />
       </View>
-      {plannerView !== 'shadow' ? (
+      {!mapHasScrub ? (
         <>
           <View style={styles.timeStepRow}>
             <TouchableOpacity style={styles.timeStepBtn} onPress={() => setTimeInput((v) => shiftHHmm(v, -30))}>
@@ -503,169 +447,71 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
         </View>
       ) : null}
 
-      {angleData ? (
+      {mapReady && latLon && subjectLatLon && angleData ? (
         <View style={styles.card}>
-          <Text style={styles.angleHead}>Sun angle at selected time</Text>
-          <Text style={styles.angleLine}>Altitude: {angleData.altitude}°</Text>
-          <Text style={styles.angleLine}>
-            Azimuth: {angleData.azimuth}° ({angleData.dir})
-          </Text>
-          {isShadowMapFeatureEnabled() && latLon && subjectLatLon ? (
-            <View style={styles.viewToggleRow}>
-              <TouchableOpacity
-                style={[styles.viewToggleBtn, plannerView === 'metrics' && styles.viewToggleBtnOn]}
-                onPress={() => setPlannerView('metrics')}
-              >
-                <Text style={[styles.viewToggleText, plannerView === 'metrics' && styles.viewToggleTextOn]}>Metrics</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.viewToggleBtn, plannerView === 'shadow' && styles.viewToggleBtnOn]}
-                onPress={() => setPlannerView('shadow')}
-              >
-                <Text style={[styles.viewToggleText, plannerView === 'shadow' && styles.viewToggleTextOn]}>
-                  Sun Planner{canShowShadowMap() ? '' : ' (setup)'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {plannerView === 'shadow' && isShadowMapFeatureEnabled() && latLon && subjectLatLon ? (
-            <View style={styles.shadowMapBlock}>
-              <View style={styles.shadowInputRow}>
-                <Text style={styles.shadowInputLabel}>Subject height (m)</Text>
-                <TextInput
-                  style={styles.shadowInput}
-                  value={subjectHeightM}
-                  onChangeText={setSubjectHeightM}
-                  keyboardType="decimal-pad"
-                  placeholder="2.0"
-                  placeholderTextColor="rgba(255,255,255,0.35)"
-                />
-              </View>
-              <ProductionShadowMapSection
-                center={latLon}
-                subject={subjectLatLon}
-                onSubjectChange={(lat, lon) => setSubjectLatLon({ lat, lon })}
-                onResetSubject={() => {
-                  if (latLon) setSubjectLatLon(latLon)
-                }}
-                sunAzimuthDeg={angleData.azimuth}
-                sunAltitudeDeg={angleData.altitude}
-                subjectHeightM={(() => {
-                  const h = Number(subjectHeightM.replace(',', '.'))
-                  return Number.isFinite(h) && h > 0 ? h : 2
-                })()}
-                timeLabel={timeInput}
-                timeMinutes={sliderMinutes}
-                onTimeMinutesChange={(minutes) => setTimeInput(minutesToHHmm(minutes))}
-                onNudgeMinutes={(delta) => setTimeInput((v) => shiftHHmm(v, delta))}
-                onSetNow={() => setTimeInput(nowHHmm())}
-                sliderAvailable={sliderNativeAvailable}
-              />
-            </View>
-          ) : null}
-
-          {plannerView === 'metrics' || !isShadowMapFeatureEnabled() || !latLon || !subjectLatLon ? (
-            <>
-          {sunVisual ? (
-            <>
-              <View style={styles.visualWrap}>
-                <View style={styles.compass}>
-                  <Text style={[styles.compassMark, styles.markN]}>N</Text>
-                  <Text style={[styles.compassMark, styles.markE]}>E</Text>
-                  <Text style={[styles.compassMark, styles.markS]}>S</Text>
-                  <Text style={[styles.compassMark, styles.markW]}>W</Text>
-                  <View style={[styles.sunDot, { left: sunVisual.dotLeft, top: sunVisual.dotTop }]} />
-                  <View style={[styles.centerDot]} />
-                </View>
-                <View style={styles.beamWrap}>
-                  <View style={styles.beamGrid}>
-                    <View style={styles.beamGridCol} />
-                    <View style={styles.beamGridCol} />
-                    <View style={styles.beamGridCol} />
-                  </View>
-                  <View style={styles.beamGridRow} />
-                  <View style={[styles.beamArrow, { transform: [{ rotate: `${sunVisual.beamAngle}deg` }] }]} />
-                  <View style={[styles.beamLine, { transform: [{ rotate: `${sunVisual.beamAngle}deg` }] }]} />
-                  <Text style={styles.beamText}>{sunVisual.altitudeHint}</Text>
-                </View>
-              </View>
-            </>
-          ) : null}
-          {dayTimeline ? (
-            <View style={styles.timelineWrap}>
-              <Text style={styles.timelineTitle}>Daylight timeline</Text>
-              <View style={styles.timelineTrack}>
-                <View style={styles.timelineDaylight} />
-                <View style={[styles.timelineGolden, { left: 0, width: `${dayTimeline.morningGoldenEnd * 100}%` }]} />
-                <View
-                  style={[
-                    styles.timelineGolden,
-                    { left: `${dayTimeline.eveningGoldenStart * 100}%`, width: `${(1 - dayTimeline.eveningGoldenStart) * 100}%` },
-                  ]}
-                />
-                <View style={[styles.timelineNow, { left: `${dayTimeline.selectedRatio * 100}%` }]} />
-              </View>
-              <View style={styles.timelineLabels}>
-                <Text style={styles.timelineLabel}>{fmtClock(sun?.sunrise ?? '')}</Text>
-                <Text style={[styles.timelineLabel, !dayTimeline.inDaylight && styles.timelineLabelWarn]}>
-                  {dayTimeline.inDaylight ? 'In daylight' : 'Outside daylight'}
-                </Text>
-                <Text style={styles.timelineLabel}>{fmtClock(sun?.sunset ?? '')}</Text>
-              </View>
-            </View>
-          ) : null}
-          <View style={styles.shadowWrap}>
-            <Text style={styles.timelineTitle}>Sun Planner preview</Text>
-            <Text style={styles.shadowSub}>Approximation from sun angle + subject height (no 3D buildings yet).</Text>
-            <View style={styles.shadowInputRow}>
-              <Text style={styles.shadowInputLabel}>Subject height (m)</Text>
-              <TextInput
-                style={styles.shadowInput}
-                value={subjectHeightM}
-                onChangeText={setSubjectHeightM}
-                keyboardType="decimal-pad"
-                placeholder="2.0"
-                placeholderTextColor="rgba(255,255,255,0.35)"
-              />
-            </View>
-            <View style={styles.shadowMap}>
-              <View style={styles.shadowGrid}>
-                <View style={styles.shadowGridV} />
-                <View style={styles.shadowGridV} />
-                <View style={styles.shadowGridV} />
-              </View>
-              <View style={[styles.shadowGridH, { top: '25%' }]} />
-              <View style={[styles.shadowGridH, { top: '50%' }]} />
-              <View style={[styles.shadowGridH, { top: '75%' }]} />
-              <Text style={[styles.shadowMark, styles.shadowNorth]}>N</Text>
-              <Text style={[styles.shadowMark, styles.shadowEast]}>E</Text>
-              <Text style={[styles.shadowMark, styles.shadowSouth]}>S</Text>
-              <Text style={[styles.shadowMark, styles.shadowWest]}>W</Text>
-              <View style={styles.subjectDot} />
-              {shadowPreview?.visible ? (
-                <>
-                  <View
-                    style={[
-                      styles.shadowLine,
-                      {
-                        transform: [{ rotate: `${shadowPreview.rotation}deg` }],
-                        width: shadowPreview.lengthPx,
-                      },
-                    ]}
-                  />
-                  <View style={[styles.shadowTip, { left: shadowPreview.left, top: shadowPreview.top }]} />
-                </>
-              ) : null}
-            </View>
-            <Text style={styles.shadowMeta}>
-              {shadowPreview?.visible && shadowPreview.lengthMeters != null
-                ? `Estimated shadow length: ${shadowPreview.lengthMeters.toFixed(1)} m`
-                : 'Sun below horizon - no direct cast shadow'}
-            </Text>
+          <View style={styles.shadowInputRow}>
+            <Text style={styles.shadowInputLabel}>Subject height (m)</Text>
+            <TextInput
+              style={styles.shadowInput}
+              value={subjectHeightM}
+              onChangeText={setSubjectHeightM}
+              keyboardType="decimal-pad"
+              placeholder="2.0"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+            />
           </View>
-            </>
-          ) : null}
+          <ProductionShadowMapSection
+            center={latLon}
+            subject={subjectLatLon}
+            onSubjectChange={(lat, lon) => setSubjectLatLon({ lat, lon })}
+            onResetSubject={() => {
+              if (latLon) setSubjectLatLon(latLon)
+            }}
+            sunAzimuthDeg={angleData.azimuth}
+            sunAltitudeDeg={angleData.altitude}
+            subjectHeightM={subjectHeight}
+            timeLabel={timeInput}
+            timeMinutes={sliderMinutes}
+            onTimeMinutesChange={(minutes) => setTimeInput(minutesToHHmm(minutes))}
+            onNudgeMinutes={(delta) => setTimeInput((v) => shiftHHmm(v, delta))}
+            onSetNow={() => setTimeInput(nowHHmm())}
+            sliderAvailable={sliderNativeAvailable}
+          />
+        </View>
+      ) : null}
+
+      {forecastError ? <Text style={styles.err}>{forecastError}</Text> : null}
+      {forecast.length > 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.forecastHead}>Weather · 7 days</Text>
+          <View style={styles.forecastHeadRow}>
+            <Text style={[styles.forecastHint, styles.forecastColTag]}>Day</Text>
+            <Text style={[styles.forecastHint, styles.forecastColTemp]}>high / low</Text>
+            <Text style={[styles.forecastHint, styles.forecastColRain]}>rain</Text>
+          </View>
+          {forecast.map((day) => (
+            <View key={day.date} style={styles.forecastDayRow}>
+              <View style={styles.forecastDayLeft}>
+                <Text style={styles.forecastDate}>
+                  {new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', {
+                    weekday: 'short',
+                    day: 'numeric',
+                    month: 'short',
+                  })}
+                </Text>
+                <Text style={styles.forecastSummary} numberOfLines={2}>
+                  {day.summary}
+                </Text>
+              </View>
+              <Text style={[styles.forecastTemps, styles.forecastColTemp]}>
+                {day.tempMax}° / {day.tempMin}°
+              </Text>
+              <Text style={[styles.forecastRain, styles.forecastColRain]}>
+                {day.precipProbMax != null ? `${day.precipProbMax}%` : '—'}
+              </Text>
+            </View>
+          ))}
+          <Text style={styles.forecastAttr}>Data: Open-Meteo</Text>
         </View>
       ) : null}
     </View>
@@ -778,143 +624,6 @@ const styles = StyleSheet.create({
   },
   metricLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 12, flex: 1 },
   metricValue: { color: '#FFDC00', fontSize: 13, fontWeight: '700' },
-  angleHead: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 8 },
-  angleLine: { color: 'rgba(255,255,255,0.75)', fontSize: 13, marginBottom: 3 },
-  viewToggleRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  viewToggleBtn: {
-    flex: 1,
-    paddingVertical: 9,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    alignItems: 'center',
-    backgroundColor: '#151515',
-  },
-  viewToggleBtnOn: { borderColor: '#FFDC00', backgroundColor: 'rgba(255,220,0,0.12)' },
-  viewToggleText: { color: 'rgba(255,255,255,0.65)', fontSize: 12, fontWeight: '800' },
-  viewToggleTextOn: { color: '#FFDC00' },
-  shadowMapBlock: { marginTop: 8 },
-  visualWrap: { marginTop: 10, gap: 12 },
-  compass: {
-    width: 124,
-    height: 124,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-    alignSelf: 'center',
-    backgroundColor: 'rgba(255,255,255,0.02)',
-  },
-  compassMark: { position: 'absolute', color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: '800' },
-  markN: { top: 6, left: 58 },
-  markE: { top: 56, right: 8 },
-  markS: { bottom: 6, left: 58 },
-  markW: { top: 56, left: 8 },
-  sunDot: {
-    position: 'absolute',
-    width: 14,
-    height: 14,
-    borderRadius: 999,
-    marginLeft: -7,
-    marginTop: -7,
-    backgroundColor: '#FFDC00',
-  },
-  centerDot: {
-    position: 'absolute',
-    left: 58,
-    top: 58,
-    width: 8,
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.75)',
-  },
-  beamWrap: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(32,48,67,0.3)',
-    height: 72,
-    justifyContent: 'center',
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  beamGrid: {
-    ...StyleSheet.absoluteFillObject,
-    flexDirection: 'row',
-    justifyContent: 'space-evenly',
-  },
-  beamGridCol: {
-    width: 1,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-  },
-  beamGridRow: {
-    position: 'absolute',
-    top: '50%',
-    left: 0,
-    right: 0,
-    height: 1,
-    marginTop: -0.5,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  beamArrow: {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    width: 0,
-    height: 0,
-    marginLeft: -4,
-    marginTop: -28,
-    borderLeftWidth: 5,
-    borderRightWidth: 5,
-    borderBottomWidth: 12,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: '#FFDC00',
-  },
-  beamLine: {
-    position: 'absolute',
-    left: -50,
-    right: -50,
-    height: 2,
-    backgroundColor: 'rgba(255,220,0,0.7)',
-  },
-  beamText: { color: 'rgba(255,255,255,0.86)', fontSize: 12, textAlign: 'center', fontWeight: '700' },
-  timelineWrap: { marginTop: 12 },
-  timelineTitle: { color: '#fff', fontSize: 12, fontWeight: '800', marginBottom: 8 },
-  timelineTrack: {
-    height: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  timelineDaylight: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(55,138,221,0.26)',
-  },
-  timelineGolden: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(255,220,0,0.38)',
-  },
-  timelineNow: {
-    position: 'absolute',
-    top: -3,
-    width: 2,
-    height: 16,
-    marginLeft: -1,
-    backgroundColor: '#fff',
-  },
-  timelineLabels: { marginTop: 6, flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  timelineLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 11 },
-  timelineLabelWarn: { color: '#ff9f9f', fontWeight: '700' },
-  shadowWrap: { marginTop: 14 },
-  shadowSub: { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginBottom: 10 },
   shadowInputRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10 },
   shadowInputLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 12, fontWeight: '700' },
   shadowInput: {
@@ -929,60 +638,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'right',
   },
-  shadowMap: {
-    height: 184,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(31,48,68,0.38)',
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  shadowGrid: {
-    ...StyleSheet.absoluteFillObject,
+  forecastHead: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 10 },
+  forecastHeadRow: {
     flexDirection: 'row',
-    justifyContent: 'space-evenly',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 8,
   },
-  shadowGridV: { width: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
-  shadowGridH: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+  forecastHint: { fontSize: 10, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: 0.5 },
+  forecastColTag: { flex: 1 },
+  forecastColTemp: { width: 86, textAlign: 'right' },
+  forecastColRain: { width: 48, textAlign: 'right' },
+  forecastDayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
   },
-  shadowMark: { position: 'absolute', color: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: '800' },
-  shadowNorth: { top: 6, left: '50%', marginLeft: -4 },
-  shadowEast: { right: 8, top: '50%', marginTop: -6 },
-  shadowSouth: { bottom: 6, left: '50%', marginLeft: -4 },
-  shadowWest: { left: 8, top: '50%', marginTop: -6 },
-  subjectDot: {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    marginLeft: -5,
-    marginTop: -5,
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-    backgroundColor: '#FFDC00',
-  },
-  shadowLine: {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    marginTop: -1,
-    height: 2,
-    backgroundColor: 'rgba(20,20,20,0.9)',
-  },
-  shadowTip: {
-    position: 'absolute',
-    width: 8,
-    height: 8,
-    borderRadius: 999,
-    marginLeft: -4,
-    marginTop: -4,
-    backgroundColor: 'rgba(20,20,20,0.95)',
-  },
-  shadowMeta: { marginTop: 8, color: 'rgba(255,255,255,0.72)', fontSize: 12 },
+  forecastDayLeft: { flex: 1, minWidth: 0 },
+  forecastDate: { fontSize: 14, fontWeight: '700', color: 'rgba(255,255,255,0.92)' },
+  forecastSummary: { fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
+  forecastTemps: { fontSize: 13, fontWeight: '600', color: '#FFDC00' },
+  forecastRain: { fontSize: 12, color: 'rgba(255,255,255,0.55)' },
+  forecastAttr: { marginTop: 8, fontSize: 10, color: 'rgba(255,255,255,0.35)' },
 })

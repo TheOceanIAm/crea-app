@@ -31,7 +31,6 @@ import { KeyboardFormModal } from '@/components/KeyboardFormModal'
 import { supabase } from '@/lib/supabase'
 import { formatShootDayOptionLabel, listProductionWindowYmd } from '@/lib/projectProductionWindow'
 import { ICON_STROKE } from '@/lib/iconTheme'
-import { ProductionWeatherSection } from '@/components/project/ProductionWeatherSection'
 import { ProductionSunPlannerSection } from '@/components/project/ProductionSunPlannerSection'
 import { ProductionEquipmentSection, ProductionTasksSection } from '@/components/project/ProductionManualLists'
 import type { ProductionEquipmentItem, ProductionTask } from '@/lib/productionLists'
@@ -323,15 +322,13 @@ type Props = {
   companyId: string
   canUseProductionWeather?: boolean
   canUseSunPlanner?: boolean
-  /** When Weather (Production) is gated (e.g. Workspace trial ended). */
-  productionWeatherLockedHint?: string | null
   /** When Sun Planner is gated (e.g. trial ended); overrides default upgrade copy. */
   sunPlannerLockedHint?: string | null
   /** Inclusive production window from workspace Overview. */
   productionWindowStart?: string | null
   productionWindowEnd?: string | null
   jobId?: string | null
-  /** Deep-link / capture: open a production feature directly (hub when null). */
+  /** Deep-link / capture: open a production feature directly (hub when null). `weather` opens Sun Planner. */
   initialFeature?: 'sun' | 'weather' | 'shotlist' | 'call_sheet' | 'tasks' | 'equipment' | null
   /** Deep-link / capture: YYYY-MM-DD shoot day to load. */
   initialShootDay?: string | null
@@ -341,12 +338,7 @@ const PRODUCTION_SECTIONS = [
   {
     id: 'sun' as const,
     label: 'Sun Planner',
-    sub: 'Sunrise, sunset, golden hour, and sun-angle preview for your shoot',
-  },
-  {
-    id: 'weather' as const,
-    label: 'Weather',
-    sub: '7-day forecast for your shoot location (Open-Meteo)',
+    sub: 'Map, sun path, and a 7-day forecast for your shoot location',
   },
   {
     id: 'shotlist' as const,
@@ -372,6 +364,11 @@ const PRODUCTION_SECTIONS = [
 
 type ProductionSectionId = (typeof PRODUCTION_SECTIONS)[number]['id']
 
+function productionFeatureFromLink(feature: Props['initialFeature']): ProductionSectionId | null {
+  if (feature === 'weather') return 'sun'
+  return feature
+}
+
 export function ProductionTab({
   projectId,
   userId,
@@ -380,7 +377,6 @@ export function ProductionTab({
   companyId,
   canUseProductionWeather = false,
   canUseSunPlanner = false,
-  productionWeatherLockedHint,
   sunPlannerLockedHint,
   productionWindowStart,
   productionWindowEnd,
@@ -486,7 +482,7 @@ export function ProductionTab({
   const prevCallSheetOpenRef = useRef(false)
   const [exportingPdf, setExportingPdf] = useState(false)
   /** `null` = category hub; otherwise full-screen feature */
-  const [openFeature, setOpenFeature] = useState<ProductionSectionId | null>(initialFeature ?? null)
+  const [openFeature, setOpenFeature] = useState<ProductionSectionId | null>(productionFeatureFromLink(initialFeature))
   const [usingOfflinePack, setUsingOfflinePack] = useState(false)
   const [packDownloadedAt, setPackDownloadedAt] = useState<string | null>(null)
   const [pendingStatuses, setPendingStatuses] = useState(0)
@@ -495,7 +491,7 @@ export function ProductionTab({
 
   useEffect(() => {
     if (!initialFeature) return
-    setOpenFeature(initialFeature)
+    setOpenFeature(productionFeatureFromLink(initialFeature))
   }, [initialFeature])
 
   useEffect(() => {
@@ -1132,7 +1128,7 @@ export function ProductionTab({
     setExportingPdf(false)
   }
 
-  const showDataLoading = openFeature !== null && openFeature !== 'weather' && loading
+  const showDataLoading = openFeature !== null && openFeature !== 'sun' && loading
   const activeMeta = openFeature ? PRODUCTION_SECTIONS.find((s) => s.id === openFeature) : null
 
   if (openFeature === null) {
@@ -1149,7 +1145,7 @@ export function ProductionTab({
           <OfflinePackBanner downloadedAt={packDownloadedAt} pendingStatuses={pendingStatuses} />
         ) : null}
         <Text style={styles.hint}>
-          Choose a category to open weather, shotlist, call sheet, tasks, or equipment. Visible to the whole team.
+          Choose a category to open sun planner, shotlist, call sheet, tasks, or equipment. Visible to the whole team.
         </Text>
         {PRODUCTION_SECTIONS.map((s) => (
           <TouchableOpacity
@@ -1269,20 +1265,6 @@ export function ProductionTab({
             </Pressable>
           </Modal>
         </View>
-      ) : null}
-      {openFeature === 'weather' ? (
-        canUseProductionWeather ? (
-          <ProductionWeatherSection initialLocation={projectLocation} />
-        ) : (
-          <View style={styles.aiDocCard}>
-            <Text style={styles.aiDocTitle}>Weather</Text>
-            <Text style={styles.muted}>
-              {productionWeatherLockedHint?.trim()
-                ? productionWeatherLockedHint.trim()
-                : 'Weather requires an upgraded plan on Workspace after the 14-day trial. Upgrade to Pro or Premium for full access.'}
-            </Text>
-          </View>
-        )
       ) : null}
       {openFeature === 'sun' ? (
         canUseSunPlanner ? (

@@ -24,7 +24,7 @@ import {
   projectStatusDisplayLabel,
   projectStatusVariant,
 } from '@/lib/projectStatusDisplay'
-import { ProductionWeatherSection } from '@/components/project/ProductionWeatherSection'
+import { ProductionSunPlannerSection } from '@/components/project/ProductionSunPlannerSection'
 import { ProjectOverviewAbout } from '@/components/project/ProjectOverviewAbout'
 import { formatProjectBudgetLine } from '@/lib/budgetFormatting'
 
@@ -73,7 +73,7 @@ export function DevDemoProjectWorkspace() {
   ])
   const briefText = 'Key visual: warm, high contrast. Deliver 16:9 master.'
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('')
-  const [prodFeature, setProdFeature] = useState<null | 'weather' | 'shotlist' | 'call' | 'tasks' | 'equipment'>(null)
+  const [prodFeature, setProdFeature] = useState<null | 'sun' | 'shotlist' | 'call' | 'tasks' | 'equipment'>(null)
   const [demoTasks, setDemoTasks] = useState([
     { id: 't1', title: 'Confirm location access', notes: '', done: false },
   ])
@@ -314,12 +314,12 @@ export function DevDemoProjectWorkspace() {
                       </Text>
                       <TouchableOpacity
                         style={styles.prodCategoryCard}
-                        onPress={() => setProdFeature('weather')}
+                        onPress={() => setProdFeature('sun')}
                         activeOpacity={0.88}
                       >
                         <View style={styles.prodCategoryText}>
-                          <Text style={styles.prodCategoryTitle}>Weather</Text>
-                          <Text style={styles.prodCategorySub}>7-day forecast for the shoot location</Text>
+                          <Text style={styles.prodCategoryTitle}>Sun Planner</Text>
+                          <Text style={styles.prodCategorySub}>Map, sun path, and a 7-day forecast</Text>
                         </View>
                         <ChevronRight size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
                       </TouchableOpacity>
@@ -376,8 +376,8 @@ export function DevDemoProjectWorkspace() {
                           <Text style={styles.prodBackText}>Categories</Text>
                         </TouchableOpacity>
                         <Text style={styles.prodDetailTitle} numberOfLines={1}>
-                          {prodFeature === 'weather'
-                            ? 'Weather'
+                          {prodFeature === 'sun'
+                            ? 'Sun Planner'
                             : prodFeature === 'shotlist'
                               ? 'Shotlist'
                               : prodFeature === 'call'
@@ -388,7 +388,7 @@ export function DevDemoProjectWorkspace() {
                         </Text>
                       </View>
                       <ScrollView style={styles.scroll} contentContainerStyle={styles.pad} showsVerticalScrollIndicator={false}>
-                        {prodFeature === 'weather' ? <ProductionWeatherSection initialLocation="Berlin" /> : null}
+                        {prodFeature === 'sun' ? <ProductionSunPlannerSection initialLocation="Berlin" /> : null}
                         {prodFeature === 'shotlist' ? (
                           <>
                             <Text style={[styles.sectionHead, styles.sectionSp]}>SHOT LIST (demo)</Text>
