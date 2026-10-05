@@ -50,6 +50,7 @@ import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { readCachedDashboardOverview } from '@/lib/dashboardOverview'
 import { ScreenListSkeleton } from '@/components/ScreenSkeletons'
 import { JobListingCard } from '@/components/JobListingCard'
+import { rememberJobPostingLogo } from '@/lib/loadJobStoryInput'
 
 type Job = JobFeedRow
 type ExternalJob = ExternalJobRow
@@ -466,6 +467,7 @@ export default function JobsListScreen() {
         renderItem={({ item }) => {
           const openCreaJob = () => {
             if (!isCreaJobItem(item)) return
+            rememberJobPostingLogo(item.id, item.company_logo_url)
             router.push(`/(tabs)/jobs/${item.id}`)
           }
           if (isCreaJobItem(item) && !showExternalFeed) {

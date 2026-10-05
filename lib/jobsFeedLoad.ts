@@ -181,17 +181,34 @@ export async function loadJobsFeed(
   if (ids.length > 0) {
     const [{ data: profiles }, { data: cps }] = await Promise.all([
       supabase.from('profiles').select('id, name, avatar_url').in('id', ids),
-      supabase.from('company_profiles').select('id, logo_url').in('id', ids),
+      supabase.from('company_profiles').select('id, company_name, logo_url').in('id', ids),
     ])
     const logoById = Object.fromEntries(
-      (cps ?? []).map((c) => [c.id, typeof c.logo_url === 'string' ? c.logo_url.trim() : ''])
+      (cps ?? []).map((c) => [
+        c.id,
+        {
+          name: typeof c.company_name === 'string' ? c.company_name.trim() : '',
+          logo: typeof c.logo_url === 'string' ? c.logo_url.trim() : '',
+        },
+      ])
     )
+    const seen = new Set<string>()
     for (const p of profiles ?? []) {
-      const logo = logoById[p.id]
-      const url = (logo && /^https?:\/\//i.test(logo) ? logo : p.avatar_url?.trim()) || null
+      seen.add(p.id)
+      const brand = logoById[p.id]
+      const logo = brand?.logo && /^https?:\/\//i.test(brand.logo) ? brand.logo : p.avatar_url?.trim()
+      const name = (brand?.name || p.name || 'Company').trim() || 'Company'
       companyById[p.id] = {
-        name: (p.name || 'Company').trim() || 'Company',
-        avatar_url: url && /^https?:\/\//i.test(url) ? url : null,
+        name,
+        avatar_url: logo && /^https?:\/\//i.test(logo) ? logo : null,
+      }
+    }
+    for (const [id, brand] of Object.entries(logoById)) {
+      if (seen.has(id)) continue
+      const logo = brand.logo && /^https?:\/\//i.test(brand.logo) ? brand.logo : null
+      companyById[id] = {
+        name: brand.name || 'Company',
+        avatar_url: logo,
       }
     }
   }

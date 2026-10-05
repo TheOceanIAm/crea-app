@@ -37,6 +37,7 @@ import { applyToJobViaWebApi, fetchJobApplicationStatus, type JobApplicationStat
 import { parseJobCategoryRoles } from '@/lib/jobCategoryRoles'
 import { resolveAppliedRoleForSubmit } from '@/lib/jobApplicationRole'
 import { prefetchProjectShell } from '@/lib/projectShellCache'
+import { storyLogoUrl } from '@/lib/loadJobStoryInput'
 
 type BookingDeepState =
   | { kind: 'none' }
@@ -589,19 +590,22 @@ export default function JobDetailScreen() {
 
   const openStoryImage = () => {
     if (!id || storyBusy) return
-    void shareStory({
-      jobId: id,
-      jobTitle: job.title,
-      company: companyName,
-      companyLogoUrl,
-      budget: formatBudgetDisplay({
-        budget_type: job.budget_type,
-        budget_amount: job.budget_amount,
-        budget_currency: job.budget_currency,
-      }),
-      location: job.location?.trim() || job.location_type?.trim() || '—',
-      description: job.description?.trim() || '—',
-    })
+    void (async () => {
+      const logo = await storyLogoUrl(id, companyLogoUrl)
+      await shareStory({
+        jobId: id,
+        jobTitle: job.title,
+        company: companyName,
+        companyLogoUrl: logo,
+        budget: formatBudgetDisplay({
+          budget_type: job.budget_type,
+          budget_amount: job.budget_amount,
+          budget_currency: job.budget_currency,
+        }),
+        location: job.location?.trim() || job.location_type?.trim() || '—',
+        description: job.description?.trim() || '—',
+      })
+    })()
   }
 
   return (
