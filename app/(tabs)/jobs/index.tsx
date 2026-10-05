@@ -19,6 +19,10 @@ import { useFocusEffect, useRouter } from 'expo-router'
 import { PreviousScreenButton } from '@/components/PreviousScreenButton'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { PlusCircle } from 'lucide-react-native'
+import { ShareSheetModal } from '@/components/ShareSheetModal'
+import { useJobStoryShare } from '@/components/JobStoryExporter'
+import { jobShareUrl } from '@/lib/shareLinks'
+import { fetchCreaApi } from '@/lib/creaApiFetch'
 import * as Linking from 'expo-linking'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
@@ -73,6 +77,17 @@ function externalJobRateLabel(rate: string | null | undefined): string {
   return normalizeRateLabel(rate ?? null) || 'Rate TBD'
 }
 
+async function externalCompanyLogo(company: string): Promise<string | null> {
+  const name = company.trim()
+  if (name.length < 2 || /^external company$/i.test(name)) return null
+  const { data } = await fetchCreaApi<{ logoUrl?: string | null }>(
+    `/api/company-logo?name=${encodeURIComponent(name)}`,
+    { timeoutMs: 4000 }
+  )
+  const logo = data?.logoUrl?.trim()
+  return logo || null
+}
+
 function isCreaJobItem(item: Job | ExternalJob): item is Job {
   return 'company_name' in item
 }
@@ -107,6 +122,8 @@ export default function JobsListScreen() {
   const jobsCountRef = useRef(bootJobs.jobs.length + bootJobs.externalJobs.length)
   jobsCountRef.current = jobs.length + externalJobs.length
   const [activeExternalJob, setActiveExternalJob] = useState<ExternalJob | null>(null)
+  const [externalShareOpen, setExternalShareOpen] = useState(false)
+  const { shareStory, busy: storyBusy, holder: storyHolder } = useJobStoryShare()
 
   /** CEO-only: manual external listing (parity with CREA web). */
   const [addExternalOpen, setAddExternalOpen] = useState(false)
@@ -257,6 +274,23 @@ export default function JobsListScreen() {
 
   const showInitialSkeleton =
     loading && (showExternalFeed ? externalJobs.length === 0 : jobs.length === 0)
+
+  const openExternalStory = (job: ExternalJob) => {
+    if (storyBusy) return
+    void (async () => {
+      const company = job.company.trim() || 'External company'
+      const companyLogoUrl = await externalCompanyLogo(company)
+      await shareStory({
+        jobId: job.id,
+        jobTitle: job.title,
+        company,
+        companyLogoUrl,
+        budget: normalizeRateLabel(job.rate) || '—',
+        location: job.location?.trim() || '—',
+        description: job.intel_brief?.trim() || '—',
+      })
+    })()
+  }
 
   async function submitCeoExternalListing() {
     const t = ceoTitle.trim()
@@ -452,6 +486,16 @@ export default function JobsListScreen() {
                   >
                     <Text style={styles.externalActionBtnText}>View contact</Text>
                   </TouchableOpacity>
+                  {isCeoUser ? (
+                    <TouchableOpacity
+                      style={styles.externalGhostBtn}
+                      activeOpacity={0.85}
+                      disabled={storyBusy}
+                      onPress={() => openExternalStory(item)}
+                    >
+                      <Text style={styles.externalGhostBtnText}>{storyBusy ? 'Story…' : 'Story image'}</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   {item.source_url ? (
                     <TouchableOpacity
                       style={styles.externalGhostBtn}
@@ -504,7 +548,10 @@ export default function JobsListScreen() {
         }
       />
 
-      <Modal visible={!!activeExternalJob} transparent animationType="fade" onRequestClose={() => setActiveExternalJob(null)}>
+      <Modal visible={!!activeExternalJob} transparent animationType="fade" onRequestClose={() => {
+        setExternalShareOpen(false)
+        setActiveExternalJob(null)
+      }}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <ScrollView
@@ -615,7 +662,33 @@ export default function JobsListScreen() {
               </View>
             </ScrollView>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalGhost} onPress={() => setActiveExternalJob(null)} activeOpacity={0.85}>
+              {isCeoUser && activeExternalJob ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.modalGhost}
+                    onPress={() => openExternalStory(activeExternalJob)}
+                    disabled={storyBusy}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.modalGhostText}>{storyBusy ? 'Story…' : 'Story image'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.modalGhost}
+                    onPress={() => setExternalShareOpen(true)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.modalGhostText}>Share link</Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
+              <TouchableOpacity
+                style={styles.modalGhost}
+                onPress={() => {
+                  setExternalShareOpen(false)
+                  setActiveExternalJob(null)
+                }}
+                activeOpacity={0.85}
+              >
                 <Text style={styles.modalGhostText}>Close</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -792,6 +865,18 @@ export default function JobsListScreen() {
           </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
+      {activeExternalJob ? (
+        <ShareSheetModal
+          visible={externalShareOpen}
+          onClose={() => setExternalShareOpen(false)}
+          sheetTitle="Share listing"
+          shareMessage={`${activeExternalJob.title}${activeExternalJob.company ? ` — ${activeExternalJob.company}` : ''}`}
+          shareUrl={jobShareUrl(activeExternalJob.id)}
+          mailSubject={`Crea job: ${activeExternalJob.title}`}
+          storyImage={{ busy: storyBusy, onPress: () => openExternalStory(activeExternalJob) }}
+        />
+      ) : null}
+      {storyHolder}
     </SafeAreaView>
   )
 }
@@ -970,6 +1055,7 @@ const styles = StyleSheet.create({
   emptyText: { color: 'rgba(255,255,255,0.3)', fontSize: 15 },
   externalActions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginTop: 12,
   },
@@ -1141,6 +1227,7 @@ const styles = StyleSheet.create({
   },
   modalActions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'flex-end',
     gap: 8,
     marginTop: 12,
