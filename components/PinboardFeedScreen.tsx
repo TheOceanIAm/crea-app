@@ -13,7 +13,6 @@ import {
   Platform,
   ScrollView,
   Keyboard,
-  useWindowDimensions,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -88,8 +87,7 @@ function readInitialFeedPages(userId: string): InfiniteData<PinboardPost[]> | un
 export function PinboardFeedScreen() {
   const router = useRouter()
   const tabBarInset = useFloatingTabBarBottomInset()
-  const { height: windowHeight } = useWindowDimensions()
-  const [keyboardHeight, setKeyboardHeight] = useState(0)
+  const composerScrollRef = useRef<ScrollView>(null)
   const { overview, refresh: refreshOverview } = useDashboardOverview()
   const userId = overview?.userId ?? null
   const role = overview?.role ?? null
@@ -106,45 +104,31 @@ export function PinboardFeedScreen() {
   const [attachLoading, setAttachLoading] = useState(false)
   const [attachPickerOpen, setAttachPickerOpen] = useState(false)
   const [externalSearch, setExternalSearch] = useState('')
+  const [noteFocused, setNoteFocused] = useState(false)
+  const [keyboardHeight, setKeyboardHeight] = useState(0)
   const lastSuggestionRef = useRef('')
 
-  useEffect(() => {
-    const applyFrame = (event: { endCoordinates: { height: number; screenY: number } }) => {
-      const { height, screenY } = event.endCoordinates
-      if (screenY >= windowHeight - 1) {
-        setKeyboardHeight(0)
-        return
-      }
-      if (screenY > 0) {
-        setKeyboardHeight(Math.max(0, windowHeight - screenY))
-        return
-      }
-      setKeyboardHeight(height > 0 && height < windowHeight * 0.75 ? height : 0)
-    }
-    const hide = () => setKeyboardHeight(0)
-    const subs = [
-      Keyboard.addListener('keyboardDidShow', applyFrame),
-      Keyboard.addListener('keyboardDidHide', hide),
-    ]
-    if (Platform.OS === 'ios') {
-      subs.push(
-        Keyboard.addListener('keyboardWillChangeFrame', applyFrame),
-        Keyboard.addListener('keyboardWillShow', applyFrame),
-        Keyboard.addListener('keyboardWillHide', hide),
-      )
-    }
-    return () => {
-      subs.forEach((sub) => sub.remove())
-    }
-  }, [windowHeight])
+  const revealNoteField = useCallback(() => {
+    const jump = () => composerScrollRef.current?.scrollToEnd({ animated: true })
+    jump()
+    setTimeout(jump, 60)
+    setTimeout(jump, 280)
+  }, [])
 
-  const keyboardOpen = keyboardHeight > 0
-  const sheetBottom = keyboardOpen ? keyboardHeight : tabBarInset
-  const composerMaxHeight = Math.max(280, windowHeight - sheetBottom - 8)
-  const jobListMaxHeight = keyboardOpen
-    ? Math.max(64, Math.min(110, composerMaxHeight - 360))
-    : Math.min(220, Math.max(96, composerMaxHeight - 420))
-  const attachScrollMaxHeight = Math.max(96, composerMaxHeight - (keyboardOpen ? 250 : 310))
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      const height = event.endCoordinates?.height ?? 0
+      if (height > 0) setKeyboardHeight(height)
+      revealNoteField()
+    })
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0))
+    return () => {
+      showSub.remove()
+      hideSub.remove()
+    }
+  }, [revealNoteField])
 
   const feedQuery = useInfiniteQuery({
     queryKey: feedKey(userId),
@@ -701,8 +685,9 @@ export function PinboardFeedScreen() {
           <View
             style={[
               styles.modalSheet,
-              styles.modalSheetLifted,
-              { bottom: sheetBottom, maxHeight: composerMaxHeight },
+              keyboardHeight > 0
+                ? { marginBottom: keyboardHeight, paddingBottom: 12 }
+                : { paddingBottom: tabBarInset, maxHeight: '88%' },
             ]}
           >
             <View style={styles.modalHeader}>
@@ -716,10 +701,13 @@ export function PinboardFeedScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView
+              ref={composerScrollRef}
               keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               showsVerticalScrollIndicator={false}
               bounces={false}
-              style={{ maxHeight: attachScrollMaxHeight }}
+              contentContainerStyle={styles.composerScrollContent}
             >
             <Text style={styles.attachFieldLabel}>
               {allowUnlinked
@@ -745,7 +733,7 @@ export function PinboardFeedScreen() {
                   autoCapitalize="none"
                 />
                 <ScrollView
-                  style={[styles.jobAttachScroll, { maxHeight: jobListMaxHeight }]}
+                  style={[styles.jobAttachScroll, noteFocused && styles.jobAttachScrollFocused]}
                   keyboardShouldPersistTaps="handled"
                 >
                   {filteredAttachOptions.map((opt) => {
@@ -884,7 +872,6 @@ export function PinboardFeedScreen() {
                 ) : null}
               </View>
             )}
-            </ScrollView>
             <Text style={[styles.attachFieldLabel, { marginTop: 14 }]}>
               Short note
             </Text>
@@ -899,8 +886,13 @@ export function PinboardFeedScreen() {
               placeholderTextColor="rgba(255,255,255,0.28)"
               multiline
               maxLength={6000}
-              style={[styles.modalInput, keyboardOpen && styles.modalInputKeyboard]}
+              style={[styles.modalInput, noteFocused && styles.modalInputKeyboard]}
               editable={!composeSubmitting}
+              onFocus={() => {
+                setNoteFocused(true)
+                revealNoteField()
+              }}
+              onBlur={() => setNoteFocused(false)}
             />
             <View style={styles.modalFooter}>
               <Text style={styles.charCount}>{composeBody.trim().length}/6000</Text>
@@ -915,6 +907,7 @@ export function PinboardFeedScreen() {
               </TouchableOpacity>
             </View>
             {composeError ? <Text style={styles.composeError}>{composeError}</Text> : null}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1100,13 +1093,9 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
     padding: 16,
     paddingBottom: 12,
-    maxHeight: '88%',
   },
-  modalSheetLifted: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    overflow: 'hidden',
+  composerScrollContent: {
+    paddingBottom: 8,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1152,7 +1141,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0a0a',
     overflow: 'hidden',
   },
-  jobAttachScroll: { maxHeight: 240 },
+  jobAttachScroll: { maxHeight: 180 },
+  jobAttachScrollFocused: { maxHeight: 72 },
   jobAttachItem: {
     paddingHorizontal: 14,
     paddingVertical: 12,
