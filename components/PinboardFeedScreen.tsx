@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   TextInput,
   Alert,
   Platform,
+  ScrollView,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -44,10 +45,12 @@ import {
   hydratePinboardFeedFromDisk,
   loadPinboardAttachOptions,
   loadPinboardFeedPage,
+  loadPublishedExternalJobsForPinboard,
   parsePinboardAttachKey,
   pinboardPostHasLink,
   pinboardPostLinkKindLabel,
   pinboardPostLinkLabel,
+  suggestedExternalJobUpdateNote,
   PINBOARD_NO_ATTACH,
   PINBOARD_PAGE_SIZE,
   PINBOARD_UPDATES_COPY,
@@ -98,6 +101,8 @@ export function PinboardFeedScreen() {
   const [attachOptions, setAttachOptions] = useState<PinboardAttachOption[]>([])
   const [attachLoading, setAttachLoading] = useState(false)
   const [attachPickerOpen, setAttachPickerOpen] = useState(false)
+  const [externalSearch, setExternalSearch] = useState('')
+  const lastSuggestionRef = useRef('')
 
   const feedQuery = useInfiniteQuery({
     queryKey: feedKey(userId),
@@ -218,7 +223,9 @@ export function PinboardFeedScreen() {
     let cancelled = false
     void (async () => {
       setAttachLoading(true)
-      const options = await loadPinboardAttachOptions(userId)
+      const options = allowUnlinked
+        ? await loadPublishedExternalJobsForPinboard()
+        : await loadPinboardAttachOptions(userId)
       if (!cancelled) {
         setAttachOptions(options)
         setAttachLoading(false)
@@ -227,16 +234,20 @@ export function PinboardFeedScreen() {
     return () => {
       cancelled = true
     }
-  }, [userId, canCompose])
+  }, [userId, canCompose, allowUnlinked])
 
   const openComposer = useCallback(async () => {
     if (!userId || !canCompose) return
     setComposeError(null)
     setComposeBody('')
+    lastSuggestionRef.current = ''
+    setExternalSearch('')
     setAttachPickerOpen(false)
     setComposerOpen(true)
     setAttachLoading(true)
-    const options = await loadPinboardAttachOptions(userId)
+    const options = allowUnlinked
+      ? await loadPublishedExternalJobsForPinboard()
+      : await loadPinboardAttachOptions(userId)
     setAttachOptions(options)
     setComposeAttachKey(
       allowUnlinked ? PINBOARD_NO_ATTACH : (options[0]?.key ?? PINBOARD_NO_ATTACH)
@@ -249,14 +260,18 @@ export function PinboardFeedScreen() {
       body: string
       jobId: string | null
       projectId: string | null
+      externalJobId: string | null
       jobTitle: string | null
       projectTitle: string | null
+      externalJobTitle: string | null
+      externalJobCompany: string | null
     }) => {
       const result = await createPinboardPost({
         userId: userId as string,
         body: vars.body,
         jobId: vars.jobId,
         projectId: vars.projectId,
+        externalJobId: vars.externalJobId,
         allowUnlinked,
       })
       if (!result.ok) throw new Error(result.error)
@@ -270,6 +285,9 @@ export function PinboardFeedScreen() {
         created_at: new Date().toISOString(),
         job_id: vars.jobId,
         project_id: vars.projectId,
+        external_job_id: vars.externalJobId,
+        external_job_title: vars.externalJobTitle,
+        external_job_company: vars.externalJobCompany,
         job_title: vars.jobTitle,
         job_company_id: null,
         job_company_name: displayName,
@@ -296,6 +314,7 @@ export function PinboardFeedScreen() {
       // Close the composer immediately — the post is already visible in the feed.
       setComposerOpen(false)
       setComposeBody('')
+      lastSuggestionRef.current = ''
       return { prev, body: vars.body }
     },
     onError: (err, _vars, ctx) => {
@@ -318,10 +337,12 @@ export function PinboardFeedScreen() {
     const parsed = parsePinboardAttachKey(composeAttachKey)
     const jobId = parsed?.kind === 'job' ? parsed.id : null
     const projectId = parsed?.kind === 'project' ? parsed.id : null
+    const externalJobId = parsed?.kind === 'external' ? parsed.id : null
     const validation = validatePinboardUpdateInput({
       body: composeBody,
       jobId,
       projectId,
+      externalJobId,
       allowUnlinked,
     })
     if (!validation.ok) {
@@ -333,8 +354,11 @@ export function PinboardFeedScreen() {
       body: composeBody,
       jobId,
       projectId,
+      externalJobId,
       jobTitle: opt?.kind === 'job' ? opt.title : null,
       projectTitle: opt?.kind === 'project' ? opt.title : null,
+      externalJobTitle: opt?.kind === 'external' ? opt.title : null,
+      externalJobCompany: opt?.kind === 'external' ? opt.company ?? null : null,
     })
   }, [allowUnlinked, attachOptions, composeAttachKey, composeBody, createMutation, userId])
 
@@ -380,6 +404,13 @@ export function PinboardFeedScreen() {
 
   const openPostLink = useCallback(
     (p: PinboardPost) => {
+      if (p.external_job_id && p.external_job_title) {
+        router.push({
+          pathname: '/(tabs)/jobs',
+          params: { externalJobId: p.external_job_id },
+        } as Href)
+        return
+      }
       if (p.project_id) {
         router.push(`/project/${p.project_id}` as Href)
         return
@@ -470,6 +501,15 @@ export function PinboardFeedScreen() {
   )
 
   const hasAttachOptions = attachOptions.length > 0
+  const filteredAttachOptions = useMemo(() => {
+    if (!allowUnlinked) return attachOptions
+    const q = externalSearch.trim().toLowerCase()
+    if (!q) return attachOptions
+    return attachOptions.filter((opt) => {
+      const haystack = `${opt.title} ${opt.company ?? ''} ${opt.meta ?? ''}`.toLowerCase()
+      return haystack.includes(q)
+    })
+  }, [allowUnlinked, attachOptions, externalSearch])
   const canSubmit =
     (allowUnlinked || composeAttachKey !== PINBOARD_NO_ATTACH) &&
     composeBody.trim().length > 0 &&
@@ -600,7 +640,9 @@ export function PinboardFeedScreen() {
           ) : loadError ? (
             <Text style={styles.emptyError}>{loadError}</Text>
           ) : (
-            <Text style={styles.emptyText}>{PINBOARD_UPDATES_COPY.emptyFeed}</Text>
+            <Text style={styles.emptyText}>
+              {allowUnlinked ? PINBOARD_UPDATES_COPY.emptyFeedCeo : PINBOARD_UPDATES_COPY.emptyFeed}
+            </Text>
           )
         }
         ListFooterComponent={
@@ -630,6 +672,9 @@ export function PinboardFeedScreen() {
                 ? PINBOARD_UPDATES_COPY.attachOptionalLabel
                 : PINBOARD_UPDATES_COPY.attachLabel}
             </Text>
+            {allowUnlinked ? (
+              <Text style={styles.attachHint}>{PINBOARD_UPDATES_COPY.attachExternalHint}</Text>
+            ) : null}
             {attachLoading ? (
               <View style={{ marginVertical: 8, alignItems: 'flex-start' }}>
                 <CreaInlineLoader size="sm" />
@@ -658,6 +703,18 @@ export function PinboardFeedScreen() {
                 {attachPickerOpen ? (
                   <View style={styles.jobAttachList}>
                     {allowUnlinked ? (
+                      <TextInput
+                        value={externalSearch}
+                        onChangeText={setExternalSearch}
+                        placeholder={PINBOARD_UPDATES_COPY.externalSearchPlaceholder}
+                        placeholderTextColor="rgba(255,255,255,0.28)"
+                        style={styles.externalSearch}
+                        autoCorrect={false}
+                        autoCapitalize="none"
+                      />
+                    ) : null}
+                    <ScrollView style={styles.jobAttachScroll} keyboardShouldPersistTaps="handled">
+                    {!externalSearch.trim() && allowUnlinked ? (
                       <TouchableOpacity
                         style={styles.jobAttachItem}
                         onPress={() => {
@@ -668,20 +725,45 @@ export function PinboardFeedScreen() {
                         <Text style={styles.jobAttachItemText}>{PINBOARD_UPDATES_COPY.noLinkOption}</Text>
                       </TouchableOpacity>
                     ) : null}
-                    {attachOptions.map((opt) => (
+                    {allowUnlinked && attachOptions.length === 0 ? (
+                      <Text style={styles.attachEmpty}>{PINBOARD_UPDATES_COPY.noExternalJobs}</Text>
+                    ) : allowUnlinked && filteredAttachOptions.length === 0 ? (
+                      <Text style={styles.attachEmpty}>{PINBOARD_UPDATES_COPY.noExternalMatches}</Text>
+                    ) : (
+                    filteredAttachOptions.map((opt) => (
                       <TouchableOpacity
                         key={opt.key}
                         style={styles.jobAttachItem}
                         onPress={() => {
                           setComposeAttachKey(opt.key)
                           setAttachPickerOpen(false)
+                          if (opt.kind === 'external') {
+                            const suggestion = suggestedExternalJobUpdateNote({
+                              title: opt.title,
+                              company: opt.company,
+                            })
+                            setComposeBody((current) => {
+                              if (!current.trim() || current === lastSuggestionRef.current) {
+                                lastSuggestionRef.current = suggestion
+                                return suggestion
+                              }
+                              return current
+                            })
+                          }
                         }}
                       >
                         <Text style={styles.jobAttachItemText} numberOfLines={2}>
-                          {formatPinboardAttachOptionLabel(opt.kind, opt.title)}
+                          {opt.kind === 'external' ? opt.title : formatPinboardAttachOptionLabel(opt.kind, opt.title)}
                         </Text>
+                        {opt.kind === 'external' && (opt.company || opt.meta) ? (
+                          <Text style={styles.jobAttachItemMeta} numberOfLines={1}>
+                            {[opt.company, opt.meta].filter(Boolean).join(' · ')}
+                          </Text>
+                        ) : null}
                       </TouchableOpacity>
-                    ))}
+                    ))
+                    )}
+                    </ScrollView>
                   </View>
                 ) : null}
               </View>
@@ -856,6 +938,27 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.55)',
     marginBottom: 8,
   },
+  attachHint: {
+    marginTop: -4,
+    marginBottom: 8,
+    fontSize: 12,
+    lineHeight: 17,
+    color: 'rgba(255,255,255,0.35)',
+  },
+  attachEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.35)',
+  },
+  externalSearch: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#fff',
+  },
   postText: { marginTop: 8, fontSize: 15, lineHeight: 22, color: 'rgba(255,255,255,0.82)' },
   postRemove: {
     marginTop: 10,
@@ -923,6 +1026,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0a0a',
     overflow: 'hidden',
   },
+  jobAttachScroll: { maxHeight: 240 },
   jobAttachItem: {
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -930,6 +1034,7 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255,255,255,0.06)',
   },
   jobAttachItemText: { fontSize: 13, color: '#fff' },
+  jobAttachItemMeta: { marginTop: 2, fontSize: 11, color: 'rgba(255,255,255,0.4)' },
   modalFooter: {
     flexDirection: 'row',
     alignItems: 'center',

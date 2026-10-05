@@ -15,7 +15,7 @@ import {
   RefreshControl,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useFocusEffect, useRouter } from 'expo-router'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { PreviousScreenButton } from '@/components/PreviousScreenButton'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { PlusCircle } from 'lucide-react-native'
@@ -122,6 +122,10 @@ export default function JobsListScreen() {
   const jobsCountRef = useRef(bootJobs.jobs.length + bootJobs.externalJobs.length)
   jobsCountRef.current = jobs.length + externalJobs.length
   const [activeExternalJob, setActiveExternalJob] = useState<ExternalJob | null>(null)
+  const { externalJobId: externalJobIdParam } = useLocalSearchParams<{ externalJobId?: string | string[] }>()
+  const pendingExternalJobId = (Array.isArray(externalJobIdParam) ? externalJobIdParam[0] : externalJobIdParam)?.trim() ?? ''
+  const externalJobsRef = useRef(externalJobs)
+  externalJobsRef.current = externalJobs
   const [externalShareOpen, setExternalShareOpen] = useState(false)
   const { shareStory, busy: storyBusy, holder: storyHolder } = useJobStoryShare()
 
@@ -142,6 +146,33 @@ export default function JobsListScreen() {
   const [ceoContactUrl, setCeoContactUrl] = useState('')
 
   const [refreshing, setRefreshing] = useState(false)
+
+  useEffect(() => {
+    if (!pendingExternalJobId) return
+    let cancelled = false
+    void (async () => {
+      const known = externalJobsRef.current.find((job) => job.id === pendingExternalJobId) ?? null
+      let row = known
+      if (!row) {
+        const { data } = await supabase
+          .from('external_jobs')
+          .select(
+            'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram,contact_url'
+          )
+          .eq('id', pendingExternalJobId)
+          .eq('status', 'published')
+          .maybeSingle()
+        row = (data as ExternalJob | null) ?? null
+      }
+      if (cancelled || !row) return
+      setFeedTab('external')
+      setActiveExternalJob(row)
+      router.setParams({ externalJobId: '' })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [pendingExternalJobId, router])
 
   const loadJobs = useCallback(
     async (opts?: { bypassCooldown?: boolean }) => {

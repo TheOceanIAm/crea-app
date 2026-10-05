@@ -14,6 +14,7 @@ export type PinboardPostRow = {
   created_at: string
   job_id: string | null
   project_id: string | null
+  external_job_id?: string | null
   author_id: string
   jobs: {
     id: string
@@ -36,6 +37,9 @@ export type PinboardPost = {
   created_at: string
   job_id: string | null
   project_id: string | null
+  external_job_id: string | null
+  external_job_title: string | null
+  external_job_company: string | null
   job_title: string | null
   job_company_id: string | null
   job_company_name: string | null
@@ -58,7 +62,9 @@ export type PinboardAttachOption = {
   key: string
   id: string
   title: string
-  kind: 'job' | 'project'
+  kind: 'job' | 'project' | 'external'
+  company?: string
+  meta?: string
 }
 
 export const PINBOARD_NO_ATTACH = ''
@@ -75,14 +81,20 @@ export const PINBOARD_UPDATES_COPY = {
   attachSelectPlaceholder: 'Choose a listing or project…',
   attachRequiredError: 'Link a job listing or workspace project.',
   announcementKind: 'Announcement',
-  sectionSubtitleCeo: 'Share an announcement, a new feature, or a listing.',
-  composerPlaceholderCeo: 'Share an announcement…',
-  messagePlaceholderCeo: 'e.g. Invoicing just got faster — here’s what changed.',
-  attachOptionalLabel: 'Link to a job or project (optional)',
-  noLinkOption: 'No link',
+  sectionSubtitleCeo: 'Pick a published external job and it shows up in the same feed.',
+  composerPlaceholderCeo: 'Share an external job…',
+  messagePlaceholderCeo: 'e.g. DP needed in Berlin next month — the link opens the listing.',
+  attachOptionalLabel: 'External job',
+  attachExternalHint: 'Pick a published external job, or post an announcement with no link.',
+  externalSearchPlaceholder: 'Search title or company…',
+  noExternalJobs: 'No published external jobs yet.',
+  noExternalMatches: 'No external jobs match that search.',
+  noLinkOption: 'No link — announcement',
+  linkKindExternal: 'External job',
   bodyRequiredError: 'Add a short note for your update.',
   emptyFeed:
     'No updates yet. Share a listing or crew search and link it to a job or project.',
+  emptyFeedCeo: 'No updates yet. Pick an external job and post it to the feed.',
   noLinkOptionsTitle: 'Create something to link first',
   noLinkOptionsBody:
     'Post a job listing or create a workspace project, then share it here.',
@@ -98,27 +110,43 @@ export const PINBOARD_UPDATES_COPY = {
 } as const
 
 export function formatPinboardAttachOptionLabel(
-  kind: 'job' | 'project',
+  kind: 'job' | 'project' | 'external',
   title: string
 ): string {
   const prefix =
-    kind === 'job' ? PINBOARD_UPDATES_COPY.linkKindJob : PINBOARD_UPDATES_COPY.linkKindProject
+    kind === 'job'
+      ? PINBOARD_UPDATES_COPY.linkKindJob
+      : kind === 'project'
+        ? PINBOARD_UPDATES_COPY.linkKindProject
+        : PINBOARD_UPDATES_COPY.linkKindExternal
   return `${prefix}: ${title}`
+}
+
+/** Default note when the CEO picks an external listing. They can edit it before posting. */
+export function suggestedExternalJobUpdateNote(job: { title: string; company?: string | null }): string {
+  const title = job.title.trim() || 'New listing'
+  const company = job.company?.trim() ?? ''
+  return company ? `${title} — ${company}` : title
 }
 
 export function validatePinboardUpdateInput(opts: {
   body: string
   jobId: string | null
   projectId: string | null
+  externalJobId?: string | null
   /** CEO announcements do not need a listing or project. */
   allowUnlinked?: boolean
 }): { ok: true } | { ok: false; error: string } {
   const trimmed = opts.body.trim()
-  if (!opts.allowUnlinked && !opts.jobId && !opts.projectId) {
+  if (opts.externalJobId && !opts.allowUnlinked) {
     return { ok: false, error: PINBOARD_UPDATES_COPY.attachRequiredError }
   }
-  if (opts.jobId && opts.projectId) {
-    return { ok: false, error: 'Link either a job or a project, not both.' }
+  const linkCount = [opts.jobId, opts.projectId, opts.allowUnlinked ? opts.externalJobId : null].filter(Boolean).length
+  if (!opts.allowUnlinked && linkCount === 0) {
+    return { ok: false, error: PINBOARD_UPDATES_COPY.attachRequiredError }
+  }
+  if (linkCount > 1) {
+    return { ok: false, error: 'Link one listing or project, not more than one.' }
   }
   if (trimmed.length < 1) {
     return { ok: false, error: PINBOARD_UPDATES_COPY.bodyRequiredError }
@@ -139,10 +167,10 @@ export function canComposePinboardUpdates(opts: {
 
 export function parsePinboardAttachKey(
   key: string
-): { kind: 'job' | 'project'; id: string } | null {
+): { kind: 'job' | 'project' | 'external'; id: string } | null {
   if (!key || key === PINBOARD_NO_ATTACH) return null
   const [kind, id] = key.split(':')
-  if ((kind === 'job' || kind === 'project') && id) return { kind, id }
+  if ((kind === 'job' || kind === 'project' || kind === 'external') && id) return { kind, id }
   return null
 }
 
@@ -196,10 +224,18 @@ export async function loadPinboardFeedPage(opts?: {
   beforeCreatedAt?: string
 }): Promise<{ posts: PinboardPost[]; error: string | null }> {
   const limit = opts?.limit ?? PINBOARD_PAGE_SIZE
-  let q = supabase
-    .from('job_pinboard_posts')
-    .select(
-      `
+  const postSelect = `
+      id,
+      body,
+      created_at,
+      job_id,
+      project_id,
+      external_job_id,
+      author_id,
+      jobs ( id, title, company_id, is_solo_workspace, location, location_type, start_date, budget_type, budget_amount, budget_currency ),
+      projects ( id, title, company_id, freelancer_id )
+    `
+  const legacySelect = `
       id,
       body,
       created_at,
@@ -209,18 +245,39 @@ export async function loadPinboardFeedPage(opts?: {
       jobs ( id, title, company_id, is_solo_workspace, location, location_type, start_date, budget_type, budget_amount, budget_currency ),
       projects ( id, title, company_id, freelancer_id )
     `
-    )
-    .order('created_at', { ascending: false })
-    .limit(limit)
 
-  if (opts?.beforeCreatedAt) {
-    q = q.lt('created_at', opts.beforeCreatedAt)
+  const run = (select: string) => {
+    let q = supabase
+      .from('job_pinboard_posts')
+      .select(select)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    if (opts?.beforeCreatedAt) q = q.lt('created_at', opts.beforeCreatedAt)
+    return q
   }
 
-  const { data, error } = await q
+  let { data, error } = await run(postSelect)
+  if (error && /external_job_id/i.test(error.message)) {
+    ;({ data, error } = await run(legacySelect))
+  }
   if (error) return { posts: [], error: error.message }
 
   const rows = (data ?? []) as unknown as PinboardPostRow[]
+  const externalJobIds = [...new Set(rows.map((r) => r.external_job_id).filter(Boolean))] as string[]
+  const externalJobMap: Record<string, { title: string; company: string }> = {}
+  if (externalJobIds.length > 0) {
+    const { data: externalJobs } = await supabase
+      .from('external_jobs')
+      .select('id, title, company')
+      .in('id', externalJobIds)
+      .eq('status', 'published')
+    for (const job of externalJobs ?? []) {
+      externalJobMap[String(job.id)] = {
+        title: String(job.title ?? ''),
+        company: String(job.company ?? ''),
+      }
+    }
+  }
   const authorIds = [...new Set(rows.map((r) => r.author_id))]
   const companyIds = [
     ...new Set(
@@ -273,6 +330,9 @@ export async function loadPinboardFeedPage(opts?: {
         created_at: r.created_at,
         job_id: r.job_id,
         project_id: r.project_id,
+        external_job_id: r.external_job_id ? String(r.external_job_id) : null,
+        external_job_title: r.external_job_id ? externalJobMap[String(r.external_job_id)]?.title ?? null : null,
+        external_job_company: r.external_job_id ? externalJobMap[String(r.external_job_id)]?.company ?? null : null,
         job_title: r.jobs?.title ?? null,
         job_company_id: companyId,
         job_company_name: company?.name?.trim() || au?.name?.trim() || null,
@@ -341,6 +401,33 @@ export async function loadPinboardAttachOptions(ownerId: string): Promise<Pinboa
   return options
 }
 
+/** Published external listings the CEO can post into the feed. */
+export async function loadPublishedExternalJobsForPinboard(): Promise<PinboardAttachOption[]> {
+  const { data, error } = await supabase
+    .from('external_jobs')
+    .select('id, title, company, location, role')
+    .eq('status', 'published')
+    .order('posted_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(300)
+  if (error || !data) return []
+
+  return data.map((job) => {
+    const id = String(job.id)
+    const company = String(job.company ?? '').trim()
+    const location = String(job.location ?? '').trim()
+    const role = String(job.role ?? '').trim()
+    return {
+      key: `external:${id}`,
+      id,
+      title: String(job.title ?? '').trim() || 'Untitled listing',
+      kind: 'external' as const,
+      company,
+      meta: [role, location].filter(Boolean).join(' · '),
+    }
+  })
+}
+
 /** @deprecated Use loadPinboardAttachOptions */
 export async function loadCompanyJobsForPinboard(
   companyId: string
@@ -354,23 +441,41 @@ export async function createPinboardPost(opts: {
   body: string
   jobId: string | null
   projectId: string | null
+  externalJobId?: string | null
   allowUnlinked?: boolean
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const validation = validatePinboardUpdateInput({
     body: opts.body,
     jobId: opts.jobId,
     projectId: opts.projectId,
+    externalJobId: opts.externalJobId,
     allowUnlinked: opts.allowUnlinked,
   })
   if (!validation.ok) return validation
   const trimmed = opts.body.trim()
-  const { error } = await supabase.from('job_pinboard_posts').insert({
+  const payload: {
+    author_id: string
+    body: string
+    job_id: string | null
+    project_id: string | null
+    external_job_id?: string
+  } = {
     author_id: opts.userId,
     body: trimmed,
     job_id: opts.jobId,
     project_id: opts.projectId,
-  })
-  if (error) return { ok: false, error: error.message }
+  }
+  if (opts.externalJobId) payload.external_job_id = opts.externalJobId
+  const { error } = await supabase.from('job_pinboard_posts').insert(payload)
+  if (error) {
+    if (opts.externalJobId && /external_job_id/i.test(error.message)) {
+      return {
+        ok: false,
+        error: 'External job links are not available yet. Pull the latest app update and try again.',
+      }
+    }
+    return { ok: false, error: error.message }
+  }
   return { ok: true }
 }
 
@@ -381,6 +486,7 @@ export async function deletePinboardPost(postId: string): Promise<{ ok: true } |
 }
 
 export function pinboardPostLinkLabel(post: PinboardPost): string | null {
+  if (post.external_job_id && post.external_job_title) return post.external_job_title
   if (post.project_id && post.project_title) return post.project_title
   if (post.job_id && post.job_title) return post.job_title
   return null
@@ -388,14 +494,17 @@ export function pinboardPostLinkLabel(post: PinboardPost): string | null {
 
 export function pinboardPostHasLink(post: PinboardPost): boolean {
   return Boolean(
-    (post.project_id && post.project_title) || (post.job_id && post.job_title)
+    (post.external_job_id && post.external_job_title) ||
+      (post.project_id && post.project_title) ||
+      (post.job_id && post.job_title)
   )
 }
 
 export function pinboardPostLinkKindLabel(post: PinboardPost): string | null {
+  if (post.external_job_id && post.external_job_title) return PINBOARD_UPDATES_COPY.linkKindExternal
   if (post.project_id && post.project_title) return PINBOARD_UPDATES_COPY.linkKindProject
   if (post.job_id && post.job_title) return PINBOARD_UPDATES_COPY.linkKindJob
-  if (post.project_id || post.job_id) return PINBOARD_UPDATES_COPY.legacyUnlinked
+  if (post.project_id || post.job_id || post.external_job_id) return PINBOARD_UPDATES_COPY.legacyUnlinked
   return PINBOARD_UPDATES_COPY.announcementKind
 }
 
