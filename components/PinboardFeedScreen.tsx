@@ -242,7 +242,7 @@ export function PinboardFeedScreen() {
     setComposeBody('')
     lastSuggestionRef.current = ''
     setExternalSearch('')
-    setAttachPickerOpen(false)
+    setAttachPickerOpen(allowUnlinked)
     setComposerOpen(true)
     setAttachLoading(true)
     const options = allowUnlinked
@@ -679,18 +679,77 @@ export function PinboardFeedScreen() {
               <View style={{ marginVertical: 8, alignItems: 'flex-start' }}>
                 <CreaInlineLoader size="sm" />
               </View>
+            ) : allowUnlinked ? (
+              <View style={styles.jobAttachList}>
+                <TextInput
+                  value={externalSearch}
+                  onChangeText={setExternalSearch}
+                  placeholder={PINBOARD_UPDATES_COPY.externalSearchPlaceholder}
+                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  style={styles.externalSearch}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+                <ScrollView style={styles.jobAttachScroll} keyboardShouldPersistTaps="handled">
+                  {filteredAttachOptions.map((opt) => {
+                    const selected = composeAttachKey === opt.key
+                    return (
+                      <TouchableOpacity
+                        key={opt.key}
+                        style={[styles.jobAttachItem, selected && styles.jobAttachItemSelected]}
+                        onPress={() => {
+                          setComposeAttachKey(opt.key)
+                          const suggestion = suggestedExternalJobUpdateNote({
+                            title: opt.title,
+                            company: opt.company,
+                          })
+                          setComposeBody((current) => {
+                            if (!current.trim() || current === lastSuggestionRef.current) {
+                              lastSuggestionRef.current = suggestion
+                              return suggestion
+                            }
+                            return current
+                          })
+                        }}
+                      >
+                        <Text style={[styles.jobAttachItemText, selected && styles.jobAttachItemTextSelected]} numberOfLines={2}>
+                          {opt.title}
+                        </Text>
+                        {opt.company || opt.meta ? (
+                          <Text style={styles.jobAttachItemMeta} numberOfLines={1}>
+                            {[opt.company, opt.meta].filter(Boolean).join(' · ')}
+                          </Text>
+                        ) : null}
+                      </TouchableOpacity>
+                    )
+                  })}
+                  {attachOptions.length === 0 ? (
+                    <Text style={styles.attachEmpty}>{PINBOARD_UPDATES_COPY.noExternalJobs}</Text>
+                  ) : filteredAttachOptions.length === 0 ? (
+                    <Text style={styles.attachEmpty}>{PINBOARD_UPDATES_COPY.noExternalMatches}</Text>
+                  ) : null}
+                </ScrollView>
+                <TouchableOpacity
+                  onPress={() => {
+                    setComposeAttachKey(PINBOARD_NO_ATTACH)
+                    setComposeBody((current) => (current === lastSuggestionRef.current ? '' : current))
+                    lastSuggestionRef.current = ''
+                  }}
+                  style={styles.noLinkBtn}
+                >
+                  <Text style={styles.noLinkBtnText}>{PINBOARD_UPDATES_COPY.noLinkOption}</Text>
+                </TouchableOpacity>
+              </View>
             ) : (
               <View style={styles.jobAttach}>
                 <TouchableOpacity
                   style={styles.jobAttachBtn}
                   onPress={() => setAttachPickerOpen((o) => !o)}
-                  disabled={composeSubmitting || (!allowUnlinked && attachOptions.length === 0)}
+                  disabled={composeSubmitting || attachOptions.length === 0}
                 >
                   <Text style={styles.jobAttachLabel} numberOfLines={2}>
                     {composeAttachKey === PINBOARD_NO_ATTACH
-                      ? allowUnlinked
-                        ? PINBOARD_UPDATES_COPY.noLinkOption
-                        : PINBOARD_UPDATES_COPY.attachSelectPlaceholder
+                      ? PINBOARD_UPDATES_COPY.attachSelectPlaceholder
                       : (() => {
                           const opt = attachOptions.find((o) => o.key === composeAttachKey)
                           return opt
@@ -1034,7 +1093,11 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255,255,255,0.06)',
   },
   jobAttachItemText: { fontSize: 13, color: '#fff' },
+  jobAttachItemSelected: { backgroundColor: 'rgba(255,220,0,0.1)' },
+  jobAttachItemTextSelected: { color: '#FFDC00', fontWeight: '700' },
   jobAttachItemMeta: { marginTop: 2, fontSize: 11, color: 'rgba(255,255,255,0.4)' },
+  noLinkBtn: { paddingHorizontal: 14, paddingVertical: 10 },
+  noLinkBtnText: { fontSize: 12, color: 'rgba(255,255,255,0.4)' },
   modalFooter: {
     flexDirection: 'row',
     alignItems: 'center',
