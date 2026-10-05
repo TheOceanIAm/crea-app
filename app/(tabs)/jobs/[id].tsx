@@ -12,8 +12,9 @@ import {
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useGlobalSearchParams, useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft, Share2, Lock } from 'lucide-react-native'
+import { ChevronLeft, ImageDown, Share2, Lock } from 'lucide-react-native'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
+import { useJobStoryShare } from '@/components/JobStoryExporter'
 import { supabase } from '@/lib/supabase'
 import { isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
@@ -113,6 +114,7 @@ export default function JobDetailScreen() {
   const [companyName, setCompanyName] = useState('Company')
   const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
+  const { shareStory, busy: storyBusy, holder: storyHolder } = useJobStoryShare()
   const [accessDenied, setAccessDenied] = useState(false)
   const [bookingDeep, setBookingDeep] = useState<BookingDeepState>({ kind: 'none' })
   const [bookingBusy, setBookingBusy] = useState(false)
@@ -585,6 +587,23 @@ export default function JobDetailScreen() {
     )
   }
 
+  const openStoryImage = () => {
+    if (!id || storyBusy) return
+    void shareStory({
+      jobId: id,
+      jobTitle: job.title,
+      company: companyName,
+      companyLogoUrl,
+      budget: formatBudgetDisplay({
+        budget_type: job.budget_type,
+        budget_amount: job.budget_amount,
+        budget_currency: job.budget_currency,
+      }),
+      location: job.location?.trim() || job.location_type?.trim() || '—',
+      description: job.description?.trim() || '—',
+    })
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.topBar}>
@@ -592,14 +611,29 @@ export default function JobDetailScreen() {
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backLabel}>{listingWordPlural}</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.shareIconBtn}
-          onPress={() => setShareOpen(true)}
-          hitSlop={12}
-          accessibilityLabel={`Share ${listingWord.toLowerCase()}`}
-        >
-          <Share2 size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-        </TouchableOpacity>
+        <View style={styles.topActions}>
+          <TouchableOpacity
+            style={styles.shareIconBtn}
+            onPress={openStoryImage}
+            hitSlop={12}
+            disabled={storyBusy}
+            accessibilityLabel="Download story image"
+          >
+            {storyBusy ? (
+              <ActivityIndicator color="#FFDC00" size="small" />
+            ) : (
+              <ImageDown size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.shareIconBtn}
+            onPress={() => setShareOpen(true)}
+            hitSlop={12}
+            accessibilityLabel={`Share ${listingWord.toLowerCase()}`}
+          >
+            <Share2 size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <Modal visible={rolePickerOpen} transparent animationType="fade" onRequestClose={() => setRolePickerOpen(false)}>
@@ -660,7 +694,9 @@ export default function JobDetailScreen() {
         shareMessage={jobShareMessage}
         shareUrl={publicJobUrl}
         mailSubject={`Crea ${listingWord.toLowerCase()}: ${job.title}`}
+        storyImage={{ busy: storyBusy, onPress: openStoryImage }}
       />
+      {storyHolder}
 
       <ScrollView
         style={styles.scroll}
@@ -886,6 +922,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     alignSelf: 'flex-start',
   },
+  topActions: { flexDirection: 'row', alignItems: 'center' },
   shareIconBtn: {
     paddingVertical: 8,
     paddingHorizontal: 12,

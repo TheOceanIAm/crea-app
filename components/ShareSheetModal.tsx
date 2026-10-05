@@ -9,6 +9,7 @@ import {
   ScrollView,
   Alert,
   Platform,
+  ActivityIndicator,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
@@ -28,6 +29,11 @@ export type ShareSheetModalProps = {
   shareMessage: string
   shareUrl: string | null
   mailSubject: string
+  /** Job story graphic (1080×1920). Opens the system share sheet so it can be saved or posted. */
+  storyImage?: {
+    busy: boolean
+    onPress: () => void
+  }
 }
 
 export function ShareSheetModal({
@@ -37,6 +43,7 @@ export function ShareSheetModal({
   shareMessage,
   shareUrl,
   mailSubject,
+  storyImage,
 }: ShareSheetModalProps) {
   const insets = useSafeAreaInsets()
   const fullText = useMemo(
@@ -88,6 +95,21 @@ export function ShareSheetModal({
               void shareNative({ title: sheetTitle, message: fullText })
             })}
             {row('Copy link', onCopy)}
+            {storyImage ? (
+              <TouchableOpacity
+                style={[styles.row, storyImage.busy && styles.rowDisabled]}
+                onPress={() => {
+                  if (storyImage.busy) return
+                  storyImage.onPress()
+                }}
+                activeOpacity={0.75}
+              >
+                <View style={styles.storyRow}>
+                  {storyImage.busy ? <ActivityIndicator color="#FFDC00" size="small" /> : null}
+                  <Text style={[styles.rowLabel, storyImage.busy && styles.rowLabelDisabled]}>Story image</Text>
+                </View>
+              </TouchableOpacity>
+            ) : null}
             {row('LinkedIn', () => openLinkedInShare(shareUrl!), !shareUrl)}
             {row('X (Twitter)', () => openTwitterShare(fullText))}
             {row('WhatsApp', () => openWhatsAppShare(fullText))}
@@ -95,7 +117,9 @@ export function ShareSheetModal({
           </ScrollView>
 
           <Text style={styles.hint}>
-            For Instagram or AirDrop, use Share… and pick Instagram, Messages, or AirDrop from the system menu.
+            {storyImage
+              ? 'The link is a short URL. Story image is a 1080×1920 graphic — save it from the share menu or post it to Instagram.'
+              : 'For Instagram or AirDrop, use Share… and pick Instagram, Messages, or AirDrop from the system menu.'}
           </Text>
 
           <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.8}>
@@ -159,6 +183,7 @@ const styles = StyleSheet.create({
   rowDisabled: { opacity: 0.35 },
   rowLabel: { fontSize: 16, fontWeight: '600', color: '#FFDC00' },
   rowLabelDisabled: { color: 'rgba(255,255,255,0.25)' },
+  storyRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   hint: {
     fontSize: 11,
     color: 'rgba(255,255,255,0.35)',

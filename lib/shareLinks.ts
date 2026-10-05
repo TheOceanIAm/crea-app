@@ -11,11 +11,22 @@ export function getShareBaseUrl(): string {
   return getCreaWebBaseUrl()
 }
 
+/** First 8 hex chars of a UUID, same shape as the web short link (`/s/70e93ee8`). */
+export function jobShortShareSlug(id: string): string {
+  return id.trim().replace(/-/g, '').toLowerCase().slice(0, 8)
+}
+
+/**
+ * Public job link. Opens `/s/{prefix}` on the web and redirects to the job,
+ * matching crea-services `getJobPublicUrl`.
+ */
 export function jobShareUrl(jobId: string): string | null {
   const base = getShareBaseUrl()
   const id = jobId.trim()
   if (!base || !id) return null
-  return `${base}/jobs/${encodeURIComponent(id)}`
+  const slug = jobShortShareSlug(id)
+  if (!/^[0-9a-f]{8}$/.test(slug)) return `${base}/jobs/${encodeURIComponent(id)}`
+  return `${base}/s/${slug}`
 }
 
 export function profileShareUrl(userId: string): string | null {

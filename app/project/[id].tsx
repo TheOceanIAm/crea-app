@@ -9,10 +9,15 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft } from 'lucide-react-native'
+import { ChevronLeft, ImageDown, Share2 } from 'lucide-react-native'
+import { ShareSheetModal } from '@/components/ShareSheetModal'
+import { useJobStoryShare } from '@/components/JobStoryExporter'
+import { jobShareUrl } from '@/lib/shareLinks'
+import { loadJobStoryInput } from '@/lib/loadJobStoryInput'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { supabase } from '@/lib/supabase'
 import { ensureSoloWorkspaceProjectRow } from '@/lib/ensureSoloWorkspaceProject'
@@ -138,6 +143,8 @@ export default function ProjectWorkspaceScreen() {
   const [sunPlannerLockedHint, setSunPlannerLockedHint] = useState<string | null>(null)
   const [productionWeatherLockedHint, setProductionWeatherLockedHint] = useState<string | null>(null)
   const [isPrivateWorkspace, setIsPrivateWorkspace] = useState(Boolean(bootShell?.isPrivateWorkspace))
+  const [jobShareOpen, setJobShareOpen] = useState(false)
+  const { shareStory, busy: storyBusy, holder: storyHolder } = useJobStoryShare()
   /** `jobs.company_id` — same owner check as web ManageJobClient (`isOwner`). */
   const [jobOwnerCompanyId, setJobOwnerCompanyId] = useState<string | null>(
     bootShell?.jobOwnerCompanyId ?? null
@@ -1080,6 +1087,21 @@ export default function ProjectWorkspaceScreen() {
     </View>
   )
 
+  const canShareListing = Boolean(project.job_id && !isPrivateWorkspace)
+  const listingShareUrl = project.job_id ? jobShareUrl(project.job_id) : null
+  const openListingStory = () => {
+    const jobId = project.job_id
+    if (!jobId || storyBusy || isPrivateWorkspace) return
+    void (async () => {
+      const input = await loadJobStoryInput(jobId)
+      if (!input) {
+        Alert.alert('Story image', 'Could not load this listing.')
+        return
+      }
+      await shareStory(input)
+    })()
+  }
+
   const needsFlexTab =
     tab === 'messages' ||
     tab === 'milestones' ||
@@ -1103,6 +1125,31 @@ export default function ProjectWorkspaceScreen() {
           <Text style={styles.headerTitle} numberOfLines={1}>
             {project.title}
           </Text>
+          {canShareListing ? (
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={styles.headerIconBtn}
+                onPress={openListingStory}
+                disabled={storyBusy}
+                hitSlop={8}
+                accessibilityLabel="Download story image"
+              >
+                {storyBusy ? (
+                  <ActivityIndicator color="#FFDC00" size="small" />
+                ) : (
+                  <ImageDown size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerIconBtn}
+                onPress={() => setJobShareOpen(true)}
+                hitSlop={8}
+                accessibilityLabel="Share listing"
+              >
+                <Share2 size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll}>
@@ -1362,6 +1409,18 @@ export default function ProjectWorkspaceScreen() {
           )}
         </View>
       </KeyboardAvoidingView>
+      {canShareListing ? (
+        <ShareSheetModal
+          visible={jobShareOpen}
+          onClose={() => setJobShareOpen(false)}
+          sheetTitle="Share listing"
+          shareMessage={`Project on Crea: ${project.title}`}
+          shareUrl={listingShareUrl}
+          mailSubject={`Crea project: ${project.title}`}
+          storyImage={{ busy: storyBusy, onPress: openListingStory }}
+        />
+      ) : null}
+      {storyHolder}
     </SafeAreaView>
   )
 }
@@ -1373,10 +1432,12 @@ const styles = StyleSheet.create({
   flexFill: { flex: 1 },
   flexTabInner: { flex: 1, minHeight: 0 },
   center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  topRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 16 },
+  topRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 8 },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 12 },
   backLabel: { color: '#FFDC00', fontSize: 16, fontWeight: '600' },
   headerTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: 'rgba(255,255,255,0.85)' },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
+  headerIconBtn: { paddingVertical: 8, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' },
   tabScroll: { flexGrow: 0, marginBottom: 12 },
   tabRow: {
     flexDirection: 'row',
