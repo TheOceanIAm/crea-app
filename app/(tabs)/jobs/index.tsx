@@ -199,7 +199,7 @@ export default function JobsListScreen() {
       setIsFreeFreelancer(isFreelancerProfile(role) && !freelancerCanApplyToJobs(plan))
       const companyOnly = isCompanyProfile(role)
       setIsCompanyUser(companyOnly)
-      setIsCeoUser(isCeoProfile(role))
+      setIsCeoUser(isCeoUserId(user.id) || isCeoProfile(role))
 
       const loaded = await loadJobsFeed(user, { feedTab, knownRole: role })
       if (!loaded) {
@@ -493,7 +493,7 @@ export default function JobsListScreen() {
                       disabled={storyBusy}
                       onPress={() => openExternalStory(item)}
                     >
-                      <Text style={styles.externalGhostBtnText}>{storyBusy ? 'Story…' : 'Story image'}</Text>
+                      <Text style={styles.externalGhostBtnText}>{storyBusy ? 'Story…' : 'Download story'}</Text>
                     </TouchableOpacity>
                   ) : null}
                   {item.source_url ? (
@@ -562,6 +562,20 @@ export default function JobsListScreen() {
               <Text style={styles.modalKicker}>View contact</Text>
               <Text style={styles.modalTitle}>{activeExternalJob?.title}</Text>
               <Text style={styles.modalSub}>{activeExternalJob?.company}</Text>
+              {isCeoUser && activeExternalJob ? (
+                <TouchableOpacity
+                  style={[styles.modalStoryBtn, storyBusy && styles.modalStoryBtnBusy]}
+                  onPress={() => openExternalStory(activeExternalJob)}
+                  disabled={storyBusy}
+                  activeOpacity={0.85}
+                >
+                  {storyBusy ? (
+                    <ActivityIndicator color="#0a0a0a" />
+                  ) : (
+                    <Text style={styles.modalStoryBtnText}>Download story</Text>
+                  )}
+                </TouchableOpacity>
+              ) : null}
 
               <View style={styles.modalDetailsCard}>
                 <Text style={styles.modalContactLabel}>Job details</Text>
@@ -1116,6 +1130,20 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.5)',
     marginTop: 2,
     marginBottom: 10,
+  },
+  modalStoryBtn: {
+    backgroundColor: '#FFDC00',
+    borderRadius: 999,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  modalStoryBtnBusy: { opacity: 0.7 },
+  modalStoryBtnText: {
+    color: '#0a0a0a',
+    fontSize: 14,
+    fontWeight: '800',
   },
   modalDetailsCard: {
     borderWidth: 1,
