@@ -13,6 +13,7 @@ import {
   Platform,
   ScrollView,
   Keyboard,
+  useWindowDimensions,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -87,7 +88,7 @@ function readInitialFeedPages(userId: string): InfiniteData<PinboardPost[]> | un
 export function PinboardFeedScreen() {
   const router = useRouter()
   const tabBarInset = useFloatingTabBarBottomInset()
-  const composerScrollRef = useRef<ScrollView>(null)
+  const { height: windowHeight } = useWindowDimensions()
   const { overview, refresh: refreshOverview } = useDashboardOverview()
   const userId = overview?.userId ?? null
   const role = overview?.role ?? null
@@ -108,12 +109,7 @@ export function PinboardFeedScreen() {
   const [keyboardHeight, setKeyboardHeight] = useState(0)
   const lastSuggestionRef = useRef('')
 
-  const revealNoteField = useCallback(() => {
-    const jump = () => composerScrollRef.current?.scrollToEnd({ animated: true })
-    jump()
-    setTimeout(jump, 60)
-    setTimeout(jump, 280)
-  }, [])
+  const noteLift = noteFocused ? Math.max(keyboardHeight, Math.round(windowHeight * 0.55)) : keyboardHeight
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
@@ -121,14 +117,13 @@ export function PinboardFeedScreen() {
     const showSub = Keyboard.addListener(showEvent, (event) => {
       const height = event.endCoordinates?.height ?? 0
       if (height > 0) setKeyboardHeight(height)
-      revealNoteField()
     })
     const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0))
     return () => {
       showSub.remove()
       hideSub.remove()
     }
-  }, [revealNoteField])
+  }, [])
 
   const feedQuery = useInfiniteQuery({
     queryKey: feedKey(userId),
@@ -268,6 +263,7 @@ export function PinboardFeedScreen() {
     setComposeBody('')
     lastSuggestionRef.current = ''
     setExternalSearch('')
+    setNoteFocused(false)
     setAttachPickerOpen(allowUnlinked)
     setComposerOpen(true)
     setAttachLoading(true)
@@ -685,15 +681,21 @@ export function PinboardFeedScreen() {
           <View
             style={[
               styles.modalSheet,
-              keyboardHeight > 0
-                ? { marginBottom: keyboardHeight, paddingBottom: 12 }
-                : { paddingBottom: tabBarInset, maxHeight: '88%' },
+              styles.modalSheetAnchored,
+              {
+                bottom: noteLift,
+                paddingBottom: noteLift > 0 ? 12 : tabBarInset,
+              },
             ]}
           >
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{PINBOARD_UPDATES_COPY.composerModalTitle}</Text>
               <TouchableOpacity
-                onPress={() => !composeSubmitting && setComposerOpen(false)}
+                onPress={() => {
+                  if (composeSubmitting) return
+                  setNoteFocused(false)
+                  setComposerOpen(false)
+                }}
                 hitSlop={12}
                 accessibilityLabel="Close"
               >
@@ -701,14 +703,13 @@ export function PinboardFeedScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView
-              ref={composerScrollRef}
               keyboardShouldPersistTaps="handled"
-              automaticallyAdjustKeyboardInsets
               keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               showsVerticalScrollIndicator={false}
               bounces={false}
               contentContainerStyle={styles.composerScrollContent}
             >
+            <View style={noteFocused ? styles.hiddenWhileTyping : undefined}>
             <Text style={styles.attachFieldLabel}>
               {allowUnlinked
                 ? PINBOARD_UPDATES_COPY.attachOptionalLabel
@@ -872,7 +873,8 @@ export function PinboardFeedScreen() {
                 ) : null}
               </View>
             )}
-            <Text style={[styles.attachFieldLabel, { marginTop: 14 }]}>
+            </View>
+            <Text style={[styles.attachFieldLabel, { marginTop: noteFocused ? 0 : 14 }]}>
               Short note
             </Text>
             <TextInput
@@ -888,11 +890,10 @@ export function PinboardFeedScreen() {
               maxLength={6000}
               style={[styles.modalInput, noteFocused && styles.modalInputKeyboard]}
               editable={!composeSubmitting}
-              onFocus={() => {
-                setNoteFocused(true)
-                revealNoteField()
+              onFocus={() => setNoteFocused(true)}
+              onBlur={() => {
+                setTimeout(() => setNoteFocused(false), 250)
               }}
-              onBlur={() => setNoteFocused(false)}
             />
             <View style={styles.modalFooter}>
               <Text style={styles.charCount}>{composeBody.trim().length}/6000</Text>
@@ -1096,6 +1097,14 @@ const styles = StyleSheet.create({
   },
   composerScrollContent: {
     paddingBottom: 8,
+  },
+  modalSheetAnchored: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+  },
+  hiddenWhileTyping: {
+    display: 'none',
   },
   modalHeader: {
     flexDirection: 'row',
