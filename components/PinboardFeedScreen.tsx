@@ -109,25 +109,42 @@ export function PinboardFeedScreen() {
   const lastSuggestionRef = useRef('')
 
   useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
-    const showSub = Keyboard.addListener(showEvent, (event) => {
-      setKeyboardHeight(event.endCoordinates.height)
-    })
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0))
-    return () => {
-      showSub.remove()
-      hideSub.remove()
+    const applyFrame = (event: { endCoordinates: { height: number; screenY: number } }) => {
+      const { height, screenY } = event.endCoordinates
+      if (screenY >= windowHeight - 1) {
+        setKeyboardHeight(0)
+        return
+      }
+      if (screenY > 0) {
+        setKeyboardHeight(Math.max(0, windowHeight - screenY))
+        return
+      }
+      setKeyboardHeight(height > 0 && height < windowHeight * 0.75 ? height : 0)
     }
-  }, [])
+    const hide = () => setKeyboardHeight(0)
+    const subs = [
+      Keyboard.addListener('keyboardDidShow', applyFrame),
+      Keyboard.addListener('keyboardDidHide', hide),
+    ]
+    if (Platform.OS === 'ios') {
+      subs.push(
+        Keyboard.addListener('keyboardWillChangeFrame', applyFrame),
+        Keyboard.addListener('keyboardWillShow', applyFrame),
+        Keyboard.addListener('keyboardWillHide', hide),
+      )
+    }
+    return () => {
+      subs.forEach((sub) => sub.remove())
+    }
+  }, [windowHeight])
 
   const keyboardOpen = keyboardHeight > 0
-  const sheetBottomGap = keyboardOpen ? keyboardHeight : tabBarInset
-  const composerMaxHeight = Math.max(280, windowHeight - sheetBottomGap - 8)
-  const jobListMaxHeight = Math.max(
-    72,
-    Math.min(keyboardOpen ? 140 : 220, composerMaxHeight - (keyboardOpen ? 380 : 460)),
-  )
+  const sheetBottom = keyboardOpen ? keyboardHeight : tabBarInset
+  const composerMaxHeight = Math.max(280, windowHeight - sheetBottom - 8)
+  const jobListMaxHeight = keyboardOpen
+    ? Math.max(64, Math.min(110, composerMaxHeight - 360))
+    : Math.min(220, Math.max(96, composerMaxHeight - 420))
+  const attachScrollMaxHeight = Math.max(96, composerMaxHeight - (keyboardOpen ? 250 : 310))
 
   const feedQuery = useInfiniteQuery({
     queryKey: feedKey(userId),
@@ -684,7 +701,8 @@ export function PinboardFeedScreen() {
           <View
             style={[
               styles.modalSheet,
-              { marginBottom: sheetBottomGap, maxHeight: composerMaxHeight, paddingBottom: 12 },
+              styles.modalSheetLifted,
+              { bottom: sheetBottom, maxHeight: composerMaxHeight },
             ]}
           >
             <View style={styles.modalHeader}>
@@ -701,7 +719,7 @@ export function PinboardFeedScreen() {
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
               bounces={false}
-              style={{ maxHeight: composerMaxHeight - 64 }}
+              style={{ maxHeight: attachScrollMaxHeight }}
             >
             <Text style={styles.attachFieldLabel}>
               {allowUnlinked
@@ -866,6 +884,7 @@ export function PinboardFeedScreen() {
                 ) : null}
               </View>
             )}
+            </ScrollView>
             <Text style={[styles.attachFieldLabel, { marginTop: 14 }]}>
               Short note
             </Text>
@@ -896,7 +915,6 @@ export function PinboardFeedScreen() {
               </TouchableOpacity>
             </View>
             {composeError ? <Text style={styles.composeError}>{composeError}</Text> : null}
-            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1081,8 +1099,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
     padding: 16,
-    paddingBottom: 16,
+    paddingBottom: 12,
     maxHeight: '88%',
+  },
+  modalSheetLifted: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    overflow: 'hidden',
   },
   modalHeader: {
     flexDirection: 'row',
