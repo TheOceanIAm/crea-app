@@ -12,6 +12,8 @@ import {
   Alert,
   Platform,
   ScrollView,
+  Keyboard,
+  useWindowDimensions,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -86,6 +88,8 @@ function readInitialFeedPages(userId: string): InfiniteData<PinboardPost[]> | un
 export function PinboardFeedScreen() {
   const router = useRouter()
   const tabBarInset = useFloatingTabBarBottomInset()
+  const { height: windowHeight } = useWindowDimensions()
+  const [keyboardHeight, setKeyboardHeight] = useState(0)
   const { overview, refresh: refreshOverview } = useDashboardOverview()
   const userId = overview?.userId ?? null
   const role = overview?.role ?? null
@@ -103,6 +107,27 @@ export function PinboardFeedScreen() {
   const [attachPickerOpen, setAttachPickerOpen] = useState(false)
   const [externalSearch, setExternalSearch] = useState('')
   const lastSuggestionRef = useRef('')
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates.height)
+    })
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0))
+    return () => {
+      showSub.remove()
+      hideSub.remove()
+    }
+  }, [])
+
+  const keyboardOpen = keyboardHeight > 0
+  const sheetBottomGap = keyboardOpen ? keyboardHeight : tabBarInset
+  const composerMaxHeight = Math.max(280, windowHeight - sheetBottomGap - 8)
+  const jobListMaxHeight = Math.max(
+    72,
+    Math.min(keyboardOpen ? 140 : 220, composerMaxHeight - (keyboardOpen ? 380 : 460)),
+  )
 
   const feedQuery = useInfiniteQuery({
     queryKey: feedKey(userId),
@@ -656,7 +681,12 @@ export function PinboardFeedScreen() {
 
       <Modal visible={composerOpen} animationType="slide" transparent onRequestClose={() => setComposerOpen(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
+          <View
+            style={[
+              styles.modalSheet,
+              { marginBottom: sheetBottomGap, maxHeight: composerMaxHeight, paddingBottom: 12 },
+            ]}
+          >
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{PINBOARD_UPDATES_COPY.composerModalTitle}</Text>
               <TouchableOpacity
@@ -667,6 +697,12 @@ export function PinboardFeedScreen() {
                 <X size={24} color="rgba(255,255,255,0.5)" strokeWidth={ICON_STROKE} />
               </TouchableOpacity>
             </View>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              style={{ maxHeight: composerMaxHeight - 64 }}
+            >
             <Text style={styles.attachFieldLabel}>
               {allowUnlinked
                 ? PINBOARD_UPDATES_COPY.attachOptionalLabel
@@ -690,7 +726,10 @@ export function PinboardFeedScreen() {
                   autoCorrect={false}
                   autoCapitalize="none"
                 />
-                <ScrollView style={styles.jobAttachScroll} keyboardShouldPersistTaps="handled">
+                <ScrollView
+                  style={[styles.jobAttachScroll, { maxHeight: jobListMaxHeight }]}
+                  keyboardShouldPersistTaps="handled"
+                >
                   {filteredAttachOptions.map((opt) => {
                     const selected = composeAttachKey === opt.key
                     return (
@@ -841,7 +880,7 @@ export function PinboardFeedScreen() {
               placeholderTextColor="rgba(255,255,255,0.28)"
               multiline
               maxLength={6000}
-              style={styles.modalInput}
+              style={[styles.modalInput, keyboardOpen && styles.modalInputKeyboard]}
               editable={!composeSubmitting}
             />
             <View style={styles.modalFooter}>
@@ -857,6 +896,7 @@ export function PinboardFeedScreen() {
               </TouchableOpacity>
             </View>
             {composeError ? <Text style={styles.composeError}>{composeError}</Text> : null}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1041,7 +1081,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
     padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 20,
+    paddingBottom: 16,
     maxHeight: '88%',
   },
   modalHeader: {
@@ -1062,6 +1102,9 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: '#fff',
     textAlignVertical: 'top',
+  },
+  modalInputKeyboard: {
+    minHeight: 72,
   },
   jobAttach: { marginTop: 12 },
   jobAttachBtn: {
