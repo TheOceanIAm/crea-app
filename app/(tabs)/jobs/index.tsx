@@ -77,15 +77,24 @@ function externalJobRateLabel(rate: string | null | undefined): string {
   return normalizeRateLabel(rate ?? null) || 'Rate TBD'
 }
 
-async function externalCompanyLogo(company: string): Promise<string | null> {
+async function listingLogoUrl(jobId: string): Promise<string | null> {
+  const { data } = await supabase.from('external_jobs').select('logo_url').eq('id', jobId).maybeSingle()
+  const logo = typeof data?.logo_url === 'string' ? data.logo_url.trim() : ''
+  return /^https?:\/\//i.test(logo) ? logo : null
+}
+
+async function externalCompanyLogo(company: string, jobId: string): Promise<string | null> {
+  const stored = await listingLogoUrl(jobId)
+  if (stored) return stored
   const name = company.trim()
-  if (name.length < 2 || /^external company$/i.test(name)) return null
+  const params = new URLSearchParams({ jobId })
+  if (name.length >= 2 && !/^external company$/i.test(name)) params.set('name', name)
   const { data } = await fetchCreaApi<{ logoUrl?: string | null }>(
-    `/api/company-logo?name=${encodeURIComponent(name)}`,
-    { timeoutMs: 4000 }
+    `/api/company-logo?${params.toString()}`,
+    { timeoutMs: 12000 }
   )
   const logo = data?.logoUrl?.trim()
-  return logo || null
+  return logo && /^https?:\/\//i.test(logo) ? logo : null
 }
 
 function isCreaJobItem(item: Job | ExternalJob): item is Job {
@@ -310,9 +319,7 @@ export default function JobsListScreen() {
     if (storyBusy) return
     void (async () => {
       const company = job.company.trim() || 'External company'
-      const stored = job.logo_url?.trim()
-      const companyLogoUrl =
-        stored && /^https?:\/\//i.test(stored) ? stored : await externalCompanyLogo(company)
+      const companyLogoUrl = await externalCompanyLogo(company, job.id)
       await shareStory({
         jobId: job.id,
         jobTitle: job.title,
