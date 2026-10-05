@@ -157,7 +157,7 @@ export default function JobsListScreen() {
         const { data } = await supabase
           .from('external_jobs')
           .select(
-            'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram,contact_url'
+            'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram,contact_url,logo_url'
           )
           .eq('id', pendingExternalJobId)
           .eq('status', 'published')
@@ -310,7 +310,9 @@ export default function JobsListScreen() {
     if (storyBusy) return
     void (async () => {
       const company = job.company.trim() || 'External company'
-      const companyLogoUrl = await externalCompanyLogo(company)
+      const stored = job.logo_url?.trim()
+      const companyLogoUrl =
+        stored && /^https?:\/\//i.test(stored) ? stored : await externalCompanyLogo(company)
       await shareStory({
         jobId: job.id,
         jobTitle: job.title,
