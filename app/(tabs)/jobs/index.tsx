@@ -486,16 +486,14 @@ export default function JobsListScreen() {
                   >
                     <Text style={styles.externalActionBtnText}>View contact</Text>
                   </TouchableOpacity>
-                  {isCeoUser ? (
-                    <TouchableOpacity
-                      style={styles.externalGhostBtn}
-                      activeOpacity={0.85}
-                      disabled={storyBusy}
-                      onPress={() => openExternalStory(item)}
-                    >
-                      <Text style={styles.externalGhostBtnText}>{storyBusy ? 'Story…' : 'Download story'}</Text>
-                    </TouchableOpacity>
-                  ) : null}
+                  <TouchableOpacity
+                    style={styles.externalGhostBtn}
+                    activeOpacity={0.85}
+                    disabled={storyBusy}
+                    onPress={() => openExternalStory(item)}
+                  >
+                    <Text style={styles.externalGhostBtnText}>{storyBusy ? 'Story…' : 'Download story'}</Text>
+                  </TouchableOpacity>
                   {item.source_url ? (
                     <TouchableOpacity
                       style={styles.externalGhostBtn}
@@ -555,6 +553,7 @@ export default function JobsListScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <ScrollView
+              style={styles.modalScroll}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.modalScrollContent}
@@ -562,20 +561,6 @@ export default function JobsListScreen() {
               <Text style={styles.modalKicker}>View contact</Text>
               <Text style={styles.modalTitle}>{activeExternalJob?.title}</Text>
               <Text style={styles.modalSub}>{activeExternalJob?.company}</Text>
-              {isCeoUser && activeExternalJob ? (
-                <TouchableOpacity
-                  style={[styles.modalStoryBtn, storyBusy && styles.modalStoryBtnBusy]}
-                  onPress={() => openExternalStory(activeExternalJob)}
-                  disabled={storyBusy}
-                  activeOpacity={0.85}
-                >
-                  {storyBusy ? (
-                    <ActivityIndicator color="#0a0a0a" />
-                  ) : (
-                    <Text style={styles.modalStoryBtnText}>Download story</Text>
-                  )}
-                </TouchableOpacity>
-              ) : null}
 
               <View style={styles.modalDetailsCard}>
                 <Text style={styles.modalContactLabel}>Job details</Text>
@@ -675,17 +660,22 @@ export default function JobsListScreen() {
                 </Text>
               </View>
             </ScrollView>
+            {activeExternalJob ? (
+              <TouchableOpacity
+                style={[styles.modalStoryBtn, storyBusy && styles.modalStoryBtnBusy]}
+                onPress={() => openExternalStory(activeExternalJob)}
+                disabled={storyBusy}
+                activeOpacity={0.85}
+              >
+                {storyBusy ? (
+                  <ActivityIndicator color="#0a0a0a" />
+                ) : (
+                  <Text style={styles.modalStoryBtnText}>Download story</Text>
+                )}
+              </TouchableOpacity>
+            ) : null}
             <View style={styles.modalActions}>
-              {isCeoUser && activeExternalJob ? (
-                <>
-                  <TouchableOpacity
-                    style={styles.modalGhost}
-                    onPress={() => openExternalStory(activeExternalJob)}
-                    disabled={storyBusy}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.modalGhostText}>{storyBusy ? 'Story…' : 'Story image'}</Text>
-                  </TouchableOpacity>
+                  {isCeoUser && activeExternalJob ? (
                   <TouchableOpacity
                     style={styles.modalGhost}
                     onPress={() => setExternalShareOpen(true)}
@@ -693,8 +683,7 @@ export default function JobsListScreen() {
                   >
                     <Text style={styles.modalGhostText}>Share link</Text>
                   </TouchableOpacity>
-                </>
-              ) : null}
+                  ) : null}
               <TouchableOpacity
                 style={styles.modalGhost}
                 onPress={() => {
@@ -1110,6 +1099,7 @@ const styles = StyleSheet.create({
     padding: 16,
     maxHeight: '88%',
   },
+  modalScroll: { flexGrow: 0, flexShrink: 1 },
   modalScrollContent: {
     paddingBottom: 4,
   },
