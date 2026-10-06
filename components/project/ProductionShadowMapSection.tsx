@@ -11,7 +11,7 @@ import type { ProductionShadowMapSectionProps } from '@/components/project/produ
 
 export type { ProductionShadowMapSectionProps } from '@/components/project/productionShadowMapTypes'
 
-const MAP_HEIGHT = 280
+const MAP_HEIGHT = 420
 
 type WebViewMessageEvent = { nativeEvent: { data: string } }
 type NativeWebViewComponent = React.ComponentType<{
@@ -226,43 +226,43 @@ export function ProductionShadowMapSection({
           nestedScrollEnabled
           androidLayerType={Platform.OS === 'android' ? 'hardware' : undefined}
         />
-        <View style={styles.timeOverlay} pointerEvents="box-none">
-          <View style={styles.timeHead}>
-            <Text style={styles.timeLabel}>Time scrub</Text>
-            <Text style={styles.timeValue}>{timeLabel}</Text>
-          </View>
-          <View style={styles.timeStepRow}>
-            <TouchableOpacity style={styles.timeStepBtn} onPress={() => onNudgeMinutes(-30)}>
-              <Text style={styles.timeStepText}>-30m</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.timeStepBtn} onPress={() => onNudgeMinutes(-15)}>
-              <Text style={styles.timeStepText}>-15m</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.timeStepBtn} onPress={onSetNow}>
-              <Text style={styles.timeStepText}>Now</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.timeStepBtn} onPress={() => onNudgeMinutes(15)}>
-              <Text style={styles.timeStepText}>+15m</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.timeStepBtn} onPress={() => onNudgeMinutes(30)}>
-              <Text style={styles.timeStepText}>+30m</Text>
-            </TouchableOpacity>
-          </View>
-          {sliderAvailable ? (
-            <Slider
-              minimumValue={0}
-              maximumValue={1439}
-              step={1}
-              value={timeMinutes}
-              onValueChange={onTimeMinutesChange}
-              minimumTrackTintColor="#FFDC00"
-              maximumTrackTintColor="rgba(255,255,255,0.22)"
-              thumbTintColor="#FFDC00"
-            />
-          ) : (
-            <Text style={styles.timeFallback}>The slider activates after a new iOS build.</Text>
-          )}
+      </View>
+      <View style={styles.timeOverlay}>
+        <View style={styles.timeHead}>
+          <Text style={styles.timeLabel}>Time scrub</Text>
+          <Text style={styles.timeValue}>{timeLabel}</Text>
         </View>
+        <View style={styles.timeStepRow}>
+          <TouchableOpacity style={styles.timeStepBtn} onPress={() => onNudgeMinutes(-30)}>
+            <Text style={styles.timeStepText}>-30m</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.timeStepBtn} onPress={() => onNudgeMinutes(-15)}>
+            <Text style={styles.timeStepText}>-15m</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.timeStepBtn} onPress={onSetNow}>
+            <Text style={styles.timeStepText}>Now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.timeStepBtn} onPress={() => onNudgeMinutes(15)}>
+            <Text style={styles.timeStepText}>+15m</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.timeStepBtn} onPress={() => onNudgeMinutes(30)}>
+            <Text style={styles.timeStepText}>+30m</Text>
+          </TouchableOpacity>
+        </View>
+        {sliderAvailable ? (
+          <Slider
+            minimumValue={0}
+            maximumValue={1439}
+            step={1}
+            value={timeMinutes}
+            onValueChange={onTimeMinutesChange}
+            minimumTrackTintColor="#FFDC00"
+            maximumTrackTintColor="rgba(255,255,255,0.22)"
+            thumbTintColor="#FFDC00"
+          />
+        ) : (
+          <Text style={styles.timeFallback}>The slider activates after a new iOS build.</Text>
+        )}
       </View>
       <Text style={styles.metaHint}>Dark area = estimated shadow footprint. Yellow line = sun direction.</Text>
       <TouchableOpacity style={styles.resetBtn} onPress={onResetSubject}>
@@ -304,16 +304,13 @@ const styles = StyleSheet.create({
   },
   map: { width: '100%', backgroundColor: '#111' },
   timeOverlay: {
-    position: 'absolute',
-    left: 10,
-    right: 10,
-    bottom: 10,
+    marginTop: 8,
     borderRadius: 12,
     paddingVertical: 8,
     paddingHorizontal: 10,
-    backgroundColor: 'rgba(10,10,10,0.72)',
+    backgroundColor: '#111',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   timeHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   timeLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: '700' },
