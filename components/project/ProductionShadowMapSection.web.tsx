@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import {
   MAPBOX_GL_VERSION,
@@ -7,10 +7,7 @@ import {
   canShowShadowMap,
   getMapboxAccessToken,
 } from '@/lib/mapboxConfig'
-import {
-  buildSunPlannerMapPayload,
-  type ShadowRealism,
-} from '@/lib/sunPlannerMapModel'
+import { buildSunPlannerMapPayload } from '@/lib/sunPlannerMapModel'
 import type { ProductionShadowMapSectionProps } from '@/components/project/productionShadowMapTypes'
 
 const MAPBOX_JS_URL = `https://api.mapbox.com/mapbox-gl-js/${MAPBOX_GL_VERSION}/mapbox-gl.js`
@@ -293,7 +290,6 @@ export function ProductionShadowMapSection({
   const mapRef = useRef<any>(null)
   const token = getMapboxAccessToken()
   const ready = canShowShadowMap()
-  const [realism, setRealism] = useState<ShadowRealism>('subtle')
 
   const payload = useMemo(
     () =>
@@ -302,9 +298,9 @@ export function ProductionShadowMapSection({
         sunAzimuthDeg,
         sunAltitudeDeg,
         subjectHeightM,
-        realism,
+        realism: 'subtle',
       }),
-    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, realism]
+    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM]
   )
   useEffect(() => {
     if (!ready || !token || !mapElRef.current) return
@@ -376,19 +372,6 @@ export function ProductionShadowMapSection({
       <Text style={styles.hint}>
         Tap the map to place the subject. Buildings and trees cast shadows from the selected time.
       </Text>
-      <View style={styles.realismRow}>
-        {(['subtle', 'balanced', 'strong'] as const).map((key) => (
-          <TouchableOpacity
-            key={key}
-            style={[styles.realismBtn, realism === key && styles.realismBtnOn]}
-            onPress={() => setRealism(key)}
-          >
-            <Text style={[styles.realismText, realism === key && styles.realismTextOn]}>
-              {key[0].toUpperCase() + key.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
 
       <View style={styles.mapShell}>
         <div ref={mapElRef} style={{ width: '100%', height: '100%' }} />
@@ -442,19 +425,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
   },
-  realismRow: { flexDirection: 'row', gap: 8 },
-  realismBtn: {
-    flex: 1,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-    backgroundColor: '#141414',
-    paddingVertical: 7,
-    alignItems: 'center',
-  },
-  realismBtnOn: { borderColor: '#FFDC00', backgroundColor: 'rgba(255,220,0,0.12)' },
-  realismText: { color: 'rgba(255,255,255,0.74)', fontSize: 11, fontWeight: '700' },
-  realismTextOn: { color: '#FFDC00' },
   mapShell: {
     width: '100%',
     height: MAP_HEIGHT,

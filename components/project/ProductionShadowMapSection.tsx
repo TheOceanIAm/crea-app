@@ -3,10 +3,7 @@ import { NativeModules, View, Text, StyleSheet, TouchableOpacity, Platform } fro
 import { getMapboxAccessToken, canShowShadowMap } from '@/lib/mapboxConfig'
 import { buildSunPlannerMapHtml } from '@/lib/sunPlannerMapHtml'
 import { TimeScrubSlider } from '@/components/project/TimeScrubSlider'
-import {
-  buildSunPlannerMapPayload,
-  type ShadowRealism,
-} from '@/lib/sunPlannerMapModel'
+import { buildSunPlannerMapPayload } from '@/lib/sunPlannerMapModel'
 import type { ProductionShadowMapSectionProps } from '@/components/project/productionShadowMapTypes'
 
 export type { ProductionShadowMapSectionProps } from '@/components/project/productionShadowMapTypes'
@@ -78,7 +75,6 @@ export function ProductionShadowMapSection({
   const webRef = useRef<{ injectJavaScript: (js: string) => void } | null>(null)
   const mapReadyRef = useRef(false)
   const [mapError, setMapError] = useState<string | null>(null)
-  const [realism, setRealism] = useState<ShadowRealism>('subtle')
 
   const html = useMemo(() => buildSunPlannerMapHtml(), [])
   const payload = useMemo(
@@ -88,9 +84,9 @@ export function ProductionShadowMapSection({
         sunAzimuthDeg,
         sunAltitudeDeg,
         subjectHeightM,
-        realism,
+        realism: 'subtle',
       }),
-    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, realism]
+    [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM]
   )
   const bootMap = useCallback(() => {
     if (!token || !webRef.current) return
@@ -169,19 +165,6 @@ export function ProductionShadowMapSection({
   return (
     <View style={styles.wrapper}>
       <Text style={styles.hint}>Tap map to place subject. Shadow is a flat-ground estimate (not real mesh).</Text>
-      <View style={styles.realismRow}>
-        {(['subtle', 'balanced', 'strong'] as const).map((key) => (
-          <TouchableOpacity
-            key={key}
-            style={[styles.realismBtn, realism === key && styles.realismBtnOn]}
-            onPress={() => setRealism(key)}
-          >
-            <Text style={[styles.realismText, realism === key && styles.realismTextOn]}>
-              {key[0].toUpperCase() + key.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
       {mapError ? <Text style={styles.mapErr}>{mapError}</Text> : null}
       <View style={styles.mapShell}>
         <WebView
@@ -256,19 +239,6 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     marginBottom: 8,
   },
-  realismRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  realismBtn: {
-    flex: 1,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-    backgroundColor: '#141414',
-    paddingVertical: 7,
-    alignItems: 'center',
-  },
-  realismBtnOn: { borderColor: '#FFDC00', backgroundColor: 'rgba(255,220,0,0.12)' },
-  realismText: { color: 'rgba(255,255,255,0.74)', fontSize: 11, fontWeight: '700' },
-  realismTextOn: { color: '#FFDC00' },
   mapErr: { color: '#ff9b9b', fontSize: 12, marginBottom: 6 },
   mapShell: {
     position: 'relative',
