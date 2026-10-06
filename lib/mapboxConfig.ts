@@ -30,22 +30,12 @@ export const MAPBOX_GL_VERSION = 'v3.32.0'
 
 export const MAPBOX_STANDARD_STYLE = 'mapbox://styles/mapbox/standard'
 
-export const MAPBOX_SATELLITE_STYLE = 'mapbox://styles/mapbox/standard-satellite'
-
 /** Basemap tweaks for the oblique sun study: 3D city, no label clutter. */
 export const MAPBOX_STANDARD_BASEMAP = {
   show3dObjects: true,
   show3dBuildings: true,
   show3dTrees: true,
   show3dFacades: true,
-  showPlaceLabels: false,
-  showRoadLabels: false,
-  showPointOfInterestLabels: false,
-  showTransitLabels: false,
-} as const
-
-/** Satellite keeps the same quiet labels. 3D object toggles are not part of this style. */
-export const MAPBOX_SATELLITE_BASEMAP = {
   showPlaceLabels: false,
   showRoadLabels: false,
   showPointOfInterestLabels: false,

@@ -1,10 +1,4 @@
-import {
-  MAPBOX_GL_VERSION,
-  MAPBOX_SATELLITE_BASEMAP,
-  MAPBOX_SATELLITE_STYLE,
-  MAPBOX_STANDARD_BASEMAP,
-  MAPBOX_STANDARD_STYLE,
-} from '@/lib/mapboxConfig'
+import { MAPBOX_GL_VERSION, MAPBOX_STANDARD_BASEMAP, MAPBOX_STANDARD_STYLE } from '@/lib/mapboxConfig'
 
 /**
  * Self-contained Mapbox GL JS document for Sun Planner (native WebView).
@@ -12,14 +6,7 @@ import {
  * subject taps via ReactNativeWebView.postMessage.
  */
 export function buildSunPlannerMapHtml(): string {
-  const styleUrls = JSON.stringify({
-    standard: MAPBOX_STANDARD_STYLE,
-    satellite: MAPBOX_SATELLITE_STYLE,
-  })
-  const styleConfigs = JSON.stringify({
-    standard: MAPBOX_STANDARD_BASEMAP,
-    satellite: MAPBOX_SATELLITE_BASEMAP,
-  })
+  const basemapConfig = JSON.stringify(MAPBOX_STANDARD_BASEMAP)
   // Keep HTML free of secrets; token arrives with __creaBoot.
   return `<!DOCTYPE html>
 <html>
@@ -40,16 +27,8 @@ export function buildSunPlannerMapHtml(): string {
 (function () {
   var map = null;
   var layersReady = false;
-  var currentStyleKey = 'standard';
-  var styleGeneration = 0;
   var followedCenter = null;
   var emptyFc = { type: 'FeatureCollection', features: [] };
-  var STYLE_URLS = ${styleUrls};
-  var STYLE_CONFIGS = ${styleConfigs};
-
-  function styleKeyFrom(state) {
-    return state && state.basemap === 'satellite' ? 'satellite' : 'standard';
-  }
 
   function sameCenter(a, b) {
     if (!a || !b) return false;
@@ -220,23 +199,6 @@ export function buildSunPlannerMapHtml(): string {
 
   function applyState(state) {
     if (!map || !state) return;
-    var nextKey = styleKeyFrom(state);
-    if (nextKey !== currentStyleKey) {
-      currentStyleKey = nextKey;
-      layersReady = false;
-      var generation = ++styleGeneration;
-      var center = map.getCenter();
-      var zoom = map.getZoom();
-      var pitch = map.getPitch();
-      var bearing = map.getBearing();
-      map.setStyle(STYLE_URLS[nextKey], { config: { basemap: STYLE_CONFIGS[nextKey] } });
-      map.once('style.load', function () {
-        if (generation !== styleGeneration) return;
-        map.jumpTo({ center: center, zoom: zoom, pitch: pitch, bearing: bearing });
-        applyState(state);
-      });
-      return;
-    }
     if (map.isStyleLoaded && !map.isStyleLoaded()) return;
     ensureLayers();
 
@@ -295,12 +257,11 @@ export function buildSunPlannerMapHtml(): string {
       mapboxgl.accessToken = token;
       var state = (cfg && cfg.state) || {};
       var cam = state.camera || {};
-      currentStyleKey = styleKeyFrom(state);
       followedCenter = cam.center || null;
       map = new mapboxgl.Map({
         container: 'map',
-        style: STYLE_URLS[currentStyleKey],
-        config: { basemap: STYLE_CONFIGS[currentStyleKey] },
+        style: '${MAPBOX_STANDARD_STYLE}',
+        config: { basemap: ${basemapConfig} },
         center: cam.center || [0, 0],
         zoom: cam.zoom != null ? cam.zoom : 15.2,
         pitch: cam.pitch != null ? cam.pitch : 45,

@@ -79,7 +79,6 @@ export function ProductionShadowMapSection({
   const mapReadyRef = useRef(false)
   const [mapError, setMapError] = useState<string | null>(null)
   const [realism, setRealism] = useState<ShadowRealism>('subtle')
-  const [basemap, setBasemap] = useState<'standard' | 'satellite'>('standard')
 
   const html = useMemo(() => buildSunPlannerMapHtml(), [])
   const payload = useMemo(
@@ -93,22 +92,20 @@ export function ProductionShadowMapSection({
       }),
     [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, realism]
   )
-  const mapState = useMemo(() => ({ ...payload, basemap }), [payload, basemap])
-
   const bootMap = useCallback(() => {
     if (!token || !webRef.current) return
     webRef.current.injectJavaScript(
       injectJson('__creaBoot', {
         token,
-        state: mapState,
+        state: payload,
       })
     )
-  }, [token, mapState])
+  }, [token, payload])
 
   const pushUpdate = useCallback(() => {
     if (!mapReadyRef.current || !webRef.current) return
-    webRef.current.injectJavaScript(injectJson('__creaUpdate', mapState))
-  }, [mapState])
+    webRef.current.injectJavaScript(injectJson('__creaUpdate', payload))
+  }, [payload])
 
   useEffect(() => {
     pushUpdate()
@@ -172,19 +169,6 @@ export function ProductionShadowMapSection({
   return (
     <View style={styles.wrapper}>
       <Text style={styles.hint}>Tap map to place subject. Shadow is a flat-ground estimate (not real mesh).</Text>
-      <View style={styles.realismRow}>
-        {(['standard', 'satellite'] as const).map((key) => (
-          <TouchableOpacity
-            key={key}
-            style={[styles.realismBtn, basemap === key && styles.realismBtnOn]}
-            onPress={() => setBasemap(key)}
-          >
-            <Text style={[styles.realismText, basemap === key && styles.realismTextOn]}>
-              {key === 'standard' ? '3D' : 'Satellite'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
       <View style={styles.realismRow}>
         {(['subtle', 'balanced', 'strong'] as const).map((key) => (
           <TouchableOpacity
