@@ -13,5 +13,4 @@ export type ProductionShadowMapSectionProps = {
   onTimeMinutesChange: (minutes: number) => void
   onNudgeMinutes: (delta: number) => void
   onSetNow: () => void
-  sliderAvailable: boolean
 }

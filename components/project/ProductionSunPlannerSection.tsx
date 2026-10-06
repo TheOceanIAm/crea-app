@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, NativeModules, Platform, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native'
-import Slider from '@react-native-community/slider'
+import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import {
   fetchForecast7Days,
   geocodeLocation,
@@ -10,6 +9,7 @@ import {
 } from '@/lib/openMeteoWeather'
 import { canShowShadowMap, isShadowMapFeatureEnabled } from '@/lib/mapboxConfig'
 import { ProductionShadowMapSection } from '@/components/project/ProductionShadowMapSection'
+import { TimeScrubSlider } from '@/components/project/TimeScrubSlider'
 
 type Props = {
   initialLocation?: string | null
@@ -158,10 +158,6 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
   const [forecast, setForecast] = useState<DailyForecastDay[]>([])
   const [forecastError, setForecastError] = useState<string | null>(null)
   const [weatherOpen, setWeatherOpen] = useState(false)
-  const sliderNativeAvailable =
-    Platform.OS === 'web' ||
-    !!(NativeModules as Record<string, unknown>).RNCSlider ||
-    !!UIManager.getViewManagerConfig?.('RNCSlider')
 
   useEffect(() => {
     setQuery((prev) => (prev.trim() ? prev : initialLocation?.trim() ?? ''))
@@ -383,22 +379,12 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
               <Text style={styles.timeSliderLabel}>Time scrub</Text>
               <Text style={styles.timeSliderValue}>{timeInput}</Text>
             </View>
-            {sliderNativeAvailable ? (
-              <Slider
-                minimumValue={0}
-                maximumValue={1439}
-                step={1}
-                value={sliderMinutes}
-                onValueChange={(v) => setTimeInput(minutesToHHmm(v))}
-                minimumTrackTintColor="#FFDC00"
-                maximumTrackTintColor="rgba(255,255,255,0.18)"
-                thumbTintColor="#FFDC00"
-              />
-            ) : (
-              <Text style={styles.timeSliderFallback}>
-                The slider activates after a new iOS build. Until then, use the - / + buttons.
-              </Text>
-            )}
+            <TimeScrubSlider
+              minimumValue={0}
+              maximumValue={1439}
+              value={sliderMinutes}
+              onValueChange={(v) => setTimeInput(minutesToHHmm(v))}
+            />
           </View>
         </>
       ) : null}
@@ -466,7 +452,6 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
             onTimeMinutesChange={(minutes) => setTimeInput(minutesToHHmm(minutes))}
             onNudgeMinutes={(delta) => setTimeInput((v) => shiftHHmm(v, delta))}
             onSetNow={() => setTimeInput(nowHHmm())}
-            sliderAvailable={sliderNativeAvailable}
           />
         </View>
       ) : null}
@@ -555,7 +540,6 @@ const styles = StyleSheet.create({
   timeSliderHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   timeSliderLabel: { color: 'rgba(255,255,255,0.58)', fontSize: 11, fontWeight: '700' },
   timeSliderValue: { color: '#FFDC00', fontSize: 12, fontWeight: '800' },
-  timeSliderFallback: { color: 'rgba(255,255,255,0.5)', fontSize: 11, marginVertical: 8 },
   input: {
     flex: 1,
     backgroundColor: '#111',

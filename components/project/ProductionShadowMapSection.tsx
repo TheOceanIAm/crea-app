@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { NativeModules, UIManager, View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native'
-import Slider from '@react-native-community/slider'
+import { NativeModules, View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native'
 import { getMapboxAccessToken, canShowShadowMap } from '@/lib/mapboxConfig'
 import { buildSunPlannerMapHtml } from '@/lib/sunPlannerMapHtml'
+import { TimeScrubSlider } from '@/components/project/TimeScrubSlider'
 import {
   buildSunPlannerMapPayload,
   type ShadowRealism,
@@ -36,23 +36,23 @@ type NativeWebViewComponent = React.ComponentType<{
   androidLayerType?: string
 }>
 
+let webViewCache: NativeWebViewComponent | null | undefined
+
 function loadNativeWebView(): NativeWebViewComponent | null {
+  if (webViewCache !== undefined) return webViewCache
   try {
     const natives = NativeModules as Record<string, unknown>
-    const hasNative =
-      !!natives.RNCWebView ||
-      !!natives.RNCWebViewModule ||
-      !!UIManager.getViewManagerConfig?.('RNCWebView') ||
-      !!UIManager.getViewManagerConfig?.('RNCWebViewModule')
-    if (!hasNative) return null
+    if (!natives.RNCWebView && !natives.RNCWebViewModule) {
+      webViewCache = null
+      return null
+    }
     // Only require JS after the native binary is confirmed — otherwise TurboModuleRegistry throws.
-    return require('react-native-webview').WebView as NativeWebViewComponent
+    webViewCache = require('react-native-webview').WebView as NativeWebViewComponent
   } catch {
-    return null
+    webViewCache = null
   }
+  return webViewCache
 }
-
-const WebView = loadNativeWebView()
 
 function injectJson(fnName: string, value: unknown): string {
   // JSON is safe inside a single-quoted JS string when we escape quotes/newlines via stringify twice.
@@ -71,8 +71,8 @@ export function ProductionShadowMapSection({
   onTimeMinutesChange,
   onNudgeMinutes,
   onSetNow,
-  sliderAvailable,
 }: ProductionShadowMapSectionProps) {
+  const WebView = loadNativeWebView()
   const token = getMapboxAccessToken()
   const ready = canShowShadowMap()
   const webRef = useRef<{ injectJavaScript: (js: string) => void } | null>(null)
@@ -233,20 +233,12 @@ export function ProductionShadowMapSection({
             <Text style={styles.timeStepText}>+30m</Text>
           </TouchableOpacity>
         </View>
-        {sliderAvailable ? (
-          <Slider
-            minimumValue={0}
-            maximumValue={1439}
-            step={1}
-            value={timeMinutes}
-            onValueChange={onTimeMinutesChange}
-            minimumTrackTintColor="#FFDC00"
-            maximumTrackTintColor="rgba(255,255,255,0.22)"
-            thumbTintColor="#FFDC00"
-          />
-        ) : (
-          <Text style={styles.timeFallback}>The slider activates after a new iOS build.</Text>
-        )}
+        <TimeScrubSlider
+          minimumValue={0}
+          maximumValue={1439}
+          value={timeMinutes}
+          onValueChange={onTimeMinutesChange}
+        />
       </View>
       <Text style={styles.metaHint}>Dark area = estimated shadow footprint. Yellow line = sun direction.</Text>
       <TouchableOpacity style={styles.resetBtn} onPress={onResetSubject}>
@@ -310,7 +302,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   timeStepText: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  timeFallback: { color: 'rgba(255,255,255,0.68)', fontSize: 10, marginTop: 2 },
   metaHint: { color: 'rgba(255,255,255,0.52)', fontSize: 11, marginTop: 8 },
   resetBtn: {
     marginTop: 10,
