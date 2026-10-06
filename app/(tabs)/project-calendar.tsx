@@ -90,7 +90,7 @@ export default function ProjectCalendarScreen() {
         <Text style={styles.title}>Booked days,</Text>
         <Text style={styles.titleAccent}>in your calendar.</Text>
         <Text style={styles.subtitle}>
-          When you are booked, those days show as the project title with a link to the project. If you own the job, the same entry is added for every booked day.
+          When you are booked, those days show as the project title with a link to the project. If you own the job, the production window shows up the same way.
         </Text>
 
         {loading ? <ActivityIndicator color="#FFDC00" style={{ marginTop: 24 }} /> : null}
