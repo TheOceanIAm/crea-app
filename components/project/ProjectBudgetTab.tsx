@@ -28,6 +28,7 @@ import {
   type TimesheetHourEntry,
 } from '@/lib/projectInternalBudget'
 import { ProjectTimesheetPanel } from '@/components/project/ProjectTimesheetPanel'
+import { ProjectClientPaymentStatus } from '@/components/project/ProjectClientBillingCard'
 import { commonRentalPeriod, fetchProductionEquipment } from '@/lib/productionLists'
 import { syncProjectListingBudget } from '@/lib/syncProjectListingBudget'
 import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
@@ -493,6 +494,8 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
           ? 'Internal planning only. Equipment cost uses kit-list qty × unit price. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'
           : 'Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each person\'s public day / half-day rate when set. Equipment cost uses kit-list qty × unit price. Current uses logged hours during the shoot (10 hours = one day) and keeps unlogged days on the booking. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'}
       </Text>
+
+      <ProjectClientPaymentStatus projectId={projectId} />
 
       <BudgetFold
         title="Targets"
