@@ -1,3 +1,4 @@
+import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { supabase } from '@/lib/supabase'
 import { fetchCreaApi } from '@/lib/creaApiFetch'
 
@@ -246,7 +247,15 @@ export async function insertProductionTask(
     .select(TASK_SELECT)
     .single()
   if (error) return { row: null, error: error.message }
-  return { row: mapTask(data as Record<string, unknown>), error: null }
+  const row = mapTask(data as Record<string, unknown>)
+  void notifyProductionTaskAssignee({
+    projectId,
+    taskId: row.id,
+    taskTitle: row.title,
+    assigneeProfileId: row.assignee_profile_id,
+    previousAssigneeProfileId: null,
+  })
+  return { row, error: null }
 }
 
 export async function updateProductionTask(
@@ -259,13 +268,54 @@ export async function updateProductionTask(
   if (patch.title != null) body.title = patch.title
   if (patch.notes != null) body.notes = patch.notes
   if (patch.done != null) body.done = patch.done
+  let previousAssigneeProfileId: string | null = null
+  let projectId = ''
+  let taskTitle = patch.title?.trim() ?? ''
   if (patch.assignee) {
+    const { data: existing } = await supabase
+      .from('production_tasks')
+      .select('project_id, title, assignee_profile_id')
+      .eq('id', id)
+      .maybeSingle()
+    previousAssigneeProfileId =
+      typeof existing?.assignee_profile_id === 'string' ? existing.assignee_profile_id : null
+    projectId = typeof existing?.project_id === 'string' ? existing.project_id : ''
+    if (!taskTitle) taskTitle = String(existing?.title ?? '').trim()
     body.assignee_name = patch.assignee.name.trim()
     body.assignee_profile_id = patch.assignee.profileId
     body.assignee_manual_crew_id = patch.assignee.manualCrewId
   }
   const { error } = await supabase.from('production_tasks').update(body).eq('id', id)
+  if (!error && patch.assignee && projectId) {
+    void notifyProductionTaskAssignee({
+      projectId,
+      taskId: id,
+      taskTitle: taskTitle || 'Task',
+      assigneeProfileId: patch.assignee.profileId,
+      previousAssigneeProfileId,
+    })
+  }
   return { error: error?.message ?? null }
+}
+
+async function notifyProductionTaskAssignee(opts: {
+  projectId: string
+  taskId: string
+  taskTitle: string
+  assigneeProfileId: string | null
+  previousAssigneeProfileId: string | null
+}): Promise<void> {
+  const assigneeId = opts.assigneeProfileId?.trim() || ''
+  if (!assigneeId || assigneeId === (opts.previousAssigneeProfileId?.trim() || '')) return
+  const { data } = await supabase.auth.getUser()
+  if (!data.user || data.user.id === assigneeId) return
+  await notifyExpoEvent({
+    kind: 'task_assigned',
+    projectId: opts.projectId,
+    taskId: opts.taskId,
+    assigneeProfileId: assigneeId,
+    taskTitle: opts.taskTitle,
+  })
 }
 
 export async function deleteProductionTask(id: string): Promise<{ error: string | null }> {

@@ -8,6 +8,7 @@ export type NotifyExpoKind =
   | 'workspace_activity'
   | 'workspace_ready'
   | 'project_crew_invite'
+  | 'task_assigned'
 
 export async function notifyExpoEvent(payload: Record<string, unknown>): Promise<void> {
   try {

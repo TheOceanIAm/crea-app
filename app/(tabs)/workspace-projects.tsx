@@ -230,8 +230,9 @@ export default function WorkspaceProjectsScreen() {
     if (viewerRole !== 'freelancer') {
       return [{ title: '', subtitle: '', data: listings }]
     }
-    const jobs = listings.filter((x) => x.kind === 'customer')
-    const priv = listings.filter((x) => x.kind === 'private')
+    const completed = listings.filter((x) => x.statusLabel === 'COMPLETED')
+    const jobs = listings.filter((x) => x.kind === 'customer' && x.statusLabel !== 'COMPLETED')
+    const priv = listings.filter((x) => x.kind === 'private' && x.statusLabel !== 'COMPLETED')
     const sections: ListingSection[] = []
     if (jobs.length > 0) {
       sections.push({
@@ -245,6 +246,13 @@ export default function WorkspaceProjectsScreen() {
         title: 'Private workspaces',
         subtitle: 'Projects you created yourself — full edit, archive, and delete.',
         data: priv,
+      })
+    }
+    if (completed.length > 0) {
+      sections.push({
+        title: 'Completed',
+        subtitle: 'Finished projects stay here so you can still open files, call sheets, and the workspace.',
+        data: completed,
       })
     }
     return sections.length > 0 ? sections : [{ title: '', subtitle: '', data: [] }]

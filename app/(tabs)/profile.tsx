@@ -2843,21 +2843,21 @@ export default function ProfileScreen() {
                 <ChevronRight size={18} color="rgba(255,255,255,0.2)" strokeWidth={ICON_STROKE} />
               </TouchableOpacity>
 
+              <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+                <Text style={styles.logoutText}>Sign out</Text>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={[styles.deleteAccountBtn, deleteAccountBusy && styles.btnDisabled]}
                 onPress={confirmDeleteAccount}
                 disabled={deleteAccountBusy}
-                activeOpacity={0.75}
+                activeOpacity={0.6}
               >
                 {deleteAccountBusy ? (
-                  <ActivityIndicator color="#ff8888" />
+                  <ActivityIndicator color="rgba(255,107,107,0.7)" size="small" />
                 ) : (
                   <Text style={styles.deleteAccountText}>Delete account</Text>
                 )}
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-                <Text style={styles.logoutText}>Sign out</Text>
               </TouchableOpacity>
             </>
           )}
@@ -3174,29 +3174,25 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   linkRowLabel: { flex: 1, fontSize: 15, color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
-  deleteAccountBtn: {
-    alignSelf: 'stretch',
-    marginTop: 24,
-    marginBottom: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(255,80,80,0.55)',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,60,60,0.08)',
-  },
-  deleteAccountText: { color: '#ff6b6b', fontSize: 15, fontWeight: '700' },
   logoutBtn: {
-    alignSelf: 'center',
-    marginTop: 16,
-    marginBottom: 8,
+    alignSelf: 'stretch',
+    marginTop: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255,50,50,0.35)',
+    borderColor: 'rgba(255,50,50,0.45)',
     borderRadius: 100,
-    paddingHorizontal: 28,
-    paddingVertical: 13,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  logoutText: { color: '#ff5555', fontSize: 14, fontWeight: '600' },
+  logoutText: { color: '#ff5555', fontSize: 17, fontWeight: '700' },
+  deleteAccountBtn: {
+    alignSelf: 'center',
+    marginTop: 14,
+    marginBottom: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  deleteAccountText: { color: 'rgba(255,107,107,0.72)', fontSize: 12, fontWeight: '400' },
   trialBarEmbedded: {
     marginTop: 14,
     marginBottom: 4,

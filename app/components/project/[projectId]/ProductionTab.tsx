@@ -51,9 +51,12 @@ import {
 import { overlayPendingStatuses, queueShotStatus, flushShotStatusOutbox, pendingShotStatusCount } from '@/lib/offlineShotOutbox'
 import { buildCallSheetHtml } from '@/lib/offlineCallSheetPdf'
 import { CallSheetDayHeader } from '@/components/project/CallSheetDayHeader'
+import { CallSheetScheduleCards, type CallSheetAdvanceCard } from '@/components/project/CallSheetScheduleCards'
 import {
   emptyCallSheet,
   parseCallSheet,
+  callSheetDayLabel,
+  formatCallSheetDate,
   personCallTime,
   personLocation,
   serializeCallSheet,
@@ -64,6 +67,7 @@ import {
   type CallSheetDocument,
   type CallSheetPersonCell,
   type CallSheetPlaces,
+  type CallSheetSceneRow,
   EMPTY_CALL_SHEET_CONTACTS,
   EMPTY_CALL_SHEET_DAY,
   EMPTY_CALL_SHEET_DEPARTMENTS,
@@ -465,6 +469,8 @@ export function ProductionTab({
   })
   const [contactsDraft, setContactsDraft] = useState<CallSheetContacts>({ ...EMPTY_CALL_SHEET_CONTACTS })
   const [backgroundDraft, setBackgroundDraft] = useState<CallSheetBackgroundRow[]>([])
+  const [scenesDraft, setScenesDraft] = useState<CallSheetSceneRow[]>([])
+  const [advance, setAdvance] = useState<CallSheetAdvanceCard | null>(null)
   const [wrapDraft, setWrapDraft] = useState('')
   const [notesDraft, setNotesDraft] = useState('')
   const [callSheetDirty, setCallSheetDirty] = useState(false)
@@ -696,6 +702,7 @@ export function ProductionTab({
     setDepartmentsDraft(doc.departments)
     setContactsDraft(doc.contacts)
     setBackgroundDraft(doc.background)
+    setScenesDraft(doc.scenes)
   }, [])
 
   const currentCallSheetDoc = useCallback((): CallSheetDocument => {
@@ -708,6 +715,7 @@ export function ProductionTab({
       departments: departmentsDraft,
       background: backgroundDraft,
       contacts: contactsDraft,
+      scenes: scenesDraft,
     })
   }, [
     callDraft,
@@ -717,6 +725,7 @@ export function ProductionTab({
     departmentsDraft,
     backgroundDraft,
     contactsDraft,
+    scenesDraft,
   ])
 
   const markCallSheetDirty = useCallback(() => {
@@ -753,20 +762,82 @@ export function ProductionTab({
     callSheetDirtyRef.current = callSheetDirty
   }, [callSheetDirty])
 
+  const appliedCallDayRef = useRef<string | null>(null)
+
   useEffect(() => {
-    if (!prodDay) {
-      applyCallSheetDocToDrafts(emptyCallSheet())
-      setWrapDraft('')
-      setNotesDraft('')
-      setCallSheetDirty(false)
-      callSheetDirtyRef.current = false
+    if (!prodDay || prodDay.date.slice(0, 10) !== shootDay) {
+      if (!prodDay) {
+        applyCallSheetDocToDrafts(emptyCallSheet())
+        setWrapDraft('')
+        setNotesDraft('')
+        setCallSheetDirty(false)
+        callSheetDirtyRef.current = false
+        appliedCallDayRef.current = null
+      }
       return
     }
-    if (callSheetDirty) return
+    const sameDay = appliedCallDayRef.current === shootDay
+    if (callSheetDirty && sameDay) return
+    appliedCallDayRef.current = shootDay
     applyCallSheetDocToDrafts(parseCallSheet(prodDay.call_sheet))
     setWrapDraft(prodDay.wrap_time ?? '')
     setNotesDraft(prodDay.notes ?? '')
+    if (!sameDay) {
+      setCallSheetDirty(false)
+      callSheetDirtyRef.current = false
+    }
   }, [prodDay, shootDay, callSheetDirty, applyCallSheetDocToDrafts])
+
+  const nextShootDay = useMemo(() => {
+    const index = productionDays.indexOf(shootDay)
+    if (index < 0 || index >= productionDays.length - 1) return null
+    return productionDays[index + 1]
+  }, [productionDays, shootDay])
+
+  useEffect(() => {
+    if (!nextShootDay) {
+      setAdvance(null)
+      return
+    }
+    const dayLabel = callSheetDayLabel(productionDays.indexOf(nextShootDay) + 1, productionDays.length || null)
+    if (usingOfflinePack) {
+      setAdvance({
+        dateLabel: formatCallSheetDate(nextShootDay),
+        dayLabel,
+        generalCall: '',
+        notes: '',
+        sceneCount: 0,
+        filled: false,
+      })
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const { data } = await supabase
+        .from('production_days')
+        .select('notes, call_sheet')
+        .eq('project_id', projectId)
+        .eq('date', nextShootDay)
+        .maybeSingle()
+      if (cancelled) return
+      const doc = parseCallSheet(data?.call_sheet)
+      const notesLine = String(data?.notes ?? '')
+        .trim()
+        .split('\n')[0]
+        .trim()
+      setAdvance({
+        dateLabel: formatCallSheetDate(nextShootDay),
+        dayLabel,
+        generalCall: doc.day.general_call.trim(),
+        notes: notesLine,
+        sceneCount: doc.scenes.length,
+        filled: Boolean(doc.day.general_call.trim() || doc.scenes.length || notesLine || Object.keys(doc.people).length),
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [nextShootDay, productionDays, projectId, usingOfflinePack])
 
   const fetchProdDayOnly = useCallback(async () => {
     if (!projectId || !shootDay) return
@@ -1114,6 +1185,7 @@ export function ProductionTab({
         callSheet: currentCallSheetDoc(),
         dayNumber: productionDays.indexOf(shootDay) >= 0 ? productionDays.indexOf(shootDay) + 1 : null,
         dayCount: productionDays.length || null,
+        advanceLabel: advance ? `${advance.dateLabel}${advance.dayLabel ? ` · ${advance.dayLabel}` : ''}` : null,
       })
 
       const { uri } = await Print.printToFileAsync({ html })
@@ -1622,6 +1694,39 @@ export function ProductionTab({
           })}
         </View>
       ) : null}
+      <CallSheetScheduleCards
+        editable={isCompany && !!prodDay && !usingOfflinePack}
+        people={callSheetCrew.map((m) => ({ key: m.key, name: m.name, roleLabel: m.roleLabel }))}
+        cells={callDraft}
+        onChangePerson={(key, patch) => {
+          if (!isCompany) return
+          markCallSheetDirty()
+          setCallDraft((prev) => ({
+            ...prev,
+            [key]: { ...(prev[key] ?? {}), ...patch },
+          }))
+        }}
+        scenes={scenesDraft}
+        onChangeScenes={(rows) => {
+          if (!isCompany) return
+          markCallSheetDirty()
+          setScenesDraft(rows)
+        }}
+        background={backgroundDraft}
+        onChangeBackground={(rows) => {
+          if (!isCompany) return
+          markCallSheetDirty()
+          setBackgroundDraft(rows)
+        }}
+        advance={advance}
+        onOpenAdvance={
+          nextShootDay
+            ? () => {
+                setShootDay(nextShootDay)
+              }
+            : undefined
+        }
+      />
         </CallSheetDayHeader>
 
       {!isCompany ? (

@@ -3,7 +3,7 @@ import { AppState, InteractionManager, Platform, StyleSheet, View } from 'react-
 import * as Notifications from 'expo-notifications'
 import { Tabs, usePathname } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Bell, Briefcase, House, LayoutDashboard, UserRound } from 'lucide-react-native'
+import { Bell, Briefcase, House, Layers, LayoutDashboard, UserRound } from 'lucide-react-native'
 import { FloatingGlassTabBar } from '@/components/FloatingGlassTabBar'
 import { floatingTabBarSlotHeight } from '@/lib/floatingTabBarLayout'
 import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
@@ -42,7 +42,7 @@ export default function TabLayout() {
   const [unreadAlertsCount, setUnreadAlertsCount] = useState(0)
   /** Bumps after an alerts recount so the icon badge is written back once counts exist. */
   const [iconBadgeRevision, setIconBadgeRevision] = useState(0)
-  /** Company: workspace projects tab. Freelancer/CEO: marketplace job pool tab. */
+  /** Company: Projects. Freelancer: Jobs and Projects (booked work, including completed). */
   const [showWorkspaceProjectsTab, setShowWorkspaceProjectsTab] = useState(false)
   const [showMarketplaceJobsTab, setShowMarketplaceJobsTab] = useState(false)
   const unreadAlertsInFlight = useRef<Promise<void> | null>(null)
@@ -99,8 +99,9 @@ export default function TabLayout() {
         const diskOverview = await hydrateDashboardOverviewFromDisk(user.id)
         const role = resolveAppRole(diskOverview?.role ?? hints?.role, user)
         const isCompanyAccount = role === 'company'
-        setShowWorkspaceProjectsTab(isCompanyAccount)
-        setShowMarketplaceJobsTab(isFreelancerProfile(role))
+        const isFreelancerAccount = isFreelancerProfile(role)
+        setShowWorkspaceProjectsTab(isCompanyAccount || isFreelancerAccount)
+        setShowMarketplaceJobsTab(isFreelancerAccount)
 
         if (!hints && !diskOverview) {
           const { data: profile } = await supabase
@@ -109,8 +110,9 @@ export default function TabLayout() {
             .eq('id', user.id)
             .maybeSingle()
           const fetchedRole = resolveAppRole(profile?.role, user)
-          setShowWorkspaceProjectsTab(fetchedRole === 'company')
-          setShowMarketplaceJobsTab(isFreelancerProfile(fetchedRole))
+          const fetchedFreelancer = isFreelancerProfile(fetchedRole)
+          setShowWorkspaceProjectsTab(fetchedRole === 'company' || fetchedFreelancer)
+          setShowMarketplaceJobsTab(fetchedFreelancer)
           await writeBootstrapHints(user.id, {
             role: fetchedRole,
             onboardingCompleted: !profileNeedsOnboarding(profile),
@@ -320,7 +322,7 @@ export default function TabLayout() {
             href: showWorkspaceProjectsTab ? '/(tabs)/workspace-projects' : null,
             title: 'Projects',
             tabBarIcon: ({ color, size }) => (
-              <Briefcase size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+              <Layers size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
             ),
           }}
         />

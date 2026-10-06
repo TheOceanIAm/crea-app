@@ -597,6 +597,59 @@ Deno.serve(async (req) => {
     })
   }
 
+  if (kind === 'task_assigned') {
+    const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : ''
+    const taskId = typeof body.taskId === 'string' ? body.taskId.trim() : ''
+    const assigneeProfileId = typeof body.assigneeProfileId === 'string' ? body.assigneeProfileId.trim() : ''
+    const taskTitleRaw = typeof body.taskTitle === 'string' ? body.taskTitle.trim() : ''
+    if (!projectId || !taskId || !assigneeProfileId) {
+      return new Response(JSON.stringify({ error: 'projectId, taskId and assigneeProfileId required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    if (assigneeProfileId === user.id) {
+      return new Response(JSON.stringify({ ok: true, notified: 0 }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const { recipientIds: members, projectTitle } = await workspaceRecipientIds(admin, {
+      projectId,
+      excludeUserId: '',
+    })
+    if (!members.includes(user.id)) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const { data: task } = await admin
+      .from('production_tasks')
+      .select('id, title, assignee_profile_id, project_id')
+      .eq('id', taskId)
+      .maybeSingle()
+    if (!task || String(task.project_id) !== projectId || String(task.assignee_profile_id ?? '') !== assigneeProfileId) {
+      return new Response(JSON.stringify({ error: 'Task assignment not found' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const taskTitle = taskTitleRaw || String(task.title ?? '').trim() || 'Task'
+    const res = await sendExpoPush({
+      recipientId: assigneeProfileId,
+      admin,
+      title: 'Task assigned',
+      body: `«${taskTitle}» on ${projectTitle}`,
+      data: { type: 'task_assigned', projectId, taskId },
+      allow: (s) => Boolean(s.pushProjectChat ?? true),
+    })
+    return new Response(JSON.stringify(res), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+
   if (kind === 'workspace_ready') {
     const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : ''
     if (!projectId) {

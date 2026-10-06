@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   View,
   Text,
@@ -15,6 +15,9 @@ import { supabase } from '@/lib/supabase'
 import {
   budgetVarianceTone,
   computeCrewSpendLines,
+  computeCurrentCrewCost,
+  computeCurrentHeadroom,
+  computeCurrentOtherSpend,
   computeEquipmentSpend,
   computeForecastRemaining,
   computeWrapUpVariance,
@@ -22,7 +25,9 @@ import {
   sumBudgetLineSpent,
   type CrewSpendMemberRow,
   type EquipmentSpendRow,
+  type TimesheetHourEntry,
 } from '@/lib/projectInternalBudget'
+import { ProjectTimesheetPanel } from '@/components/project/ProjectTimesheetPanel'
 import { commonRentalPeriod, fetchProductionEquipment } from '@/lib/productionLists'
 import { syncProjectListingBudget } from '@/lib/syncProjectListingBudget'
 import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
@@ -80,6 +85,53 @@ function moneyToInput(n: number | null | undefined): string {
 
 const PRESETS = ['Food & beverage', 'Travel', 'Rental cars', 'Other']
 
+function signedMoney(amount: number | null, currency: string): string {
+  if (amount == null) return 'Set a budget'
+  const sign = amount < 0 ? '−' : amount > 0 ? '+' : ''
+  return `${sign}${formatMoneyAmount(Math.abs(amount), currency)}`
+}
+
+function BudgetFold({
+  title,
+  summary,
+  summaryStyle,
+  open,
+  onToggle,
+  cardStyle,
+  children,
+}: {
+  title: string
+  summary: string
+  summaryStyle?: object
+  open: boolean
+  onToggle: () => void
+  cardStyle?: object
+  children: ReactNode
+}) {
+  return (
+    <View style={[styles.card, cardStyle]}>
+      <TouchableOpacity
+        style={styles.foldHeader}
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+      >
+        <View style={styles.foldHeaderText}>
+          <Text style={styles.foldTitle}>{title}</Text>
+          <Text style={[styles.foldAmount, summaryStyle]}>{summary}</Text>
+        </View>
+        <ChevronDown
+          size={18}
+          color="rgba(255,255,255,0.45)"
+          strokeWidth={ICON_STROKE}
+          style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
+        />
+      </TouchableOpacity>
+      {open ? <View style={styles.foldBody}>{children}</View> : null}
+    </View>
+  )
+}
+
 export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props) {
   const [loading, setLoading] = useState(true)
   const [savingPlan, setSavingPlan] = useState(false)
@@ -94,6 +146,11 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
   const [equipmentOpen, setEquipmentOpen] = useState(false)
   const [crewOpen, setCrewOpen] = useState(false)
   const [otherOpen, setOtherOpen] = useState(false)
+  const [targetsOpen, setTargetsOpen] = useState(true)
+  const [forecastOpen, setForecastOpen] = useState(true)
+  const [currentOpen, setCurrentOpen] = useState(true)
+  const [wrapOpen, setWrapOpen] = useState(true)
+  const [sheetEntries, setSheetEntries] = useState<TimesheetHourEntry[]>([])
   const [usingOfflinePack, setUsingOfflinePack] = useState(false)
   const [packDownloadedAt, setPackDownloadedAt] = useState<string | null>(null)
   const [packMissingBudget, setPackMissingBudget] = useState(false)
@@ -263,6 +320,24 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
   const otherSpent = lineTotals.spent
 
   const forecastRemaining = computeForecastRemaining(totalBudgetNum, crew.total, otherPlanned, equipment.total)
+  const currentCrew = useMemo(
+    () => (hideCrewBudgeting ? { logged: 0, open: 0, projected: 0, loggedHours: 0 } : computeCurrentCrewCost(members, sheetEntries)),
+    [hideCrewBudgeting, members, sheetEntries]
+  )
+  const otherCurrent = useMemo(
+    () =>
+      computeCurrentOtherSpend(
+        lines.map((l) => ({
+          planned_amount: parseMoneyInput(l.plannedStr),
+          spent_amount: parseMoneyInput(l.spentStr),
+        }))
+      ),
+    [lines]
+  )
+  const currentHeadroom = computeCurrentHeadroom(totalBudgetNum, currentCrew.projected, otherCurrent, equipment.total)
+  const currentTone = budgetVarianceTone(currentHeadroom)
+  const currentProduction =
+    productionCapNum != null ? Math.round((productionCapNum - currentCrew.projected) * 100) / 100 : null
   const wrapUpVariance = computeWrapUpVariance(totalBudgetNum, crew.total, otherSpent, equipment.total)
   const wrapUpTone = budgetVarianceTone(wrapUpVariance)
   const remainingProduction =
@@ -416,11 +491,15 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
       <Text style={styles.lead}>
         {hideCrewBudgeting
           ? 'Internal planning only. Equipment cost uses kit-list qty × unit price. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'
-          : "Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each person's public day / half-day rate when set. Equipment cost uses kit-list qty × unit price. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance."}
+          : 'Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each person\'s public day / half-day rate when set. Equipment cost uses kit-list qty × unit price. Current uses logged hours during the shoot (10 hours = one day) and keeps unlogged days on the booking. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'}
       </Text>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Targets</Text>
+      <BudgetFold
+        title="Targets"
+        summary={totalBudgetNum != null ? formatMoneyAmount(totalBudgetNum, currency) : 'No total yet'}
+        open={targetsOpen}
+        onToggle={() => setTargetsOpen((v) => !v)}
+      >
         <Text style={styles.hint}>Currency (ISO)</Text>
         <TextInput
           style={styles.input}
@@ -460,10 +539,15 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
             <Text style={styles.primaryBtnText}>{savingPlan ? 'Saving…' : 'Save targets'}</Text>
           </TouchableOpacity>
         ) : null}
-      </View>
+      </BudgetFold>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Forecast</Text>
+      <BudgetFold
+        title="Forecast"
+        summary={signedMoney(forecastRemaining, currency)}
+        summaryStyle={varianceStyle(forecastRemaining)}
+        open={forecastOpen}
+        onToggle={() => setForecastOpen((v) => !v)}
+      >
         <Text style={styles.muted}>Before the shoot — uses planned other expenses.</Text>
         {!hideCrewBudgeting ? (
           <View style={styles.snapRow}>
@@ -497,16 +581,72 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
         ) : (
           <Text style={styles.muted}>Set a total budget above to forecast headroom with planned expenses.</Text>
         )}
-      </View>
+      </BudgetFold>
 
-      <View
-        style={[
-          styles.card,
-          wrapUpTone === 'over' && styles.wrapCardOver,
-          wrapUpTone === 'under' && styles.wrapCardUnder,
-        ]}
+      <BudgetFold
+        title="Current"
+        summary={signedMoney(currentHeadroom, currency)}
+        summaryStyle={varianceStyle(currentHeadroom)}
+        open={currentOpen}
+        onToggle={() => setCurrentOpen((v) => !v)}
+        cardStyle={currentTone === 'over' ? styles.wrapCardOver : currentTone === 'under' ? styles.wrapCardUnder : undefined}
       >
-        <Text style={styles.cardTitle}>Wrap-up</Text>
+        <Text style={styles.muted}>During the shoot — logged hours so far, plus booked days that have no timesheet yet.</Text>
+        {!hideCrewBudgeting ? (
+          <>
+            <View style={styles.snapRow}>
+              <Text style={styles.snapLabel}>Crew logged ({currentCrew.loggedHours}h)</Text>
+              <Text style={styles.snapVal}>{formatMoneyAmount(currentCrew.logged, currency)}</Text>
+            </View>
+            <View style={styles.snapRow}>
+              <Text style={styles.snapLabel}>Crew still booked</Text>
+              <Text style={styles.snapVal}>{formatMoneyAmount(currentCrew.open, currency)}</Text>
+            </View>
+          </>
+        ) : null}
+        <View style={styles.snapRow}>
+          <Text style={styles.snapLabel}>Equipment (kit list)</Text>
+          <Text style={styles.snapVal}>{formatMoneyAmount(equipment.total, currency)}</Text>
+        </View>
+        <View style={styles.snapRow}>
+          <Text style={styles.snapLabel}>Other expenses (actual or plan)</Text>
+          <Text style={styles.snapVal}>{formatMoneyAmount(otherCurrent, currency)}</Text>
+        </View>
+        {!hideCrewBudgeting && currentProduction != null ? (
+          <View style={styles.snapRow}>
+            <Text style={styles.snapLabel}>Remaining in production bucket</Text>
+            <Text style={[styles.snapVal, varianceStyle(currentProduction)]}>
+              {formatMoneyAmount(currentProduction, currency)}
+            </Text>
+          </View>
+        ) : null}
+        {totalBudgetNum != null ? (
+          <View style={styles.snapRow}>
+            <Text style={[styles.snapLabel, styles.snapLabelStrong]}>
+              {currentTone === 'over' ? 'Over budget' : currentTone === 'under' ? 'Under budget' : 'On budget'}
+            </Text>
+            <Text style={[styles.snapVal, styles.snapValXl, varianceStyle(currentHeadroom)]}>
+              {currentHeadroom != null && currentHeadroom < 0 ? '−' : currentHeadroom != null && currentHeadroom > 0 ? '+' : ''}
+              {formatMoneyAmount(currentHeadroom != null ? Math.abs(currentHeadroom) : 0, currency)}
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.muted}>Set a total budget to see whether the shoot is running over.</Text>
+        )}
+      </BudgetFold>
+
+      {!hideCrewBudgeting && !usingOfflinePack ? (
+        <ProjectTimesheetPanel projectId={projectId} scope="company" onEntriesChange={setSheetEntries} />
+      ) : null}
+
+      <BudgetFold
+        title="Wrap-up"
+        summary={signedMoney(wrapUpVariance, currency)}
+        summaryStyle={varianceStyle(wrapUpVariance)}
+        open={wrapOpen}
+        onToggle={() => setWrapOpen((v) => !v)}
+        cardStyle={wrapUpTone === 'over' ? styles.wrapCardOver : wrapUpTone === 'under' ? styles.wrapCardUnder : undefined}
+      >
         <Text style={styles.muted}>After the shoot — uses actual spend on other expenses.</Text>
         {!hideCrewBudgeting ? (
           <View style={styles.snapRow}>
@@ -547,7 +687,7 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
         ) : (
           <Text style={styles.muted}>Set a total budget to see the final wrap-up balance.</Text>
         )}
-      </View>
+      </BudgetFold>
 
       {!hideCrewBudgeting ? (
       <View style={styles.card}>

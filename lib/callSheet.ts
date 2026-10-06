@@ -7,11 +7,13 @@ export type CallSheetPersonCell = {
   location?: string
   kind?: CallSheetPersonKind
   cast_no?: number
+  character?: string
   status?: string
   report?: string
   hmu?: string
   wardrobe?: string
   ready?: string
+  remarks?: string
 }
 
 export type CallSheetDayTimes = {
@@ -41,6 +43,18 @@ export type CallSheetContacts = {
   upm: string
   first_ad: string
   second_ad: string
+  medic_name: string
+  medic_phone: string
+}
+
+/** Short scene row for the call sheet. The PDF prints the full line; the editor stays one card. */
+export type CallSheetSceneRow = {
+  scene: string
+  int_ext: string
+  description: string
+  cast: string
+  location: string
+  move: string
 }
 
 export type CallSheetBackgroundRow = {
@@ -59,6 +73,7 @@ export type CallSheetDocument = {
   departments: CallSheetDepartments
   background: CallSheetBackgroundRow[]
   contacts: CallSheetContacts
+  scenes: CallSheetSceneRow[]
 }
 
 export const EMPTY_CALL_SHEET_DAY: CallSheetDayTimes = {
@@ -88,6 +103,17 @@ export const EMPTY_CALL_SHEET_CONTACTS: CallSheetContacts = {
   upm: '',
   first_ad: '',
   second_ad: '',
+  medic_name: '',
+  medic_phone: '',
+}
+
+export const EMPTY_CALL_SHEET_SCENE: CallSheetSceneRow = {
+  scene: '',
+  int_ext: '',
+  description: '',
+  cast: '',
+  location: '',
+  move: '',
 }
 
 export const CALL_SHEET_PLACE_ORDER: Array<{ key: keyof CallSheetPlaces; label: string }> = [
@@ -111,6 +137,7 @@ export function emptyCallSheet(): CallSheetDocument {
     departments: { ...EMPTY_CALL_SHEET_DEPARTMENTS },
     background: [],
     contacts: { ...EMPTY_CALL_SHEET_CONTACTS },
+    scenes: [],
   }
 }
 
@@ -133,6 +160,8 @@ function parsePersonCell(raw: unknown): CallSheetPersonCell {
   if (obj.kind === 'cast' || obj.kind === 'crew') cell.kind = obj.kind
   const castNo = typeof obj.cast_no === 'number' ? obj.cast_no : Number(obj.cast_no)
   if (Number.isFinite(castNo) && castNo > 0) cell.cast_no = Math.round(castNo)
+  const character = str(obj.character).trim()
+  if (character) cell.character = character
   const status = str(obj.status).trim()
   if (status) cell.status = status
   const report = str(obj.report).trim()
@@ -143,6 +172,8 @@ function parsePersonCell(raw: unknown): CallSheetPersonCell {
   if (wardrobe) cell.wardrobe = wardrobe
   const ready = str(obj.ready).trim()
   if (ready) cell.ready = ready
+  const remarks = str(obj.remarks).trim()
+  if (remarks) cell.remarks = remarks
   return cell
 }
 
@@ -198,7 +229,31 @@ function parseContacts(raw: unknown): CallSheetContacts {
     upm: str(obj.upm).trim(),
     first_ad: str(obj.first_ad).trim(),
     second_ad: str(obj.second_ad).trim(),
+    medic_name: str(obj.medic_name).trim(),
+    medic_phone: str(obj.medic_phone).trim(),
   }
+}
+
+function parseScenes(raw: unknown): CallSheetSceneRow[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((row) => {
+      const obj = asRecord(row)
+      if (!obj) return null
+      const next: CallSheetSceneRow = {
+        scene: str(obj.scene).trim(),
+        int_ext: str(obj.int_ext).trim(),
+        description: str(obj.description).trim(),
+        cast: str(obj.cast).trim(),
+        location: str(obj.location).trim(),
+        move: str(obj.move).trim(),
+      }
+      if (!next.scene && !next.int_ext && !next.description && !next.cast && !next.location && !next.move) {
+        return null
+      }
+      return next
+    })
+    .filter((row): row is CallSheetSceneRow => row != null)
 }
 
 function parseBackground(raw: unknown): CallSheetBackgroundRow[] {
@@ -240,6 +295,7 @@ export function parseCallSheet(raw: unknown): CallSheetDocument {
       departments: parseDepartments(obj.departments),
       background: parseBackground(obj.background),
       contacts: parseContacts(obj.contacts),
+      scenes: parseScenes(obj.scenes),
     }
   }
   return { ...empty, people: parsePeople(obj) }
@@ -255,6 +311,7 @@ export function serializeCallSheet(doc: CallSheetDocument): CallSheetDocument {
     departments: { ...EMPTY_CALL_SHEET_DEPARTMENTS, ...doc.departments },
     background: Array.isArray(doc.background) ? doc.background : [],
     contacts: { ...EMPTY_CALL_SHEET_CONTACTS, ...doc.contacts },
+    scenes: parseScenes(doc.scenes),
   }
 }
 
@@ -268,6 +325,22 @@ export function mergeCallSheetPeople(
     people[key] = { ...(people[key] ?? {}), ...patch }
   }
   return serializeCallSheet({ ...prev, people })
+}
+
+/** Cast list membership. An explicit crew flag wins over leftover cast fields. */
+export function personIsCast(cell: CallSheetPersonCell | undefined): boolean {
+  if (!cell) return false
+  if (cell.kind === 'crew') return false
+  if (cell.kind === 'cast') return true
+  return Boolean(
+    cell.cast_no ||
+      cell.character?.trim() ||
+      cell.status?.trim() ||
+      cell.hmu?.trim() ||
+      cell.wardrobe?.trim() ||
+      cell.ready?.trim() ||
+      cell.remarks?.trim()
+  )
 }
 
 export function personCallTime(cell: CallSheetPersonCell | undefined, generalCall?: string): string {

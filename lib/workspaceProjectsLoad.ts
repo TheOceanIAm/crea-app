@@ -94,7 +94,8 @@ export function mapJobStatusLabel(job: {
 }): string {
   const st = String(job.status ?? '').toLowerCase()
   const ps = String(job.project_status ?? '').toLowerCase()
-  if (st === 'closed' || ps === 'completed') return 'COMPLETED'
+  if (ps === 'completed') return 'COMPLETED'
+  if (st === 'closed') return 'CLOSED'
   if (ps === 'recruiting') return 'RECRUITING'
   return 'ACTIVE'
 }
@@ -347,6 +348,20 @@ async function loadWorkspaceProjectsLocal(user: User): Promise<WorkspaceProjects
 
   let jobsById: Record<string, JobRow> = {}
   const workspaceProjectIdByJobId: Record<string, string> = {}
+  const projectCompletedByJobId = new Set<string>()
+  const linkedProjectByJobId: Record<
+    string,
+    {
+      id: string
+      title: string
+      status: string
+      updatedAt: string | null
+      companyId: string | null
+      budgetAmount: number | null
+      budgetType: string | null
+      budgetCurrency: string | null
+    }
+  > = {}
   if (visibleJobIds.length > 0) {
     const [jobsRes, linkRes] = await Promise.all([
       supabase
@@ -355,7 +370,10 @@ async function loadWorkspaceProjectsLocal(user: User): Promise<WorkspaceProjects
           'id, title, category, budget_type, budget_amount, budget_currency, status, project_status, company_id, is_solo_workspace, solo_workspace_client_label, updated_at, created_at'
         )
         .in('id', visibleJobIds),
-      supabase.from('projects').select('id, job_id').in('job_id', visibleJobIds),
+      supabase
+        .from('projects')
+        .select('id, job_id, status, title, updated_at, company_id, budget_amount, budget_type, budget_currency')
+        .in('job_id', visibleJobIds),
     ])
     if (jobsRes.error && __DEV__) console.warn('[workspace-projects] jobs', jobsRes.error.message)
     jobsById = Object.fromEntries(((jobsRes.data ?? []) as JobRow[]).map((j) => [j.id, j]))
@@ -364,10 +382,44 @@ async function loadWorkspaceProjectsLocal(user: User): Promise<WorkspaceProjects
       const pid = String((row as { id?: string | null }).id ?? '').trim()
       if (!jid || !pid) continue
       if (!workspaceProjectIdByJobId[jid]) workspaceProjectIdByJobId[jid] = pid
+      const status = String((row as { status?: string | null }).status ?? '').trim().toLowerCase()
+      if (status === 'completed') projectCompletedByJobId.add(jid)
+      if (!linkedProjectByJobId[jid]) {
+        const companyIdRaw = (row as { company_id?: string | null }).company_id
+        linkedProjectByJobId[jid] = {
+          id: pid,
+          title: String((row as { title?: string | null }).title ?? '').trim(),
+          status,
+          updatedAt:
+            typeof (row as { updated_at?: string | null }).updated_at === 'string'
+              ? String((row as { updated_at: string }).updated_at)
+              : null,
+          companyId: typeof companyIdRaw === 'string' && companyIdRaw.trim() ? companyIdRaw.trim() : null,
+          budgetAmount:
+            typeof (row as { budget_amount?: number | null }).budget_amount === 'number'
+              ? (row as { budget_amount: number }).budget_amount
+              : null,
+          budgetType:
+            typeof (row as { budget_type?: string | null }).budget_type === 'string'
+              ? String((row as { budget_type: string }).budget_type)
+              : null,
+          budgetCurrency:
+            typeof (row as { budget_currency?: string | null }).budget_currency === 'string'
+              ? String((row as { budget_currency: string }).budget_currency)
+              : null,
+        }
+      }
     }
   }
 
-  const companyIds = [...new Set(Object.values(jobsById).map((j) => j.company_id).filter(Boolean))] as string[]
+  const companyIds = [
+    ...new Set(
+      [
+        ...Object.values(jobsById).map((j) => j.company_id),
+        ...Object.values(linkedProjectByJobId).map((p) => p.companyId),
+      ].filter((id): id is string => Boolean(id))
+    ),
+  ]
   const [{ data: companyProfiles }, { data: companyNames }] = await Promise.all([
     companyIds.length
       ? supabase.from('company_profiles').select('id, website, logo_url').in('id', companyIds)
@@ -416,8 +468,49 @@ async function loadWorkspaceProjectsLocal(user: User): Promise<WorkspaceProjects
 
   const built: ProjectListing[] = []
   for (const jid of visibleJobIds) {
-    const job = jobsById[jid]
-    if (!job) continue
+    const rawJob = jobsById[jid]
+    if (!rawJob) {
+      // Marketplace-excluded companies hide the jobs row from freelancers.
+      // Membership still grants the workspace, so list it from the project row.
+      const linked = linkedProjectByJobId[jid]
+      if (!linked || linked.status === 'cancelled' || linked.status === 'archived') continue
+      const statusLabel =
+        linked.status === 'completed' ? 'COMPLETED' : linked.status === 'recruiting' ? 'RECRUITING' : 'ACTIVE'
+      const companyName = (linked.companyId && nameByCompany[linked.companyId]) || 'Client'
+      const cp = linked.companyId ? cpMap[linked.companyId] : undefined
+      const logo =
+        cp?.logo_url ||
+        (cp?.website ? faviconFromWebsite(cp.website) : null) ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(companyName)}&background=FFDC00&color=0a0a0a&size=64`
+      const plan = budgetPlanByProjectId[linked.id]
+      const budgetLine = formatBudgetDisplay(
+        resolveListingBudgetFields({
+          budget_type: linked.budgetType ?? 'negotiable',
+          budget_amount: linked.budgetAmount,
+          budget_currency: linked.budgetCurrency,
+          plan_total_budget: plan?.total_budget ?? null,
+          plan_currency: plan?.currency ?? null,
+        })
+      )
+      built.push({
+        id: jid,
+        kind: 'customer',
+        title: linked.title || 'Project',
+        subtitle: companyName,
+        budgetLine,
+        logoUrl: logo,
+        statusLabel,
+        updatedAt: linked.updatedAt,
+        categoryLabel: 'Job',
+        isArchived: false,
+        workspaceProjectId: linked.id,
+      })
+      continue
+    }
+    const job =
+      String(rawJob.project_status ?? '').trim().toLowerCase() === 'completed' || !projectCompletedByJobId.has(jid)
+        ? rawJob
+        : { ...rawJob, project_status: 'completed' }
     if (!freelancerCustomerJobVisibleToFreelancer(job, user.id)) continue
 
     const isSolo = Boolean(job.is_solo_workspace) && job.company_id === user.id
@@ -523,11 +616,38 @@ async function loadWorkspaceProjectsLocal(user: User): Promise<WorkspaceProjects
   }
 }
 
+function mergeFreelancerProjectCaches(
+  fromApi: WorkspaceProjectsCache,
+  local: WorkspaceProjectsCache
+): WorkspaceProjectsCache {
+  const known = new Set<string>()
+  for (const row of fromApi.listings) {
+    known.add(row.id)
+    if (row.workspaceProjectId) known.add(row.workspaceProjectId)
+  }
+  const extra = local.listings.filter(
+    (row) => !known.has(row.id) && !(row.workspaceProjectId && known.has(row.workspaceProjectId))
+  )
+  if (extra.length === 0) return fromApi
+  const listings = [...fromApi.listings, ...extra]
+  listings.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
+  return {
+    ...fromApi,
+    listings,
+    canCreatePrivate: fromApi.canCreatePrivate || local.canCreatePrivate,
+    viewerRole: 'freelancer',
+  }
+}
+
 export async function loadWorkspaceProjectsCache(user: User): Promise<WorkspaceProjectsCache | null> {
   const localPromise = loadWorkspaceProjectsLocal(user)
   const fromApi = await fetchWorkspaceProjectsFromApi()
+  const local = await localPromise
+  if (fromApi && local && fromApi.viewerRole === 'freelancer' && local.viewerRole === 'freelancer') {
+    return mergeFreelancerProjectCaches(fromApi, local)
+  }
   if (fromApi) return fromApi
-  return localPromise
+  return local
 }
 
 async function loadDeclinedCustomerJobIds(freelancerId: string, jobIds: string[]): Promise<Set<string>> {

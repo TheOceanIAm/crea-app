@@ -18,7 +18,6 @@ import {
   type CompanySubscriptionPlanDb,
 } from '@/lib/companyPlanFromSession'
 import {
-  canFreelancerCreatePrivateProjects,
   freelancerHasInvoicing,
   isFreelancerPro,
   isFreelancerTalentPoolPlan,
@@ -180,17 +179,7 @@ export function quickActionsForRole(
   if (isFreelancerProfile(role ?? undefined)) {
     const plan = opts?.freelancerPlan ?? 'free'
     const pro = isFreelancerPro(plan)
-    if (pro && canFreelancerCreatePrivateProjects(plan)) {
-      base.push({ label: 'Projects', icon: Layers, href: '/(tabs)/workspace-projects' })
-    } else {
-      base.push({
-        label: 'Projects',
-        icon: Layers,
-        href: '/(tabs)/workspace-projects',
-        disabled: true,
-        hint: 'Pro plan',
-      })
-    }
+    base.push({ label: 'Projects', icon: Layers, href: '/(tabs)/workspace-projects' })
     if (isFreelancerTalentPoolPlan(plan)) {
       base.push({ label: 'Talent pool', icon: Users, href: '/(tabs)/talent-pool' })
     } else {

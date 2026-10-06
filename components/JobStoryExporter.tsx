@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
-import { Alert, NativeModules, UIManager, View } from 'react-native'
-import * as FileSystem from 'expo-file-system'
-import * as Sharing from 'expo-sharing'
+import { Alert, NativeModules, View } from 'react-native'
 import { encode } from 'base64-arraybuffer'
 import { buildJobStoryHtml, type JobStoryFields } from '@/lib/jobStoryHtml'
 
@@ -17,22 +15,22 @@ type NativeWebViewComponent = ComponentType<{
   pointerEvents?: 'none' | 'auto' | 'box-none' | 'box-only'
 }>
 
+let webViewCache: NativeWebViewComponent | null | undefined
+
 function loadNativeWebView(): NativeWebViewComponent | null {
+  if (webViewCache !== undefined) return webViewCache
   try {
     const natives = NativeModules as Record<string, unknown>
-    const hasNative =
-      !!natives.RNCWebView ||
-      !!natives.RNCWebViewModule ||
-      !!UIManager.getViewManagerConfig?.('RNCWebView') ||
-      !!UIManager.getViewManagerConfig?.('RNCWebViewModule')
-    if (!hasNative) return null
-    return require('react-native-webview').WebView as NativeWebViewComponent
+    if (!natives.RNCWebView && !natives.RNCWebViewModule) {
+      webViewCache = null
+      return null
+    }
+    webViewCache = require('react-native-webview').WebView as NativeWebViewComponent
   } catch {
-    return null
+    webViewCache = null
   }
+  return webViewCache
 }
-
-const WebView = loadNativeWebView()
 
 export type JobStoryShareInput = JobStoryFields & {
   jobId: string
@@ -94,6 +92,8 @@ export function useJobStoryShare() {
     timeout.current = null
     chunks.current.clear()
     if (!alive.current) return
+    const FileSystem = await import('expo-file-system')
+    const Sharing = await import('expo-sharing')
     const cache = FileSystem.cacheDirectory
     if (!cache || !base64) {
       fail('Could not create the story image.')
@@ -153,6 +153,7 @@ export function useJobStoryShare() {
   const shareStory = useCallback(
     async (input: JobStoryShareInput) => {
       if (busy) return
+      const WebView = loadNativeWebView()
       if (!WebView) {
         Alert.alert('Story image', 'This build cannot create story images yet. Update the app and try again.')
         return
@@ -178,6 +179,7 @@ export function useJobStoryShare() {
     [busy, fail]
   )
 
+  const WebView = request ? loadNativeWebView() : null
   const holder = request && WebView ? (
     <View pointerEvents="none" style={{ position: 'absolute', width: 1, height: 1, opacity: 0, left: -20, top: 0 }}>
       <WebView

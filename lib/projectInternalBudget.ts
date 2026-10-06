@@ -198,6 +198,154 @@ export function computeWrapUpVariance(
   return Math.round((totalBudget - crewTotal - equipmentTotal - otherSpent) * 100) / 100
 }
 
+/** Logged timesheet hours that equal one booked day. */
+export const TIMESHEET_HOURS_PER_DAY = 10
+
+export type TimesheetHourEntry = {
+  personKey: string
+  workDate: string
+  hours: number
+}
+
+export type TimesheetPerson = {
+  key: string
+  name: string
+  profileId: string | null
+  manualCrewId: string | null
+  bookedDates: { date: string; units: number }[]
+}
+
+export type CurrentCrewCost = {
+  logged: number
+  open: number
+  projected: number
+  loggedHours: number
+}
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+function crewRates(row: CrewSpendMemberRow): { dayRate: number; halfDayRate: number | null } {
+  const localDay =
+    typeof row.day_rate_amount === 'number' && !Number.isNaN(row.day_rate_amount) && row.day_rate_amount > 0
+      ? row.day_rate_amount
+      : null
+  const dayRate = localDay ?? (typeof row.profiles?.day_rate_amount === 'number' ? row.profiles.day_rate_amount : 0)
+  const halfRaw =
+    typeof row.half_day_rate_amount === 'number' &&
+    !Number.isNaN(row.half_day_rate_amount) &&
+    row.half_day_rate_amount > 0
+      ? row.half_day_rate_amount
+      : row.profiles?.half_day_rate_amount
+  const halfDayRate = typeof halfRaw === 'number' && !Number.isNaN(halfRaw) && halfRaw > 0 ? halfRaw : null
+  return { dayRate, halfDayRate }
+}
+
+/** Straight time against the day rate. Ten hours = one day. */
+export function crewCostForLoggedHours(hours: number, dayRate: number): number {
+  if (!(hours > 0) || !(dayRate > 0)) return 0
+  return roundMoney(dayRate * (hours / TIMESHEET_HOURS_PER_DAY))
+}
+
+export function timesheetPeopleFromMembers(rows: CrewSpendMemberRow[]): TimesheetPerson[] {
+  const people: TimesheetPerson[] = []
+  for (const row of rows) {
+    if ((row.member_role ?? '').toLowerCase() === 'company') continue
+    const key = (row.profile_id ?? '').trim()
+    if (!key) continue
+    const manual = key.startsWith('manual:') ? key.slice('manual:'.length) : null
+    people.push({
+      key,
+      name: (row.profiles?.name ?? '').trim() || (row.display_name ?? '').trim() || 'Crew member',
+      profileId: manual ? null : key,
+      manualCrewId: manual,
+      bookedDates: memberBookedSlotsFromRow(row).map((slot) => ({ date: slot.date, units: slot.units })),
+    })
+  }
+  return people
+}
+
+export function visibleTimesheetDates(person: TimesheetPerson, entries: readonly TimesheetHourEntry[]): string[] {
+  const dates = new Set(person.bookedDates.map((d) => d.date))
+  for (const entry of entries) {
+    if (entry.personKey !== person.key || !(entry.hours > 0)) continue
+    const date = entry.workDate.slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) dates.add(date)
+  }
+  return [...dates].sort()
+}
+
+/**
+ * During the shoot: logged hours replace that day's booked cost.
+ * Booked days with no hours stay on the plan. Extra logged days are added.
+ */
+export function computeCurrentCrewCost(
+  rows: CrewSpendMemberRow[],
+  entries: readonly TimesheetHourEntry[],
+): CurrentCrewCost {
+  const hoursByPerson = new Map<string, Map<string, number>>()
+  for (const entry of entries) {
+    if (!(entry.hours > 0)) continue
+    const date = entry.workDate.slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+    const byDate = hoursByPerson.get(entry.personKey) ?? new Map<string, number>()
+    byDate.set(date, entry.hours)
+    hoursByPerson.set(entry.personKey, byDate)
+  }
+
+  let logged = 0
+  let open = 0
+  let loggedHours = 0
+
+  for (const row of rows) {
+    if ((row.member_role ?? '').toLowerCase() === 'company') continue
+    const key = (row.profile_id ?? '').trim()
+    if (!key) continue
+    const { dayRate, halfDayRate } = crewRates(row)
+    const loggedDates = hoursByPerson.get(key) ?? new Map<string, number>()
+    for (const slot of memberBookedSlotsFromRow(row)) {
+      if (loggedDates.has(slot.date)) continue
+      open += crewCostForBookedUnits(slot.units, dayRate, halfDayRate)
+    }
+    for (const hours of loggedDates.values()) {
+      loggedHours += hours
+      logged += crewCostForLoggedHours(hours, dayRate)
+    }
+  }
+
+  return {
+    logged: roundMoney(logged),
+    open: roundMoney(open),
+    projected: roundMoney(logged + open),
+    loggedHours: roundMoney(loggedHours),
+  }
+}
+
+/** Actual other spend when entered (> 0); otherwise the planned amount. */
+export function computeCurrentOtherSpend(
+  rows: { spent_amount?: number | null; planned_amount?: number | null }[],
+): number {
+  let sum = 0
+  for (const row of rows) {
+    const planned = typeof row.planned_amount === 'number' && !Number.isNaN(row.planned_amount) ? row.planned_amount : 0
+    const spent = typeof row.spent_amount === 'number' && !Number.isNaN(row.spent_amount) ? row.spent_amount : 0
+    sum += spent > 0 ? spent : planned
+  }
+  return roundMoney(sum)
+}
+
+/** Headroom while shooting — projected crew + kit + current other vs total budget. */
+export function computeCurrentHeadroom(
+  totalBudget: number | null,
+  crewProjected: number,
+  otherCurrent: number,
+  equipmentTotal = 0,
+): number | null {
+  if (totalBudget == null) return null
+  return roundMoney(totalBudget - crewProjected - equipmentTotal - otherCurrent)
+}
+
 export function budgetVarianceTone(variance: number | null): 'neutral' | 'under' | 'over' {
   if (variance == null) return 'neutral'
   if (variance < 0) return 'over'

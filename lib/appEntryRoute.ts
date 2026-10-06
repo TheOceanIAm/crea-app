@@ -30,7 +30,7 @@ export function isMainTabName(value: string): value is MainTabName {
 
 export function isMainTabAllowed(tab: MainTabName, role: string | null): boolean {
   if (tab === 'jobs') return isFreelancerProfile(role)
-  if (tab === 'workspace-projects') return isCompanyProfile(role)
+  if (tab === 'workspace-projects') return isCompanyProfile(role) || isFreelancerProfile(role)
   return true
 }
 

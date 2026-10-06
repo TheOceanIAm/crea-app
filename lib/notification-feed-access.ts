@@ -213,6 +213,9 @@ export function filterNotificationRowByAccess<
 
   if (row.kind === 'project_message' && ctx.mentionedAlertIds?.has(row.id)) return true
 
+  // Scoped to the assignee (person or company account) when the feed is loaded.
+  if (row.kind === 'task_assigned') return true
+
   if (row.projectId && !ctx.accessibleProjectIds.has(row.projectId)) return false
 
   if (row.kind === 'job_application') {

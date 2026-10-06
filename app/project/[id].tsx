@@ -27,6 +27,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProjectMilestonesTab } from '@/components/project/ProjectMilestonesTab'
 import { ProjectMessagesTab } from '@/components/project/ProjectMessagesTab'
 import { ProjectBudgetTab } from '@/components/project/ProjectBudgetTab'
+import { ProjectTimesheetPanel } from '@/components/project/ProjectTimesheetPanel'
 import { ProjectCrewTab } from '@/components/project/ProjectCrewTab'
 import { ProjectFilesTab } from '@/components/project/ProjectFilesTab'
 import { ProjectReviewTab } from '@/components/project/ProjectReviewTab'
@@ -74,6 +75,7 @@ type TabId =
   | 'production'
   | 'crew'
   | 'budget'
+  | 'timesheet'
   | 'messages'
   | 'files'
   | 'review'
@@ -161,7 +163,7 @@ export default function ProjectWorkspaceScreen() {
     initialTabRaw === 'brief'
       ? 'production'
       : initialTabRaw &&
-          ['overview', 'milestones', 'production', 'crew', 'budget', 'messages', 'files', 'review'].includes(
+          ['overview', 'milestones', 'production', 'crew', 'budget', 'timesheet', 'messages', 'files', 'review'].includes(
             initialTabRaw
           )
         ? (initialTabRaw as TabId)
@@ -654,6 +656,10 @@ export default function ProjectWorkspaceScreen() {
       const miles = list.findIndex((t) => t.id === 'milestones')
       const insertAt = ix >= 0 ? ix + 1 : miles >= 0 ? miles + 1 : list.length
       list = [...list.slice(0, insertAt), { id: 'budget' as const, label: 'Budget' }, ...list.slice(insertAt)]
+    } else if (!isPrivateWorkspace) {
+      const productionIdx = list.findIndex((t) => t.id === 'production')
+      const insertAt = productionIdx >= 0 ? productionIdx + 1 : list.length
+      list = [...list.slice(0, insertAt), { id: 'timesheet' as const, label: 'Timesheet' }, ...list.slice(insertAt)]
     }
     return list
   }, [workspaceOnlyPlan, isPrivateWorkspace, viewerIsCompanyOnProject])
@@ -665,7 +671,9 @@ export default function ProjectWorkspaceScreen() {
 
   useEffect(() => {
     if (tab === 'budget' && !viewerIsCompanyOnProject) setTab('overview')
-  }, [tab, viewerIsCompanyOnProject])
+    if (tab === 'timesheet' && isPrivateWorkspace) setTab('overview')
+    if (tab === 'timesheet' && viewerIsCompanyOnProject) setTab('budget')
+  }, [tab, viewerIsCompanyOnProject, isPrivateWorkspace])
 
   // Deep-link capture: /project/[id]?tab=milestones&tool=shotlist&day=2026-09-15
   useEffect(() => {
@@ -676,7 +684,7 @@ export default function ProjectWorkspaceScreen() {
       const nextTab = nextTabRaw as TabId | undefined
       if (
         nextTab &&
-        ['overview', 'milestones', 'production', 'crew', 'budget', 'messages', 'files', 'review'].includes(nextTab)
+        ['overview', 'milestones', 'production', 'crew', 'budget', 'timesheet', 'messages', 'files', 'review'].includes(nextTab)
       ) {
         setTab(nextTab)
       }
@@ -1092,6 +1100,7 @@ export default function ProjectWorkspaceScreen() {
     tab === 'production' ||
     tab === 'crew' ||
     tab === 'budget' ||
+    tab === 'timesheet' ||
     tab === 'files'
 
   return (
@@ -1216,6 +1225,18 @@ export default function ProjectWorkspaceScreen() {
                 )}
                 {tab === 'budget' && viewerIsCompanyOnProject ? (
                   <ProjectBudgetTab projectId={project.id} hideCrewBudgeting={isPrivateWorkspace} />
+                ) : null}
+                {tab === 'timesheet' && !viewerIsCompanyOnProject && !isPrivateWorkspace ? (
+                  <ScrollView
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: 4 }}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    <ProjectTimesheetPanel
+                      projectId={project.id}
+                      scope={companyTeamOnJob ? 'company' : 'self'}
+                    />
+                  </ScrollView>
                 ) : null}
                 {tab === 'files' && (
                   <ProjectFilesTab

@@ -182,9 +182,10 @@ export function CallSheetDayHeader({
     : weatherError ?? 'Forecast'
   const safetyPreview = firstLine(day.safety_meeting || day.safety_note, 'Safety notes')
   const notesPreview = firstLine(notes, 'Day notes')
+  const medicSet = Boolean(contacts.medic_name?.trim() || contacts.medic_phone?.trim())
   const placesPreview = hospitalEmpty
     ? `${filledPlaces}/5 · Hospital missing`
-    : `${filledPlaces}/5 set`
+    : `${filledPlaces}/5 set${medicSet ? ' · Medic' : ''}`
   const specialPreview = firstLine(special, 'None')
   const deptPreview =
     [departments.camera && 'Camera', departments.sound && 'Sound', departments.wardrobe && 'Wardrobe']
@@ -294,6 +295,20 @@ export function CallSheetDayHeader({
         {hospitalEmpty ? (
           <Text style={styles.hospitalHint}>Add the nearest hospital — this is the first thing crew look for.</Text>
         ) : null}
+        <Field
+          label="Set medic"
+          value={contacts.medic_name ?? ''}
+          placeholder="Name"
+          editable={editable}
+          onChange={(v) => onChangeContacts({ medic_name: v })}
+        />
+        <Field
+          label="Medic phone"
+          value={contacts.medic_phone ?? ''}
+          placeholder="Phone"
+          editable={editable}
+          onChange={(v) => onChangeContacts({ medic_phone: v })}
+        />
       </Fold>
 
       {weatherEnabled ? (

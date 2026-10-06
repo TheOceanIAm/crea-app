@@ -161,6 +161,7 @@ export default function NotificationsScreen() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, onSoftChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, onSoftChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'project_crew_invites' }, onSoftChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'production_tasks' }, onSoftChange)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'project_milestones' },
@@ -244,6 +245,10 @@ export default function NotificationsScreen() {
         router.push(`/project/${item.projectId}`)
         return
       }
+      if (item.kind === 'task_assigned' && item.projectId) {
+        router.push(`/project/${item.projectId}?tab=production&tool=tasks`)
+        return
+      }
       if (item.projectId) router.push(`/project/${item.projectId}`)
     },
     [router, userId, rows, readKeys]
@@ -286,7 +291,9 @@ export default function NotificationsScreen() {
                             ? 'Invoice'
                             : item.kind === 'workspace_ready'
                               ? 'Workspace'
-                              : 'Project'}
+                              : item.kind === 'task_assigned'
+                                ? 'Task'
+                                : 'Project'}
                 </Text>
                 <Text style={styles.time}>{formatTimeAgo(item.at, nowTick)}</Text>
               </View>

@@ -79,11 +79,10 @@ function normalizeSkillTokens(raw: string): string[] {
     .filter((t) => t.length > 0)
 }
 
-function rowMatchesSkillsQuery(row: TalentRow, tokens: string[]): boolean {
+function rowMatchesTalentQuery(row: TalentRow, tokens: string[]): boolean {
   if (tokens.length === 0) return true
-  const skillHay = row.skills.map((s) => s.toLowerCase()).join(' ')
-  const headlineHay = row.headline.toLowerCase()
-  return tokens.every((tok) => skillHay.includes(tok) || headlineHay.includes(tok))
+  const hay = [row.name, row.location, row.headline, ...row.skills].join(' ').toLowerCase()
+  return tokens.every((tok) => hay.includes(tok))
 }
 
 async function loadFreelancerDirectoryRows(options: { excludeUserId: string; maxRows?: number; pageSize?: number }) {
@@ -450,7 +449,7 @@ export default function TalentPoolScreen() {
   const skillsTokens = useMemo(() => normalizeSkillTokens(skillsQuery), [skillsQuery])
 
   const displayRows = useMemo(() => {
-    let out = rows.filter((r) => rowMatchesSkillsQuery(r, skillsTokens))
+    let out = rows.filter((r) => rowMatchesTalentQuery(r, skillsTokens))
     if (proOnly) out = out.filter((r) => r.isPro)
     if (listFilter === 'favorites' && showFavoriteUi) {
       const set = new Set(favoriteProfileIds)
@@ -607,7 +606,7 @@ export default function TalentPoolScreen() {
         <View style={styles.center}>
           <Text style={styles.blockTitle}>Talent pool</Text>
           <Text style={styles.blockSub}>
-            Only available for Pro users. Upgrade to browse freelancers, save favorites, and filter by skills.
+            Only available for Pro users. Upgrade to browse freelancers, save favorites, and search by name, location, or skill.
           </Text>
         </View>
         </ResponsiveScreen>
@@ -651,12 +650,12 @@ export default function TalentPoolScreen() {
               <Text style={[styles.chipText, proOnly && styles.chipTextOn]}>Pro</Text>
             </TouchableOpacity>
           </ScrollView>
-          <Text style={[styles.filterLabel, { marginTop: 10 }]}>Skills</Text>
+          <Text style={[styles.filterLabel, { marginTop: 10 }]}>Search</Text>
           <TextInput
             style={styles.searchInput}
             value={skillsQuery}
             onChangeText={setSkillsQuery}
-            placeholder="e.g. color, motion, gaffer"
+            placeholder="Name, location, or skill"
             placeholderTextColor="rgba(255,255,255,0.28)"
             autoCapitalize="none"
             autoCorrect={false}
@@ -785,11 +784,11 @@ export default function TalentPoolScreen() {
                 : listFilter === 'favorites'
                   ? 'No favorites match this search.'
                   : proOnly && skillsTokens.length > 0
-                    ? 'No Pro freelancers match these skills.'
+                    ? 'No Pro freelancers match this search.'
                     : proOnly
                       ? 'No Pro freelancers in the pool right now.'
                       : skillsTokens.length > 0
-                    ? 'No freelancers match these skills.'
+                    ? 'No freelancers match this search.'
                     : 'No freelancers match these filters.'}
             </Text>
           ) : null

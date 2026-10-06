@@ -22,6 +22,7 @@ export type NotificationKind =
   | 'invoice_incoming'
   | 'invoice_freelancer'
   | 'workspace_ready'
+  | 'task_assigned'
 
 export type NotificationRow = {
   id: string
@@ -503,6 +504,8 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
       })
   }
 
+  const taskRows = await loadTaskAssignmentAlertRows(userId, projectTitle, projectJobId)
+
   const crewInviteRows: NotificationRow[] = myInvites.map((inv) => ({
     id: `crew-invite-${inv.id}`,
     kind: 'crew_invite' as const,
@@ -517,6 +520,7 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     ...crewInviteRows,
     ...inviteRows,
     ...messageRows,
+    ...taskRows,
     ...milestoneRows,
     ...fileRows,
     ...reviewLinkRows,
@@ -528,4 +532,54 @@ export async function loadNotificationFeed(userId: string): Promise<Notification
     .filter((row) => filterNotificationRowByAccess(row, accessCtx, myRole))
     .sort((a, b) => supabaseTimestampMs(b.at) - supabaseTimestampMs(a.at))
     .slice(0, 100)
+}
+
+async function loadTaskAssignmentAlertRows(
+  userId: string,
+  projectTitle: Map<string, string>,
+  projectJobId: Map<string, string>
+): Promise<NotificationRow[]> {
+  const { data: tasks, error } = await supabase
+    .from('production_tasks')
+    .select('id, project_id, title, updated_at, created_at')
+    .eq('assignee_profile_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(40)
+  if (error || !tasks?.length) return []
+
+  const missingProjectIds = [
+    ...new Set(
+      tasks
+        .map((task) => String(task.project_id ?? '').trim())
+        .filter((id) => id && !projectTitle.has(id))
+    ),
+  ]
+  if (missingProjectIds.length) {
+    const { data: projects } = await supabase
+      .from('projects')
+      .select('id, title, job_id')
+      .in('id', missingProjectIds)
+    for (const project of projects ?? []) {
+      const id = String(project.id)
+      projectTitle.set(id, String(project.title || 'Project'))
+      const jid = project.job_id != null ? String(project.job_id).trim() : ''
+      if (jid) projectJobId.set(id, jid)
+    }
+  }
+
+  return tasks.map((task) => {
+    const pid = String(task.project_id ?? '')
+    const title = String(task.title || 'Task').trim() || 'Task'
+    const at = String(task.updated_at || task.created_at || new Date().toISOString())
+    return {
+      id: `task-assigned-${task.id}-${at}`,
+      kind: 'task_assigned' as const,
+      projectId: pid,
+      jobId: projectJobId.get(pid),
+      targetId: String(task.id),
+      title: projectTitle.get(pid) ?? 'Project',
+      body: `Task assigned to you: ${title}`,
+      at,
+    }
+  })
 }

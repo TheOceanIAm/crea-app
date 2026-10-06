@@ -7,6 +7,7 @@ import {
   formatCallSheetDate,
   parseCallSheet,
   personCallTime,
+  personIsCast,
   personLocation,
   type CallSheetDocument,
 } from '@/lib/callSheet'
@@ -46,6 +47,7 @@ export function buildCallSheetHtml(opts: {
   callSheet: CallSheetDocument | Record<string, CallSheetPdfOverride> | unknown
   dayNumber?: number | null
   dayCount?: number | null
+  advanceLabel?: string | null
 }): string {
   const doc = parseCallSheet(opts.callSheet)
   const dayLabel = callSheetDayLabel(opts.dayNumber ?? null, opts.dayCount ?? null)
@@ -98,6 +100,46 @@ export function buildCallSheetHtml(opts: {
     ? `<h2>Notes</h2><div class="notes">${escapeMultiline(opts.notes.trim())}</div>`
     : ''
 
+  const medic = [doc.contacts.medic_name, doc.contacts.medic_phone].map((v) => v.trim()).filter(Boolean)
+  const medicHtml = medic.length
+    ? `<div class="place"><div class="place-k">Set medic</div><div>${escapeCallSheetHtml(medic.join(' · '))}</div></div>`
+    : ''
+
+  const sceneRows = doc.scenes
+    .map((row) => {
+      const move = row.move.trim() ? `<tr><td colspan="5"><b>Move</b> ${escapeCallSheetHtml(row.move)}</td></tr>` : ''
+      return `<tr><td>${cell(row.scene)}</td><td>${cell(row.int_ext)}</td><td>${cell(row.description)}</td><td>${cell(row.cast)}</td><td>${cell(row.location)}</td></tr>${move}`
+    })
+    .join('')
+  const scenesHtml = sceneRows
+    ? `<h2>Today's scenes</h2><table><thead><tr><th>Scene</th><th>INT/EXT</th><th>Description</th><th>Cast</th><th>Location</th></tr></thead><tbody>${sceneRows}</tbody></table>`
+    : ''
+
+  const castRows = opts.crew
+    .filter((m) => personIsCast(doc.people[m.key]))
+    .map((m) => {
+      const person = doc.people[m.key] ?? {}
+      return `<tr><td>${cell(person.cast_no ? String(person.cast_no) : '')}</td><td>${escapeCallSheetHtml(m.name)}</td><td>${cell(person.character)}</td><td>${cell(person.status)}</td><td>${cell(personCallTime(person, general))}</td><td>${cell(person.hmu)}</td><td>${cell(person.wardrobe)}</td><td>${cell(person.ready)}</td><td>${cell(person.location)}</td><td>${cell(person.remarks || person.report)}</td></tr>`
+    })
+    .join('')
+  const castHtml = castRows
+    ? `<h2>Cast calls</h2><table><thead><tr><th>#</th><th>Name</th><th>Character</th><th>Status</th><th>Call</th><th>HMU</th><th>Wardrobe</th><th>Ready</th><th>Set</th><th>Note</th></tr></thead><tbody>${castRows}</tbody></table>`
+    : ''
+
+  const bgRows = doc.background
+    .map(
+      (row) =>
+        `<tr><td>${escapeCallSheetHtml(row.label)}</td><td>${cell(row.count ? String(row.count) : '')}</td><td>${cell(row.in)}</td><td>${cell(row.ready)}</td></tr>`
+    )
+    .join('')
+  const bgHtml = bgRows
+    ? `<h2>Extras & stand-ins</h2><table><thead><tr><th>Who</th><th>Qty</th><th>Arrive</th><th>Ready</th></tr></thead><tbody>${bgRows}</tbody></table>`
+    : ''
+
+  const advanceHtml = opts.advanceLabel?.trim()
+    ? `<h2>Next shoot day</h2><div class="notes">${escapeCallSheetHtml(opts.advanceLabel.trim())}</div>`
+    : ''
+
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; color:#111; padding:24px; }
         h1 { font-size:22px; margin:0 0 4px; }
@@ -122,7 +164,10 @@ export function buildCallSheetHtml(opts: {
         ${chips ? `<div class="chips">${chips}</div>` : ''}
         <div class="safety"><b>Safety first.</b> ${escapeCallSheetHtml(safetyNote)}${safetyMeeting ? `<br/>Meeting: ${escapeCallSheetHtml(safetyMeeting)}` : ''}</div>
         <h2>Locations</h2>
-        <div class="places">${placesHtml}</div>
+        <div class="places">${placesHtml}${medicHtml}</div>
+        ${scenesHtml}
+        ${castHtml}
+        ${bgHtml}
         ${special ? `<h2>Special instructions</h2><div class="notes">${escapeMultiline(special)}</div>` : ''}
         ${deptBits.length ? `<h2>Department notes</h2><div class="notes">${deptBits.map(([k, v]) => `<b>${escapeCallSheetHtml(k)}:</b> ${escapeMultiline(v)}`).join('<br/>')}</div>` : ''}
         <h2>Crew calls</h2>
@@ -131,6 +176,7 @@ export function buildCallSheetHtml(opts: {
           <tbody>${rowsHtml}</tbody>
         </table>
         ${notesBlock}
+        ${advanceHtml}
         ${contacts.length ? `<div class="foot">${contacts.map(([k, v]) => `<span><b>${escapeCallSheetHtml(k)}</b> ${escapeCallSheetHtml(v)}</span>`).join('')}</div>` : ''}
       </body></html>`
 }
