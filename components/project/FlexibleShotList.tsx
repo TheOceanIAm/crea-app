@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Plus, Upload } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { supabase } from '@/lib/supabase'
 import {
   appendRows,
   columnsMatch,
@@ -22,6 +23,7 @@ import {
   parseShotFile,
   sheetFromParsed,
   shotGlance,
+  shotSheetFromDb,
   shotSheetKey,
   splitShotColumns,
   type ShotSheet,
@@ -80,29 +82,179 @@ export function FlexibleShotList({
   const [truncated, setTruncated] = useState(false)
   const [busy, setBusy] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
+  const latest = useRef<ShotSheet | null>(null)
+  const seenUpdatedAt = useRef('')
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flushing = useRef(false)
+  const queued = useRef(false)
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
 
-  useEffect(() => {
-    let cancelled = false
-    setReady(false)
-    void readStored(projectId, shootDay).then((stored) => {
-      if (cancelled) return
-      setSheet(stored)
-      setReady(true)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [projectId, shootDay])
-
-  const save = useCallback(
+  const cache = useCallback(
     (next: ShotSheet | null) => {
       const key = shotSheetKey(projectId, shootDay)
       if (next) void AsyncStorage.setItem(key, JSON.stringify(next))
       else void AsyncStorage.removeItem(key)
-      setSheet(next)
     },
     [projectId, shootDay]
   )
+
+  const persist = useCallback(
+    async (next: ShotSheet | null) => {
+      if (next) {
+        const { data, error } = await supabase
+          .from('production_shot_sheets')
+          .upsert(
+            {
+              project_id: projectId,
+              shoot_date: shootDay,
+              columns: next.columns,
+              rows: next.rows,
+              source_name: next.sourceName,
+            },
+            { onConflict: 'project_id,shoot_date' }
+          )
+          .select('updated_at')
+          .maybeSingle()
+        if (error) {
+          Alert.alert('Shot list', 'Could not save this shot list to the project.')
+          return
+        }
+        cache(next)
+        const stamp = typeof data?.updated_at === 'string' ? data.updated_at : ''
+        if (stamp > seenUpdatedAt.current) seenUpdatedAt.current = stamp
+        return
+      }
+      const { error } = await supabase
+        .from('production_shot_sheets')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('shoot_date', shootDay)
+      if (error) {
+        Alert.alert('Shot list', 'Could not switch back to the standard list.')
+        return
+      }
+      cache(null)
+    },
+    [cache, projectId, shootDay]
+  )
+
+  const flush = useCallback(() => {
+    if (flushing.current) {
+      queued.current = true
+      return
+    }
+    flushing.current = true
+    queued.current = false
+    const snapshot = latest.current
+    void persist(snapshot).finally(() => {
+      flushing.current = false
+      if (queued.current) flush()
+    })
+  }, [persist])
+
+  const save = useCallback(
+    (next: ShotSheet | null, immediate = false) => {
+      if (readOnlyRef.current) return
+      latest.current = next
+      setSheet(next)
+      if (timer.current) clearTimeout(timer.current)
+      if (immediate) {
+        timer.current = null
+        flush()
+        return
+      }
+      timer.current = setTimeout(() => {
+        timer.current = null
+        flush()
+      }, 450)
+    },
+    [flush]
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    setReady(false)
+    const apply = (next: ShotSheet | null, stamp = '') => {
+      if (cancelled) return
+      if (stamp > seenUpdatedAt.current) seenUpdatedAt.current = stamp
+      latest.current = next
+      setSheet(next)
+      setReady(true)
+    }
+    const load = async () => {
+      const { data, error } = await supabase
+        .from('production_shot_sheets')
+        .select('columns, rows, source_name, updated_at')
+        .eq('project_id', projectId)
+        .eq('shoot_date', shootDay)
+        .maybeSingle()
+      if (cancelled) return
+      if (error) {
+        apply(await readStored(projectId, shootDay))
+        return
+      }
+      const remote = data ? shotSheetFromDb(data) : null
+      if (remote) {
+        cache(remote)
+        apply(remote, typeof data?.updated_at === 'string' ? data.updated_at : '')
+        return
+      }
+      const local = await readStored(projectId, shootDay)
+      apply(local)
+      if (local && !readOnlyRef.current) void persist(local)
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [cache, persist, projectId, shootDay])
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`shot-sheet-${projectId}-${shootDay}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'production_shot_sheets',
+          filter: `project_id=eq.${projectId}`,
+        },
+        (payload) => {
+          if (flushing.current || queued.current || timer.current) return
+          if (payload.eventType === 'DELETE') {
+            const oldRow = payload.old as { shoot_date?: string }
+            if (oldRow.shoot_date && oldRow.shoot_date !== shootDay) return
+            latest.current = null
+            setSheet(null)
+            cache(null)
+            return
+          }
+          const row = payload.new as {
+            shoot_date?: string
+            updated_at?: string
+            columns?: unknown
+            rows?: unknown
+            source_name?: unknown
+          }
+          if (row.shoot_date !== shootDay) return
+          const stamp = row.updated_at ?? ''
+          if (stamp && stamp <= seenUpdatedAt.current) return
+          const parsed = shotSheetFromDb(row)
+          if (!parsed) return
+          if (stamp) seenUpdatedAt.current = stamp
+          latest.current = parsed
+          setSheet(parsed)
+          cache(parsed)
+        }
+      )
+      .subscribe()
+    return () => {
+      if (timer.current) clearTimeout(timer.current)
+      void supabase.removeChannel(channel)
+    }
+  }, [cache, projectId, shootDay])
 
   const pickFile = async () => {
     if (readOnly || busy) return
@@ -155,9 +307,9 @@ export function FlexibleShotList({
         Alert.alert('Shot list', merged.error)
         return
       }
-      save(merged)
+      save(merged, true)
     } else {
-      save(pending)
+      save(pending, true)
     }
     setPending(null)
   }
@@ -184,11 +336,11 @@ export function FlexibleShotList({
       )}
       <Text style={styles.hint}>
         {sheet
-          ? `Columns from ${sheet.sourceName}. Saved on this device only, so you can look at the layout before it goes live.`
+          ? `Columns from ${sheet.sourceName}. Saved in this project, so the website and the app show the same list.`
           : 'Add shots by hand, or upload an Excel file or PDF. The columns from the file become the list for this day.'}
       </Text>
       {sheet ? (
-        <TouchableOpacity onPress={() => save(null)}>
+        <TouchableOpacity onPress={() => save(null, true)}>
           <Text style={styles.standardLink}>Standard list</Text>
         </TouchableOpacity>
       ) : null}
@@ -234,19 +386,22 @@ export function FlexibleShotList({
                       style={styles.statusBtn}
                       disabled={readOnly}
                       onPress={() =>
-                        save({
-                          ...sheet,
-                          rows: sheet.rows.map((item) =>
-                            item.id === row.id ? { ...item, status: nextSheetStatus(item.status) } : item
-                          ),
-                        })
+                        save(
+                          {
+                            ...sheet,
+                            rows: sheet.rows.map((item) =>
+                              item.id === row.id ? { ...item, status: nextSheetStatus(item.status) } : item
+                            ),
+                          },
+                          true
+                        )
                       }
                     >
                       <Text style={styles.statusText}>{STATUS_LABEL[row.status]}</Text>
                     </TouchableOpacity>
                     {readOnly ? null : (
                       <TouchableOpacity
-                        onPress={() => save({ ...sheet, rows: sheet.rows.filter((item) => item.id !== row.id) })}
+                        onPress={() => save({ ...sheet, rows: sheet.rows.filter((item) => item.id !== row.id) }, true)}
                         hitSlop={8}
                       >
                         <Text style={styles.deleteText}>✕</Text>
@@ -307,7 +462,7 @@ export function FlexibleShotList({
           {readOnly ? null : (
             <TouchableOpacity
               style={styles.addBtn}
-              onPress={() => save({ ...sheet, rows: [...sheet.rows, emptyRow(sheet.columns)] })}
+              onPress={() => save({ ...sheet, rows: [...sheet.rows, emptyRow(sheet.columns)] }, true)}
             >
               <Plus size={18} color="#0a0a0a" strokeWidth={ICON_STROKE} />
               <Text style={styles.addBtnText}>New row</Text>

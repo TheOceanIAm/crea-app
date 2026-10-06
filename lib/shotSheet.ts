@@ -447,3 +447,39 @@ export function nextSheetStatus(current: ShotSheetStatus): ShotSheetStatus {
 export function shotSheetKey(projectId: string, shootDay: string): string {
   return `crea-shot-sheet-preview:${projectId}:${shootDay}`;
 }
+
+const SHEET_STATUS = new Set<ShotSheetStatus>(SHOT_SHEET_STATUSES);
+
+/** A row from production_shot_sheets. Returns null when the payload is not a sheet. */
+export function shotSheetFromDb(raw: {
+  columns?: unknown;
+  rows?: unknown;
+  source_name?: unknown;
+  sourceName?: unknown;
+}): ShotSheet | null {
+  if (!Array.isArray(raw.columns) || raw.columns.some((name) => typeof name !== "string")) return null;
+  if (!Array.isArray(raw.rows)) return null;
+  const columns = raw.columns.slice(0, MAX_COLS);
+  if (columns.length === 0) return null;
+  const rows: ShotSheetRow[] = [];
+  for (const item of raw.rows.slice(0, MAX_ROWS)) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as { id?: unknown; cells?: unknown; status?: unknown };
+    const cells = Array.isArray(record.cells)
+      ? record.cells.map((cell) => String(cell ?? "")).slice(0, columns.length)
+      : [];
+    while (cells.length < columns.length) cells.push("");
+    const status = SHEET_STATUS.has(record.status as ShotSheetStatus)
+      ? (record.status as ShotSheetStatus)
+      : "open";
+    const id = typeof record.id === "string" && record.id ? record.id : newId();
+    rows.push({ id, cells, status });
+  }
+  const sourceName =
+    typeof raw.source_name === "string"
+      ? raw.source_name
+      : typeof raw.sourceName === "string"
+        ? raw.sourceName
+        : "";
+  return { columns, rows, sourceName };
+}
