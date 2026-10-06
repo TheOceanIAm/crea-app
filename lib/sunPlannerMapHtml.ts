@@ -42,12 +42,18 @@ export function buildSunPlannerMapHtml(): string {
   var layersReady = false;
   var currentStyleKey = 'standard';
   var styleGeneration = 0;
+  var followedCenter = null;
   var emptyFc = { type: 'FeatureCollection', features: [] };
   var STYLE_URLS = ${styleUrls};
   var STYLE_CONFIGS = ${styleConfigs};
 
   function styleKeyFrom(state) {
     return state && state.basemap === 'satellite' ? 'satellite' : 'standard';
+  }
+
+  function sameCenter(a, b) {
+    if (!a || !b) return false;
+    return Math.abs(a[0] - b[0]) < 0.00002 && Math.abs(a[1] - b[1]) < 0.00002;
   }
 
   function post(msg) {
@@ -235,14 +241,16 @@ export function buildSunPlannerMapHtml(): string {
     ensureLayers();
 
     var cam = state.camera || {};
-    if (cam.center) {
-      map.easeTo({
-        center: cam.center,
-        zoom: cam.zoom != null ? cam.zoom : map.getZoom(),
-        pitch: cam.pitch != null ? cam.pitch : map.getPitch(),
-        duration: 220,
-        essential: true
-      });
+    if (cam.center && !sameCenter(followedCenter, cam.center)) {
+      var firstCenter = !followedCenter;
+      followedCenter = cam.center;
+      if (!firstCenter) {
+        map.easeTo({
+          center: cam.center,
+          duration: 450,
+          essential: true
+        });
+      }
     }
 
     if (state.mapLight) applySunLight(state.mapLight);
@@ -288,13 +296,14 @@ export function buildSunPlannerMapHtml(): string {
       var state = (cfg && cfg.state) || {};
       var cam = state.camera || {};
       currentStyleKey = styleKeyFrom(state);
+      followedCenter = cam.center || null;
       map = new mapboxgl.Map({
         container: 'map',
         style: STYLE_URLS[currentStyleKey],
         config: { basemap: STYLE_CONFIGS[currentStyleKey] },
         center: cam.center || [0, 0],
-        zoom: cam.zoom != null ? cam.zoom : 17.2,
-        pitch: cam.pitch != null ? cam.pitch : 62,
+        zoom: cam.zoom != null ? cam.zoom : 15.2,
+        pitch: cam.pitch != null ? cam.pitch : 45,
         bearing: 0,
         antialias: true,
         attributionControl: true,

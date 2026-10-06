@@ -83,13 +83,18 @@ function applyPayload(map: any, payload: ReturnType<typeof buildSunPlannerMapPay
     if (src && typeof src.setData === 'function') src.setData(data || empty)
   }
 
-  map.easeTo({
-    center: payload.camera.center,
-    zoom: payload.camera.zoom,
-    pitch: payload.camera.pitch,
-    duration: 220,
-    essential: true,
-  })
+  const nextCenter = payload.camera.center
+  const prevCenter = map.__creaCenter as [number, number] | undefined
+  const centerMoved =
+    !prevCenter ||
+    Math.abs(prevCenter[0] - nextCenter[0]) > 0.00002 ||
+    Math.abs(prevCenter[1] - nextCenter[1]) > 0.00002
+  if (centerMoved) {
+    if (prevCenter) {
+      map.easeTo({ center: nextCenter, duration: 450, essential: true })
+    }
+    map.__creaCenter = nextCenter
+  }
 
   applySunLight(map, payload.mapLight)
 
