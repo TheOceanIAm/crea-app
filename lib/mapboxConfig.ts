@@ -24,3 +24,20 @@ export function isShadowMapFeatureEnabled(): boolean {
 export function canShowShadowMap(): boolean {
   return isShadowMapFeatureEnabled() && !!getMapboxAccessToken()
 }
+
+/** CDN build for the Sun Planner web map and the native WebView. */
+export const MAPBOX_GL_VERSION = 'v3.32.0'
+
+export const MAPBOX_STANDARD_STYLE = 'mapbox://styles/mapbox/standard'
+
+/** Basemap tweaks for the oblique sun study: 3D city, no label clutter. */
+export const MAPBOX_STANDARD_BASEMAP = {
+  show3dObjects: true,
+  show3dBuildings: true,
+  show3dTrees: true,
+  show3dFacades: true,
+  showPlaceLabels: false,
+  showRoadLabels: false,
+  showPointOfInterestLabels: false,
+  showTransitLabels: false,
+} as const

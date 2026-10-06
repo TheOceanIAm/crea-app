@@ -166,8 +166,8 @@ export function buildSunPlannerMapPayload(input: {
     },
     camera: {
       center: [subject.lon, subject.lat],
-      zoom: 17,
-      pitch: 55,
+      zoom: 17.2,
+      pitch: 62,
     },
   }
 }

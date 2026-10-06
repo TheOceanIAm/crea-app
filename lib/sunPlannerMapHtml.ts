@@ -1,16 +1,19 @@
+import { MAPBOX_GL_VERSION, MAPBOX_STANDARD_BASEMAP, MAPBOX_STANDARD_STYLE } from '@/lib/mapboxConfig'
+
 /**
  * Self-contained Mapbox GL JS document for Sun Planner (native WebView).
  * RN boots/updates via window.__creaBoot / window.__creaUpdate and receives
  * subject taps via ReactNativeWebView.postMessage.
  */
 export function buildSunPlannerMapHtml(): string {
+  const basemapConfig = JSON.stringify(MAPBOX_STANDARD_BASEMAP)
   // Keep HTML free of secrets; token arrives with __creaBoot.
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <link href="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.css" rel="stylesheet" />
+  <link href="https://api.mapbox.com/mapbox-gl-js/${MAPBOX_GL_VERSION}/mapbox-gl.css" rel="stylesheet" />
   <style>
     html, body, #map { margin: 0; padding: 0; height: 100%; width: 100%; background: #111; }
     .mapboxgl-ctrl-logo { margin: 0 0 4px 4px !important; }
@@ -19,7 +22,7 @@ export function buildSunPlannerMapHtml(): string {
 </head>
 <body>
   <div id="map"></div>
-  <script src="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.js"></script>
+  <script src="https://api.mapbox.com/mapbox-gl-js/${MAPBOX_GL_VERSION}/mapbox-gl.js"></script>
   <script>
 (function () {
   var map = null;
@@ -48,49 +51,37 @@ export function buildSunPlannerMapHtml(): string {
     return undefined;
   }
 
+  function applySunLight(mapLight) {
+    if (!map || !mapLight || typeof map.setLights !== 'function' || !mapLight.position) return;
+    var azimuth = Number(mapLight.position[1]) || 0;
+    var polar = Math.max(0, Math.min(90, Number(mapLight.position[2]) || 45));
+    var sunUp = polar < 89;
+    var directional = sunUp ? 1 : 0.08;
+    try {
+      map.setLights([
+        {
+          id: 'crea-ambient',
+          type: 'ambient',
+          properties: { color: 'rgb(210,220,232)', intensity: sunUp ? 0.22 : 0.18 }
+        },
+        {
+          id: 'crea-sun',
+          type: 'directional',
+          properties: {
+            color: 'rgb(255,232,180)',
+            intensity: directional,
+            direction: [azimuth, polar],
+            'cast-shadows': sunUp,
+            'shadow-intensity': sunUp ? 1 : 0
+          }
+        }
+      ]);
+    } catch (e) {}
+  }
+
   function ensureLayers() {
     if (!map || layersReady) return;
     var before = firstSymbolLayerId();
-
-    if (!map.getSource('crea-buildings')) {
-      map.addSource('crea-buildings', {
-        type: 'vector',
-        url: 'mapbox://mapbox.mapbox-streets-v8'
-      });
-    }
-
-    // Single soft building shadow (no near/mid/far stacking).
-    if (!map.getLayer('crea-building-shadow')) {
-      map.addLayer({
-        id: 'crea-building-shadow',
-        source: 'crea-buildings',
-        'source-layer': 'building',
-        filter: ['==', ['get', 'extrude'], 'true'],
-        type: 'fill',
-        paint: {
-          'fill-color': 'rgba(0,0,0,0.4)',
-          'fill-opacity': 0,
-          'fill-translate': [0, 0],
-          'fill-translate-anchor': 'map'
-        }
-      }, before);
-    }
-
-    if (!map.getLayer('crea-3d-buildings')) {
-      map.addLayer({
-        id: 'crea-3d-buildings',
-        source: 'crea-buildings',
-        'source-layer': 'building',
-        filter: ['==', ['get', 'extrude'], 'true'],
-        type: 'fill-extrusion',
-        paint: {
-          'fill-extrusion-color': '#e6e8ec',
-          'fill-extrusion-opacity': 0.88,
-          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 12],
-          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0]
-        }
-      }, before);
-    }
 
     map.addSource('crea-shadow-area', { type: 'geojson', data: emptyFc });
     map.addLayer({
@@ -101,6 +92,7 @@ export function buildSunPlannerMapHtml(): string {
       paint: {
         'fill-color': 'rgba(20,20,20,0.22)',
         'fill-opacity': 0.12,
+        'fill-emissive-strength': 0.65,
         'fill-opacity-transition': { duration: 180 }
       }
     }, before);
@@ -112,6 +104,7 @@ export function buildSunPlannerMapHtml(): string {
       paint: {
         'fill-color': 'rgba(10,10,10,0.4)',
         'fill-opacity': 0.2,
+        'fill-emissive-strength': 0.65,
         'fill-opacity-transition': { duration: 180 }
       }
     }, before);
@@ -125,7 +118,8 @@ export function buildSunPlannerMapHtml(): string {
         'line-color': 'rgba(10,10,10,0.35)',
         'line-width': 10,
         'line-opacity': 0.2,
-        'line-blur': 2.5
+        'line-blur': 2.5,
+        'line-emissive-strength': 0.7
       }
     }, before);
     map.addLayer({
@@ -136,7 +130,8 @@ export function buildSunPlannerMapHtml(): string {
         'line-color': 'rgba(10,10,10,0.7)',
         'line-width': 3.5,
         'line-opacity': 0.35,
-        'line-blur': 0.6
+        'line-blur': 0.6,
+        'line-emissive-strength': 0.7
       }
     }, before);
 
@@ -149,7 +144,8 @@ export function buildSunPlannerMapHtml(): string {
         'line-color': 'rgba(255,220,0,0.42)',
         'line-width': 8,
         'line-opacity': 0.5,
-        'line-blur': 1.5
+        'line-blur': 1.5,
+        'line-emissive-strength': 1
       }
     });
     map.addLayer({
@@ -159,7 +155,8 @@ export function buildSunPlannerMapHtml(): string {
       paint: {
         'line-color': '#FFDC00',
         'line-width': 3,
-        'line-opacity': 0.95
+        'line-opacity': 0.95,
+        'line-emissive-strength': 1
       }
     });
 
@@ -172,7 +169,8 @@ export function buildSunPlannerMapHtml(): string {
         'circle-radius': 5,
         'circle-color': '#FFDC00',
         'circle-stroke-width': 1.5,
-        'circle-stroke-color': '#0a0a0a'
+        'circle-stroke-color': '#0a0a0a',
+        'circle-emissive-strength': 1
       }
     });
 
@@ -185,7 +183,8 @@ export function buildSunPlannerMapHtml(): string {
         'circle-radius': 9,
         'circle-color': '#FFDC00',
         'circle-stroke-width': 2,
-        'circle-stroke-color': '#0a0a0a'
+        'circle-stroke-color': '#0a0a0a',
+        'circle-emissive-strength': 1
       }
     });
 
@@ -207,15 +206,7 @@ export function buildSunPlannerMapHtml(): string {
       });
     }
 
-    if (state.mapLight) {
-      try {
-        map.setLight({
-          anchor: state.mapLight.anchor || 'map',
-          position: state.mapLight.position,
-          intensity: state.mapLight.intensity
-        });
-      } catch (e) {}
-    }
+    if (state.mapLight) applySunLight(state.mapLight);
 
     setSrc('crea-subject', state.subjectPoint);
     setSrc('crea-sun-direction', state.sunDirection);
@@ -237,13 +228,6 @@ export function buildSunPlannerMapHtml(): string {
       map.setPaintProperty('crea-shadow-line-core', 'line-opacity', tone.lineOpacity || 0.35);
     }
 
-    var b = state.buildingShadow || {};
-    if (map.getLayer('crea-building-shadow')) {
-      var visible = !!b.visible;
-      map.setLayoutProperty('crea-building-shadow', 'visibility', visible ? 'visible' : 'none');
-      map.setPaintProperty('crea-building-shadow', 'fill-opacity', visible ? (b.opacity || 0) : 0);
-      map.setPaintProperty('crea-building-shadow', 'fill-translate', b.translate || [0, 0]);
-    }
   }
 
   window.__creaBoot = function (cfg) {
@@ -266,11 +250,13 @@ export function buildSunPlannerMapHtml(): string {
       var cam = state.camera || {};
       map = new mapboxgl.Map({
         container: 'map',
-        style: 'mapbox://styles/mapbox/streets-v12',
+        style: '${MAPBOX_STANDARD_STYLE}',
+        config: { basemap: ${basemapConfig} },
         center: cam.center || [0, 0],
-        zoom: cam.zoom != null ? cam.zoom : 17,
-        pitch: cam.pitch != null ? cam.pitch : 55,
+        zoom: cam.zoom != null ? cam.zoom : 17.2,
+        pitch: cam.pitch != null ? cam.pitch : 62,
         bearing: 0,
+        antialias: true,
         attributionControl: true,
         logoPosition: 'bottom-left'
       });
