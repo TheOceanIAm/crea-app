@@ -144,6 +144,7 @@ type MenuId =
   | 'portfolio'
   | 'rates'
   | 'availability'
+  | 'calendar'
   | 'billing'
   | 'plan'
   | 'notifications'
@@ -167,13 +168,19 @@ const MENU_ITEMS: MenuItem[] = [
     icon: CalendarDays,
     href: '/(tabs)/availability',
   },
+  {
+    id: 'calendar',
+    label: 'Calendar',
+    icon: CalendarDays,
+    href: '/(tabs)/project-calendar',
+  },
   { id: 'billing', label: 'Invoice & bank', icon: Receipt },
   { id: 'plan', label: 'Plan', icon: CreditCard },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'account', label: 'Account', icon: Settings },
 ]
 
-const CEO_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability', 'billing', 'plan']
+const CEO_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability', 'calendar', 'billing', 'plan']
 /** Rates, availability & links are freelancer-focused; companies edit website/social under Profile. */
 const COMPANY_HIDDEN_MENU_IDS: MenuId[] = ['portfolio', 'rates', 'availability']
 
@@ -1420,6 +1427,7 @@ export default function ProfileScreen() {
 
   const onMenuPress = (item: MenuItem) => {
     if (item.href) {
+      if (item.id === 'calendar') setScreenReturn('/(tabs)/profile')
       router.navigate(item.href)
       return
     }

@@ -381,6 +381,13 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
+          name="project-calendar"
+          options={{
+            href: null,
+            title: 'Calendar',
+          }}
+        />
+        <Tabs.Screen
           name="profile-preview"
           options={{
             href: null,
