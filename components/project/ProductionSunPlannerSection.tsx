@@ -265,27 +265,33 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
   const daylightHours =
     sun?.daylightSeconds != null ? `${(sun.daylightSeconds / 3600).toFixed(1)} h` : '—'
 
-  const presetTimes = useMemo(() => {
-    const sunrise = sun ? isoToHHmm(sun.sunrise) : null
-    const sunset = sun ? isoToHHmm(sun.sunset) : null
-    const sunriseDate = sun ? new Date(sun.sunrise) : null
-    const sunsetDate = sun ? new Date(sun.sunset) : null
-    const morningGolden =
-      sunriseDate && !Number.isNaN(sunriseDate.getTime())
-        ? isoToHHmm(new Date(sunriseDate.getTime() + 45 * 60 * 1000).toISOString())
-        : null
-    const eveningGolden =
-      sunsetDate && !Number.isNaN(sunsetDate.getTime())
-        ? isoToHHmm(new Date(sunsetDate.getTime() - 45 * 60 * 1000).toISOString())
-        : null
+  const sunFacts = useMemo(() => {
+    const sunrise = sun ? fmtClock(sun.sunrise) : '—'
+    const sunset = sun ? fmtClock(sun.sunset) : '—'
+    const sunriseMs = sun ? new Date(sun.sunrise).getTime() : NaN
+    const sunsetMs = sun ? new Date(sun.sunset).getTime() : NaN
+    const goldenEndIso = Number.isFinite(sunriseMs) ? new Date(sunriseMs + 60 * 60 * 1000).toISOString() : null
+    const eveningStartIso = Number.isFinite(sunsetMs) ? new Date(sunsetMs - 60 * 60 * 1000).toISOString() : null
+    const goldenEnd = goldenEndIso ? fmtClock(goldenEndIso) : '—'
+    const eveningStart = eveningStartIso ? fmtClock(eveningStartIso) : '—'
     return [
-      { key: 'sunrise', label: 'Sunrise', value: sunrise },
-      { key: 'golden_am', label: 'Golden AM', value: morningGolden },
-      { key: 'noon', label: 'Noon', value: '12:00' },
-      { key: 'golden_pm', label: 'Golden PM', value: eveningGolden },
-      { key: 'sunset', label: 'Sunset', value: sunset },
+      { key: 'sunrise', label: 'Sunrise', value: sunrise, jump: sun ? isoToHHmm(sun.sunrise) : null },
+      { key: 'sunset', label: 'Sunset', value: sunset, jump: sun ? isoToHHmm(sun.sunset) : null },
+      { key: 'daylight', label: 'Daylight', value: daylightHours, jump: null },
+      {
+        key: 'golden',
+        label: 'Golden hour (approx)',
+        value: sun && goldenEnd !== '—' ? `${sunrise}–${goldenEnd}` : '—',
+        jump: sun ? isoToHHmm(sun.sunrise) : null,
+      },
+      {
+        key: 'evening',
+        label: 'Evening golden hour (approx)',
+        value: sun && eveningStart !== '—' ? `${eveningStart}–${sunset}` : '—',
+        jump: eveningStartIso ? isoToHHmm(eveningStartIso) : null,
+      },
     ]
-  }, [sun])
+  }, [sun, daylightHours])
 
   const sliderMinutes = useMemo(() => hhmmToMinutes(timeInput) ?? 12 * 60, [timeInput])
   const mapReady = isShadowMapFeatureEnabled() && !!latLon && !!subjectLatLon && !!angleData
@@ -400,52 +406,36 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
       </TouchableOpacity>
 
       <View style={styles.presetsRow}>
-        {presetTimes.map((p) => (
-          <TouchableOpacity
-            key={p.key}
-            style={[styles.presetBtn, (!p.value || loading) && styles.presetBtnDisabled]}
-            disabled={!p.value || loading}
-            onPress={() => {
-              if (p.value) setTimeInput(p.value)
-            }}
-          >
-            <Text style={styles.presetBtnLabel}>{p.label}</Text>
-            <Text style={styles.presetBtnValue}>{p.value ?? '—'}</Text>
-          </TouchableOpacity>
-        ))}
+        {sunFacts.map((fact) => {
+          const body = (
+            <>
+              <Text style={styles.presetBtnLabel}>{fact.label}</Text>
+              <Text style={styles.presetBtnValue}>{fact.value}</Text>
+            </>
+          )
+          if (!fact.jump || loading) {
+            return (
+              <View key={fact.key} style={styles.presetBtn}>
+                {body}
+              </View>
+            )
+          }
+          return (
+            <TouchableOpacity
+              key={fact.key}
+              style={styles.presetBtn}
+              onPress={() => {
+                if (fact.jump) setTimeInput(fact.jump)
+              }}
+            >
+              {body}
+            </TouchableOpacity>
+          )
+        })}
       </View>
 
       {error ? <Text style={styles.err}>{error}</Text> : null}
       {label ? <Text style={styles.location}>{label}</Text> : null}
-
-      {sun ? (
-        <View style={styles.card}>
-          <View style={styles.metricRow}>
-            <Text style={styles.metricLabel}>Sunrise</Text>
-            <Text style={styles.metricValue}>{fmtClock(sun.sunrise)}</Text>
-          </View>
-          <View style={styles.metricRow}>
-            <Text style={styles.metricLabel}>Sunset</Text>
-            <Text style={styles.metricValue}>{fmtClock(sun.sunset)}</Text>
-          </View>
-          <View style={styles.metricRow}>
-            <Text style={styles.metricLabel}>Daylight</Text>
-            <Text style={styles.metricValue}>{daylightHours}</Text>
-          </View>
-          <View style={styles.metricRow}>
-            <Text style={styles.metricLabel}>Golden hour (approx)</Text>
-            <Text style={styles.metricValue}>
-              {`${fmtClock(sun.sunrise)}–${fmtClock(new Date(new Date(sun.sunrise).getTime() + 60 * 60 * 1000).toISOString())}`}
-            </Text>
-          </View>
-          <View style={styles.metricRow}>
-            <Text style={styles.metricLabel}>Evening golden hour (approx)</Text>
-            <Text style={styles.metricValue}>
-              {`${fmtClock(new Date(new Date(sun.sunset).getTime() - 60 * 60 * 1000).toISOString())}–${fmtClock(sun.sunset)}`}
-            </Text>
-          </View>
-        </View>
-      ) : null}
 
       {mapReady && latLon && subjectLatLon && angleData ? (
         <View style={styles.card}>
@@ -585,7 +575,6 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     minWidth: 78,
   },
-  presetBtnDisabled: { opacity: 0.45 },
   presetBtnLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: '700' },
   presetBtnValue: { color: '#FFDC00', fontSize: 12, fontWeight: '800', marginTop: 1 },
   err: { fontSize: 13, color: 'rgba(255,100,100,0.9)', marginBottom: 8 },
@@ -615,15 +604,6 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
   },
-  metricRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 5,
-    gap: 12,
-  },
-  metricLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 12, flex: 1 },
-  metricValue: { color: '#FFDC00', fontSize: 13, fontWeight: '700' },
   shadowInputRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10 },
   shadowInputLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 12, fontWeight: '700' },
   shadowInput: {
