@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import {
   MAPBOX_GL_VERSION,
+  MAPBOX_SATELLITE_BASEMAP,
+  MAPBOX_SATELLITE_STYLE,
   MAPBOX_STANDARD_BASEMAP,
   MAPBOX_STANDARD_STYLE,
   canShowShadowMap,
@@ -286,9 +288,11 @@ export function ProductionShadowMapSection({
 }: ProductionShadowMapSectionProps) {
   const mapElRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
+  const appliedBasemapRef = useRef<'standard' | 'satellite'>('standard')
   const token = getMapboxAccessToken()
   const ready = canShowShadowMap()
   const [realism, setRealism] = useState<ShadowRealism>('subtle')
+  const [basemap, setBasemap] = useState<'standard' | 'satellite'>('standard')
 
   const payload = useMemo(
     () =>
@@ -301,6 +305,8 @@ export function ProductionShadowMapSection({
       }),
     [subject, sunAzimuthDeg, sunAltitudeDeg, subjectHeightM, realism]
   )
+  const payloadRef = useRef(payload)
+  payloadRef.current = payload
 
   useEffect(() => {
     if (!ready || !token || !mapElRef.current) return
@@ -359,6 +365,24 @@ export function ProductionShadowMapSection({
     applyPayload(map, payload)
   }, [payload])
 
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || appliedBasemapRef.current === basemap) return
+    appliedBasemapRef.current = basemap
+    const center = map.getCenter()
+    const zoom = map.getZoom()
+    const pitch = map.getPitch()
+    const bearing = map.getBearing()
+    const style = basemap === 'satellite' ? MAPBOX_SATELLITE_STYLE : MAPBOX_STANDARD_STYLE
+    const config = basemap === 'satellite' ? MAPBOX_SATELLITE_BASEMAP : MAPBOX_STANDARD_BASEMAP
+    map.setStyle(style, { config: { basemap: { ...config } } })
+    map.once('style.load', () => {
+      map.jumpTo({ center, zoom, pitch, bearing })
+      ensureMapLayers(map)
+      applyPayload(map, payloadRef.current)
+    })
+  }, [basemap])
+
   if (!ready || !token) {
     return (
       <View style={styles.wrapper}>
@@ -372,6 +396,19 @@ export function ProductionShadowMapSection({
       <Text style={styles.hint}>
         Tap the map to place the subject. Buildings and trees cast shadows from the selected time.
       </Text>
+      <View style={styles.realismRow}>
+        {(['standard', 'satellite'] as const).map((key) => (
+          <TouchableOpacity
+            key={key}
+            style={[styles.realismBtn, basemap === key && styles.realismBtnOn]}
+            onPress={() => setBasemap(key)}
+          >
+            <Text style={[styles.realismText, basemap === key && styles.realismTextOn]}>
+              {key === 'standard' ? '3D' : 'Satellite'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <View style={styles.realismRow}>
         {(['subtle', 'balanced', 'strong'] as const).map((key) => (
           <TouchableOpacity

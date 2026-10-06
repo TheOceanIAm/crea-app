@@ -157,6 +157,7 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
   const [subjectLatLon, setSubjectLatLon] = useState<{ lat: number; lon: number } | null>(null)
   const [forecast, setForecast] = useState<DailyForecastDay[]>([])
   const [forecastError, setForecastError] = useState<string | null>(null)
+  const [weatherOpen, setWeatherOpen] = useState(false)
   const sliderNativeAvailable =
     Platform.OS === 'web' ||
     !!(NativeModules as Record<string, unknown>).RNCSlider ||
@@ -473,35 +474,46 @@ export function ProductionSunPlannerSection({ initialLocation }: Props) {
       {forecastError ? <Text style={styles.err}>{forecastError}</Text> : null}
       {forecast.length > 0 ? (
         <View style={styles.card}>
-          <Text style={styles.forecastHead}>Weather · 7 days</Text>
-          <View style={styles.forecastHeadRow}>
-            <Text style={[styles.forecastHint, styles.forecastColTag]}>Day</Text>
-            <Text style={[styles.forecastHint, styles.forecastColTemp]}>high / low</Text>
-            <Text style={[styles.forecastHint, styles.forecastColRain]}>rain</Text>
-          </View>
-          {forecast.map((day) => (
-            <View key={day.date} style={styles.forecastDayRow}>
-              <View style={styles.forecastDayLeft}>
-                <Text style={styles.forecastDate}>
-                  {new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', {
-                    weekday: 'short',
-                    day: 'numeric',
-                    month: 'short',
-                  })}
-                </Text>
-                <Text style={styles.forecastSummary} numberOfLines={2}>
-                  {day.summary}
-                </Text>
+          <TouchableOpacity
+            style={[styles.forecastToggle, weatherOpen && styles.forecastToggleOpen]}
+            onPress={() => setWeatherOpen((open) => !open)}
+            accessibilityRole="button"
+          >
+            <Text style={styles.forecastHead}>Weather · 7 days</Text>
+            <Text style={styles.forecastChevron}>{weatherOpen ? '▴' : '▾'}</Text>
+          </TouchableOpacity>
+          {weatherOpen ? (
+            <>
+              <View style={styles.forecastHeadRow}>
+                <Text style={[styles.forecastHint, styles.forecastColTag]}>Day</Text>
+                <Text style={[styles.forecastHint, styles.forecastColTemp]}>high / low</Text>
+                <Text style={[styles.forecastHint, styles.forecastColRain]}>rain</Text>
               </View>
-              <Text style={[styles.forecastTemps, styles.forecastColTemp]}>
-                {day.tempMax}° / {day.tempMin}°
-              </Text>
-              <Text style={[styles.forecastRain, styles.forecastColRain]}>
-                {day.precipProbMax != null ? `${day.precipProbMax}%` : '—'}
-              </Text>
-            </View>
-          ))}
-          <Text style={styles.forecastAttr}>Data: Open-Meteo</Text>
+              {forecast.map((day) => (
+                <View key={day.date} style={styles.forecastDayRow}>
+                  <View style={styles.forecastDayLeft}>
+                    <Text style={styles.forecastDate}>
+                      {new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        day: 'numeric',
+                        month: 'short',
+                      })}
+                    </Text>
+                    <Text style={styles.forecastSummary} numberOfLines={2}>
+                      {day.summary}
+                    </Text>
+                  </View>
+                  <Text style={[styles.forecastTemps, styles.forecastColTemp]}>
+                    {day.tempMax}° / {day.tempMin}°
+                  </Text>
+                  <Text style={[styles.forecastRain, styles.forecastColRain]}>
+                    {day.precipProbMax != null ? `${day.precipProbMax}%` : '—'}
+                  </Text>
+                </View>
+              ))}
+              <Text style={styles.forecastAttr}>Data: Open-Meteo</Text>
+            </>
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -618,7 +630,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'right',
   },
-  forecastHead: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 10 },
+  forecastToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  forecastToggleOpen: { marginBottom: 10 },
+  forecastHead: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  forecastChevron: { color: '#FFDC00', fontSize: 14, fontWeight: '800' },
   forecastHeadRow: {
     flexDirection: 'row',
     alignItems: 'center',
