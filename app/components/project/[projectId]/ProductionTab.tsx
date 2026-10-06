@@ -33,6 +33,7 @@ import { formatShootDayOptionLabel, listProductionWindowYmd } from '@/lib/projec
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProductionSunPlannerSection } from '@/components/project/ProductionSunPlannerSection'
 import { ProductionEquipmentSection, ProductionTasksSection } from '@/components/project/ProductionManualLists'
+import { FlexibleShotList } from '@/components/project/FlexibleShotList'
 import type { ProductionEquipmentItem, ProductionTask } from '@/lib/productionLists'
 import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
 import { OfflinePackCard } from '@/components/project/OfflinePackCard'
@@ -1375,6 +1376,7 @@ export function ProductionTab({
       ) : null}
 
       {openFeature === 'shotlist' && !loading ? (
+        <FlexibleShotList projectId={projectId} shootDay={shootDay} readOnly={usingOfflinePack}>
         <>
       {/* —— Shot list —— */}
       <Text style={[styles.sectionHead, styles.sectionSp]}>SHOT LIST</Text>
@@ -1541,6 +1543,7 @@ export function ProductionTab({
         <Text style={styles.addRowBtnText}>Add shot</Text>
       </TouchableOpacity>
         </>
+        </FlexibleShotList>
       ) : null}
 
       {openFeature === 'call_sheet' && !loading ? (
