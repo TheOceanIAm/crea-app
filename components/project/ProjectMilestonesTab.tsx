@@ -54,7 +54,7 @@ type Props = {
   projectId: string
   jobId: string | null
   onCountsChanged?: () => void
-  /** Company account (owner or active team seat): add/edit/remove. Freelancers are view-only. */
+  /** Company account (owner or active team seat): add, edit, reorder, and remove. */
   canManage: boolean
 }
 
@@ -347,8 +347,10 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
     }
   }
 
+  const canCheck = !usingOfflinePack
+
   const toggle = async (m: WorkspaceMilestoneUi) => {
-    if (!canManage) return
+    if (!canCheck) return
     if (usingOfflinePack) {
       Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
       return
@@ -377,7 +379,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
   }
 
   const toggleDeliverable = async (m: WorkspaceMilestoneUi, index: number) => {
-    if (!canManage) return
+    if (!canCheck) return
     if (usingOfflinePack) {
       Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
       return
@@ -409,7 +411,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
   }
 
   const setStatus = async (m: WorkspaceMilestoneUi, status: WorkspaceMilestoneStatus) => {
-    if (!canManage || m.status === status) return
+    if ((!canManage && !canCheck) || m.status === status) return
     if (usingOfflinePack) {
       Alert.alert(OFFLINE_READ_ONLY_TITLE, OFFLINE_READ_ONLY_MESSAGE)
       return
@@ -484,8 +486,8 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
       {usingOfflinePack ? <OfflinePackBanner downloadedAt={packDownloadedAt} /> : null}
       <Text style={styles.hint}>
         {canManage
-          ? 'Shared with the web workspace. Tap a milestone to edit title, schedule, deliverables and status. Freelancers on the job can only view this list.'
-          : 'Shared with the web workspace. View each milestone to work through it — only the company team can edit.'}
+          ? 'Shared with the web workspace. Tap a milestone to edit it. Booked crew can check work off, but only the company team can add or change milestones.'
+          : 'Check off milestones and deliverables as you finish them. Only the company team can add or edit milestones.'}
       </Text>
 
       {canManage && !usingOfflinePack ? (
@@ -677,7 +679,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                   style={styles.checkWrap}
                   onPress={() => toggle(m)}
                   hitSlop={8}
-                  disabled={!canManage}
+                  disabled={!canCheck}
                 >
                   {m.completed ? (
                     <View style={styles.checkOn}>
@@ -728,8 +730,8 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                   {m.deliverables.length > 0 ? (
                     <View style={styles.expandedBlock}>
                       <Text style={styles.expandedLabel}>Deliverables</Text>
-                      {canManage ? (
-                        <Text style={styles.expandedEmpty}>Check off each item as you accept it.</Text>
+                      {canCheck ? (
+                        <Text style={styles.expandedEmpty}>Check off each item as you finish it.</Text>
                       ) : null}
                       {(isExpanded ? m.deliverables : m.deliverables.slice(0, 3)).map((d, i) => {
                         const done = m.deliverablesDone[i] === true
@@ -741,7 +743,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                             <Text style={[styles.deliverableText, done && styles.titleDone]}>{d}</Text>
                           </>
                         )
-                        return canManage ? (
+                        return canCheck ? (
                           <TouchableOpacity
                             key={`${m.id}-d-${i}`}
                             style={styles.deliverableRow}
@@ -794,9 +796,9 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                 />
               </View>
 
-              {isExpanded && canManage ? (
+              {isExpanded && (canManage || canCheck) ? (
                 <View style={styles.expanded}>
-                  {editingId === m.id ? (
+                  {canManage && editingId === m.id ? (
                     <View style={styles.editBlock}>
                       <Text style={styles.expandedLabel}>Edit milestone</Text>
                       <TextInput
@@ -944,6 +946,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                       </View>
                     </View>
                   ) : null}
+                  {canManage ? (
                   <View style={styles.expandedBlock}>
                     <Text style={styles.expandedLabel}>Priority</Text>
                     <View style={styles.priorityRowCompact}>
@@ -976,6 +979,7 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                       })}
                     </View>
                   </View>
+                  ) : null}
                   <View style={styles.expandedBlock}>
                     <Text style={styles.expandedLabel}>Update status</Text>
                     <View style={styles.statusColumn}>
