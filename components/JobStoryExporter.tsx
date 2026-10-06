@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
-import { Alert, NativeModules, View } from 'react-native'
+import { Alert, NativeModules, Platform, View } from 'react-native'
 import { encode } from 'base64-arraybuffer'
 import { buildJobStoryHtml, type JobStoryFields } from '@/lib/jobStoryHtml'
 
@@ -15,21 +15,17 @@ type NativeWebViewComponent = ComponentType<{
   pointerEvents?: 'none' | 'auto' | 'box-none' | 'box-only'
 }>
 
-let webViewCache: NativeWebViewComponent | null | undefined
-
 function loadNativeWebView(): NativeWebViewComponent | null {
-  if (webViewCache !== undefined) return webViewCache
+  // The August iOS binary aborts if this native view is touched. Expo then throws the
+  // update away and reopens that August bundle. Keep the probe off on iOS until a new binary ships.
+  if (Platform.OS === 'ios') return null
   try {
     const natives = NativeModules as Record<string, unknown>
-    if (!natives.RNCWebView && !natives.RNCWebViewModule) {
-      webViewCache = null
-      return null
-    }
-    webViewCache = require('react-native-webview').WebView as NativeWebViewComponent
+    if (!natives.RNCWebView && !natives.RNCWebViewModule) return null
+    return require('react-native-webview').WebView as NativeWebViewComponent
   } catch {
-    webViewCache = null
+    return null
   }
-  return webViewCache
 }
 
 export type JobStoryShareInput = JobStoryFields & {
