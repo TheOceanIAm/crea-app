@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
-import { Alert, NativeModules, Platform, View } from 'react-native'
+import { Alert, NativeModules, View } from 'react-native'
 import { encode } from 'base64-arraybuffer'
 import { buildJobStoryHtml, type JobStoryFields } from '@/lib/jobStoryHtml'
+import { nativeBinaryHasWebView } from '@/lib/nativeWebView'
 
 type WebViewMessageEvent = { nativeEvent: { data: string } }
 type NativeWebViewComponent = ComponentType<{
@@ -16,9 +17,7 @@ type NativeWebViewComponent = ComponentType<{
 }>
 
 function loadNativeWebView(): NativeWebViewComponent | null {
-  // The August iOS binary aborts if this native view is touched. Expo then throws the
-  // update away and reopens that August bundle. Keep the probe off on iOS until a new binary ships.
-  if (Platform.OS === 'ios') return null
+  if (!nativeBinaryHasWebView()) return null
   try {
     const natives = NativeModules as Record<string, unknown>
     if (!natives.RNCWebView && !natives.RNCWebViewModule) return null
