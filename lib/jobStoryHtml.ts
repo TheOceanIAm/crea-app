@@ -1,4 +1,5 @@
 import { CREA_WORDMARK_PATH, CREA_WORDMARK_VIEWBOX } from '@/lib/creaWordmark'
+import { summarizeStoryDescription } from '@/lib/storyDescription'
 
 export type JobStoryFields = {
   jobTitle: string
@@ -17,7 +18,7 @@ const CANVAS_SCRIPT = `
   var PAD_X = 108;
   var PAD_TOP_MIN = 140;
   var GAP_ABOVE_WORDMARK = 96;
-  var STORY_DESC_MAX_LINES = 16;
+  var STORY_DESC_MAX_LINES = 3;
   var STORY_DESC_PARA_GAP_FACTOR = 0.9;
   var BG = '#262626';
   var TEXT = '#ffffff';
@@ -282,10 +283,10 @@ const CANVAS_SCRIPT = `
       lines.push(line);
     }
     if (i < words.length && lines.length > 0) {
-      var last = lines[lines.length - 1];
-      var elided = last;
+      var elided = String(lines[lines.length - 1] || '').replace(/[.,;:]+$/, '').trim();
       while (elided.length > 4 && ctx.measureText(elided + '…').width > maxWidth) {
-        elided = elided.slice(0, -1);
+        var space = elided.lastIndexOf(' ');
+        elided = space > 8 ? elided.slice(0, space) : elided.slice(0, -1);
       }
       lines[lines.length - 1] = elided + '…';
     }
@@ -543,7 +544,7 @@ export function buildJobStoryHtml(fields: JobStoryFields): string {
     logoDataUrl: fields.logoDataUrl?.startsWith('data:image/') ? fields.logoDataUrl : null,
     budget: fields.budget || '—',
     location: fields.location || '—',
-    description: (fields.description || '—').slice(0, 4000),
+    description: summarizeStoryDescription(fields.description || '—'),
     wordmarkPath: CREA_WORDMARK_PATH,
     wordmarkViewBox: CREA_WORDMARK_VIEWBOX,
   }
