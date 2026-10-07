@@ -29,7 +29,7 @@ export type ShareSheetModalProps = {
   shareMessage: string
   shareUrl: string | null
   mailSubject: string
-  /** Job story graphic (1080×1920). Opens the system share sheet so it can be saved or posted. */
+  /** Job story graphic (1080×1350, 4:5). Opens the system share sheet so it can be saved or posted. */
   storyImage?: {
     busy: boolean
     onPress: () => void
@@ -118,7 +118,7 @@ export function ShareSheetModal({
 
           <Text style={styles.hint}>
             {storyImage
-              ? 'The link is a short URL. Story image is a 1080×1920 graphic — save it from the share menu or post it to Instagram.'
+              ? 'The link is a short URL. Story image is a 1080×1350 graphic — save it from the share menu or post it to Instagram.'
               : 'For Instagram or AirDrop, use Share… and pick Instagram, Messages, or AirDrop from the system menu.'}
           </Text>
 
