@@ -6,6 +6,7 @@ import {
 } from 'react-native'
 import { router } from 'expo-router'
 import Purchases from 'react-native-purchases'
+import { CreaWordmark } from '@/components/CreaWordmark'
 import { supabase } from '@/lib/supabase'
 import { isRetryableSupabaseError, sleep, userFacingErrorMessage } from '@/lib/userFacingError'
 import {
@@ -57,8 +58,8 @@ export default function LoginScreen() {
     >
       <ResponsiveScreen variant="compact">
       <View style={styles.inner}>
-        <Text style={styles.logo}>CREA</Text>
-        <Text style={styles.subtitle}>The platform for creative talent</Text>
+        <CreaWordmark style={styles.logo} />
+        <Text style={styles.subtitle}>Your new production home</Text>
 
         <View style={styles.form}>
           <TextInput
@@ -148,17 +149,14 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
   inner: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
   logo: {
-    fontSize: 52,
-    color: '#FFDC00',
-    fontWeight: '900',
-    letterSpacing: 6,
-    marginBottom: 6,
+    marginBottom: 10,
   },
   subtitle: {
     fontSize: 13,
     color: 'rgba(255,255,255,0.35)',
     letterSpacing: 1,
     marginBottom: 48,
+    textAlign: 'center',
   },
   form: { gap: 12 },
   input: {
