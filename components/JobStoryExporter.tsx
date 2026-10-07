@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
 import { Alert, View } from 'react-native'
 import { encode } from 'base64-arraybuffer'
-import { buildJobStoryHtml, type JobStoryFields } from '@/lib/jobStoryHtml'
+import { getCreaWebBaseUrl } from '@/lib/creaWeb'
+import { type JobStoryFields } from '@/lib/jobStoryHtml'
 import { nativeBinaryHasWebView } from '@/lib/nativeWebView'
 
 type WebViewMessageEvent = { nativeEvent: { data: string } }
@@ -32,27 +33,6 @@ export type JobStoryShareInput = JobStoryFields & {
 
 type StoryRequest = { id: number; html: string; jobId: string }
 type ChunkBag = { n: number; parts: Array<string | undefined> }
-
-async function logoToDataUrl(url: string | null | undefined): Promise<string | null> {
-  const trimmed = url?.trim() ?? ''
-  if (!/^https?:\/\//i.test(trimmed)) return null
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 8000)
-  try {
-    const res = await fetch(trimmed, { signal: ctrl.signal })
-    if (!res.ok) return null
-    const type = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
-    if (type.includes('svg') || (type && !type.startsWith('image/'))) return null
-    const buf = await res.arrayBuffer()
-    if (buf.byteLength < 32 || buf.byteLength > 4_000_000) return null
-    const mime = type.startsWith('image/') ? type : 'image/png'
-    return `data:${mime};base64,${encode(buf)}`
-  } catch {
-    return null
-  } finally {
-    clearTimeout(timer)
-  }
-}
 
 export function useJobStoryShare() {
   const [busy, setBusy] = useState(false)
@@ -146,31 +126,39 @@ export function useJobStoryShare() {
   const shareStory = useCallback(
     async (input: JobStoryShareInput) => {
       if (busy) return
-      const WebView = loadNativeWebView()
-      if (!WebView) {
-        Alert.alert('Story image', 'This build cannot create story images yet. Update the app and try again.')
+      const base = getCreaWebBaseUrl()
+      if (!base) {
+        fail('Could not create the story image.')
         return
       }
       setBusy(true)
-      const logoDataUrl = await logoToDataUrl(input.companyLogoUrl)
-      if (!alive.current) return
-      const html = buildJobStoryHtml({
-        jobTitle: input.jobTitle,
-        company: input.company,
-        logoDataUrl,
-        budget: input.budget,
-        location: input.location,
-        description: input.description,
-        isFreelance: input.isFreelance,
-      })
-      const id = requestId.current + 1
-      requestId.current = id
-      chunks.current.clear()
-      if (timeout.current) clearTimeout(timeout.current)
-      timeout.current = setTimeout(() => fail('Could not create the story image. Try again.'), 20000)
-      setRequest({ id, html, jobId: input.jobId })
+      try {
+        const res = await fetch(`${base}/api/og/job-story`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'image/png' },
+          body: JSON.stringify({
+            jobTitle: input.jobTitle,
+            company: input.company,
+            companyLogoUrl: input.companyLogoUrl ?? null,
+            budget: input.budget,
+            location: input.location,
+            description: input.description,
+            isFreelance: input.isFreelance ?? null,
+          }),
+        })
+        if (!alive.current) return
+        if (!res.ok) {
+          fail('Could not create the story image. Try again.')
+          return
+        }
+        const png = encode(await res.arrayBuffer())
+        if (!alive.current) return
+        await finish(input.jobId, png)
+      } catch {
+        if (alive.current) fail('Could not create the story image. Try again.')
+      }
     },
-    [busy, fail]
+    [busy, fail, finish]
   )
 
   const WebView = request ? loadNativeWebView() : null
