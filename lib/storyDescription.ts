@@ -102,3 +102,35 @@ export function summarizeStoryDescription(raw: string): string {
   const parts = roleBits.length > 0 ? roleBits : prose.length > 0 ? prose : [flat];
   return fitStoryLines(parts.join(" "));
 }
+
+const FULL_TIME =
+  /\b(full[-\s]?time|festanstellung|vollzeit|unbefristet|permanent(?:\s+(?:role|position|employment))?|staff\s+role)\b/gi;
+const PART_TIME = /\b(part[-\s]?time|teilzeit)\b/gi;
+const FREELANCE = /\b(freelance|freelancer|freiberufl\w*)\b/gi;
+const CONTRACT = /\b(fixed[-\s]?term|befristet|werkvertrag)\b/gi;
+
+function mentionsEmployment(text: string, pattern: RegExp): boolean {
+  const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    const before = text.slice(Math.max(0, match.index - 16), match.index);
+    if (/(?:^|\s)(not|no|kein|keine|nicht|without)\b(?:\s+\w+){0,2}\s+$/i.test(before)) continue;
+    return true;
+  }
+  return false;
+}
+
+/** Label in front of the story meta line. Reads the posting instead of assuming freelance. */
+export function storyEngagementLabel(input: {
+  description?: string | null;
+  title?: string | null;
+  isFreelance?: boolean | null;
+}): string {
+  const text = `${input.title ?? ""}\n${input.description ?? ""}`;
+  if (mentionsEmployment(text, FULL_TIME)) return "Full-time";
+  if (mentionsEmployment(text, PART_TIME)) return "Part-time";
+  if (mentionsEmployment(text, FREELANCE)) return "Freelance";
+  if (mentionsEmployment(text, CONTRACT)) return "Contract";
+  if (input.isFreelance === false) return "Full-time";
+  return "Freelance";
+}

@@ -1,5 +1,5 @@
 import { CREA_WORDMARK_PATH, CREA_WORDMARK_VIEWBOX } from '@/lib/creaWordmark'
-import { summarizeStoryDescription } from '@/lib/storyDescription'
+import { storyEngagementLabel, summarizeStoryDescription } from '@/lib/storyDescription'
 
 export type JobStoryFields = {
   jobTitle: string
@@ -9,6 +9,8 @@ export type JobStoryFields = {
   budget: string
   location: string
   description: string
+  /** When false, the listing is a staff role even if the text does not say so. */
+  isFreelance?: boolean | null
 }
 
 const CANVAS_SCRIPT = `
@@ -293,8 +295,9 @@ const CANVAS_SCRIPT = `
     return lines;
   }
 
-  function storyMetaLine(location, budget) {
-    var parts = ['Freelance'];
+  function storyMetaLine(location, budget, engagement) {
+    var kind = String(engagement || '').trim() || 'Freelance';
+    var parts = [kind];
     var place = String(location || '').trim();
     var money = String(budget || '').trim();
     if (place && place !== '—') parts.push(place);
@@ -424,7 +427,7 @@ const CANVAS_SCRIPT = `
       ? containedSize(logoImg, LOGO_MAX_W, LOGO_MAX_H).h
       : companyNameBlockHeight(ctx, details.company, contentW);
     var title = layoutTitle(ctx, details.jobTitle, contentW);
-    var meta = layoutMeta(ctx, storyMetaLine(details.location, details.budget), contentW);
+    var meta = layoutMeta(ctx, storyMetaLine(details.location, details.budget, details.engagement), contentW);
     var descLines = hasStoryDescription(details.description)
       ? buildDescriptionLayoutLines(ctx, details.description, contentW, STORY_DESC_MAX_LINES)
       : [];
@@ -544,6 +547,11 @@ export function buildJobStoryHtml(fields: JobStoryFields): string {
     logoDataUrl: fields.logoDataUrl?.startsWith('data:image/') ? fields.logoDataUrl : null,
     budget: fields.budget || '—',
     location: fields.location || '—',
+    engagement: storyEngagementLabel({
+      description: fields.description,
+      title: fields.jobTitle,
+      isFreelance: fields.isFreelance,
+    }),
     description: summarizeStoryDescription(fields.description || '—'),
     wordmarkPath: CREA_WORDMARK_PATH,
     wordmarkViewBox: CREA_WORDMARK_VIEWBOX,

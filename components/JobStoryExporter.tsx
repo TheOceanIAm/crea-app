@@ -164,6 +164,7 @@ export function useJobStoryShare() {
         budget: input.budget,
         location: input.location,
         description: input.description,
+        isFreelance: input.isFreelance,
       })
       const id = requestId.current + 1
       requestId.current = id

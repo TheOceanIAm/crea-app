@@ -167,7 +167,7 @@ export default function JobsListScreen() {
         const { data } = await supabase
           .from('external_jobs')
           .select(
-            'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram,contact_url,logo_url'
+            'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram,contact_url,logo_url,is_freelance'
           )
           .eq('id', pendingExternalJobId)
           .eq('status', 'published')
@@ -329,6 +329,7 @@ export default function JobsListScreen() {
         budget: normalizeRateLabel(job.rate) || '—',
         location: job.location?.trim() || '—',
         description: job.intel_brief?.trim() || '—',
+        isFreelance: job.is_freelance,
       })
     })()
   }

@@ -42,6 +42,7 @@ export type ExternalJobRow = {
   contact_instagram: string | null
   contact_url: string | null
   logo_url?: string | null
+  is_freelance?: boolean | null
 }
 
 export type JobsFeedCache = {
@@ -139,7 +140,7 @@ export async function loadJobsFeed(
     const { data: extRows, error: extError } = await supabase
       .from('external_jobs')
       .select(
-        'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram,contact_url,logo_url'
+        'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram,contact_url,logo_url,is_freelance'
       )
       .eq('status', 'published')
       .order('posted_date', { ascending: false })
