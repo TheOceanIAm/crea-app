@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { NativeModules, View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native'
 import { getMapboxAccessToken, canShowShadowMap } from '@/lib/mapboxConfig'
 import { nativeBinaryHasWebView } from '@/lib/nativeWebView'
 import { buildSunPlannerMapHtml } from '@/lib/sunPlannerMapHtml'
@@ -37,8 +37,6 @@ type NativeWebViewComponent = React.ComponentType<{
 function loadNativeWebView(): NativeWebViewComponent | null {
   if (!nativeBinaryHasWebView()) return null
   try {
-    const natives = NativeModules as Record<string, unknown>
-    if (!natives.RNCWebView && !natives.RNCWebViewModule) return null
     return require('react-native-webview').WebView as NativeWebViewComponent
   } catch {
     return null

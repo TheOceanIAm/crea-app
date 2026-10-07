@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
-import { Alert, NativeModules, View } from 'react-native'
+import { Alert, View } from 'react-native'
 import { encode } from 'base64-arraybuffer'
 import { buildJobStoryHtml, type JobStoryFields } from '@/lib/jobStoryHtml'
 import { nativeBinaryHasWebView } from '@/lib/nativeWebView'
@@ -19,8 +19,6 @@ type NativeWebViewComponent = ComponentType<{
 function loadNativeWebView(): NativeWebViewComponent | null {
   if (!nativeBinaryHasWebView()) return null
   try {
-    const natives = NativeModules as Record<string, unknown>
-    if (!natives.RNCWebView && !natives.RNCWebViewModule) return null
     return require('react-native-webview').WebView as NativeWebViewComponent
   } catch {
     return null
