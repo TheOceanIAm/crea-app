@@ -1,8 +1,11 @@
 import { supabase } from '@/lib/supabase'
 import { getCreaWebBaseUrl } from '@/lib/creaWeb'
 
+export type ExternalJobEngagement = 'freelance' | 'part_time' | 'full_time'
+
 export type PublishCeoExternalJobInput = {
   title: string
+  engagement?: ExternalJobEngagement
   company?: string
   location?: string
   role?: string

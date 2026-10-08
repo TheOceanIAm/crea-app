@@ -120,12 +120,27 @@ function mentionsEmployment(text: string, pattern: RegExp): boolean {
   return false;
 }
 
-/** Label in front of the story meta line. Reads the posting instead of assuming freelance. */
+/** Stored listing choice wins over words in the brief. */
+export function explicitStoryEngagementLabel(raw: string | null | undefined): string | null {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return null;
+  if (trimmed === "Freelance" || trimmed === "Part-time" || trimmed === "Full-time") return trimmed;
+  const key = trimmed.toLowerCase().replace(/[\s-]+/g, "_");
+  if (key === "freelance" || key === "freelancer") return "Freelance";
+  if (key === "part_time" || key === "teilzeit") return "Part-time";
+  if (key === "full_time" || key === "vollzeit" || key === "festanstellung") return "Full-time";
+  return null;
+}
+
+/** Label in front of the story meta line. A saved engagement type wins; otherwise the posting is read. */
 export function storyEngagementLabel(input: {
+  engagement?: string | null;
   description?: string | null;
   title?: string | null;
   isFreelance?: boolean | null;
 }): string {
+  const chosen = explicitStoryEngagementLabel(input.engagement);
+  if (chosen) return chosen;
   const text = `${input.title ?? ""}\n${input.description ?? ""}`;
   if (mentionsEmployment(text, FULL_TIME)) return "Full-time";
   if (mentionsEmployment(text, PART_TIME)) return "Part-time";

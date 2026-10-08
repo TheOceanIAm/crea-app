@@ -143,6 +143,7 @@ export function useJobStoryShare() {
             budget: input.budget,
             location: input.location,
             description: input.description,
+            engagement: input.engagement ?? null,
             isFreelance: input.isFreelance ?? null,
           }),
         })

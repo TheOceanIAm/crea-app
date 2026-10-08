@@ -34,7 +34,7 @@ import {
   freelancerCanApplyToJobs,
   resolveFreelancerPlanFromUserAndProfileTier,
 } from '@/lib/freelancerPlan'
-import { publishCeoExternalJob } from '@/lib/ceoExternalJobsApi'
+import { publishCeoExternalJob, type ExternalJobEngagement } from '@/lib/ceoExternalJobsApi'
 import { instagramUrl, linkedinUrl, normalizeExternalUrl } from '@/lib/profilePublicLinks'
 import {
   cacheJobsFeed,
@@ -54,6 +54,16 @@ import { rememberJobPostingLogo } from '@/lib/loadJobStoryInput'
 
 type Job = JobFeedRow
 type ExternalJob = ExternalJobRow
+
+const CEO_ENGAGEMENTS: { value: ExternalJobEngagement; label: string }[] = [
+  { value: 'freelance', label: 'Freelancer' },
+  { value: 'part_time', label: 'Part-time' },
+  { value: 'full_time', label: 'Full-time' },
+]
+
+function engagementChip(raw: string | null | undefined): string | null {
+  return CEO_ENGAGEMENTS.find((option) => option.value === raw)?.label ?? null
+}
 
 function companyInitial(name: string) {
   const t = name.trim()
@@ -143,6 +153,7 @@ export default function JobsListScreen() {
   const [addExternalOpen, setAddExternalOpen] = useState(false)
   const [ceoExtSaving, setCeoExtSaving] = useState(false)
   const [ceoTitle, setCeoTitle] = useState('')
+  const [ceoEngagement, setCeoEngagement] = useState<ExternalJobEngagement>('freelance')
   const [ceoLocation, setCeoLocation] = useState('')
   const [ceoRate, setCeoRate] = useState('')
   const [ceoRoleLine, setCeoRoleLine] = useState('')
@@ -167,7 +178,7 @@ export default function JobsListScreen() {
         const { data } = await supabase
           .from('external_jobs')
           .select(
-            'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram,contact_url,logo_url,is_freelance'
+            'id,title,company,location,region,role,rate,needed_when,source_platform,source_url,intel_brief,contact_name,contact_email,contact_linkedin,contact_instagram,contact_url,logo_url,engagement,is_freelance'
           )
           .eq('id', pendingExternalJobId)
           .eq('status', 'published')
@@ -329,6 +340,7 @@ export default function JobsListScreen() {
         budget: normalizeRateLabel(job.rate) || '—',
         location: job.location?.trim() || '—',
         description: job.intel_brief?.trim() || '—',
+        engagement: job.engagement,
         isFreelance: job.is_freelance,
       })
     })()
@@ -348,6 +360,7 @@ export default function JobsListScreen() {
     setCeoExtSaving(true)
     const result = await publishCeoExternalJob({
       title: t,
+      engagement: ceoEngagement,
       company: ceoCompany.trim() || undefined,
       location: ceoLocation.trim() || undefined,
       role: ceoRoleLine.trim() || undefined,
@@ -366,6 +379,7 @@ export default function JobsListScreen() {
       return
     }
     setCeoTitle('')
+    setCeoEngagement('freelance')
     setCeoLocation('')
     setCeoRate('')
     setCeoRoleLine('')
@@ -516,7 +530,9 @@ export default function JobsListScreen() {
                   </View>
                 </View>
                 <Text style={styles.jobMeta}>
-                  {item.role || 'Role n/a'} · {item.location || 'Location n/a'}
+                  {[engagementChip(item.engagement), item.role || 'Role n/a', item.location || 'Location n/a']
+                    .filter(Boolean)
+                    .join(' · ')}
                 </Text>
                 {item.needed_when ? (
                   <Text style={styles.jobMeta}>Needed: {item.needed_when}</Text>
@@ -800,6 +816,24 @@ export default function JobsListScreen() {
                 placeholder="e.g. Logo design"
                 placeholderTextColor="rgba(255,255,255,0.25)"
               />
+              <Text style={styles.ceoLabel}>Engagement</Text>
+              <View style={styles.ceoEngagementRow}>
+                {CEO_ENGAGEMENTS.map((option) => {
+                  const selected = ceoEngagement === option.value
+                  return (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[styles.ceoEngagementBtn, selected && styles.ceoEngagementBtnOn]}
+                      activeOpacity={0.85}
+                      onPress={() => setCeoEngagement(option.value)}
+                    >
+                      <Text style={[styles.ceoEngagementBtnText, selected && styles.ceoEngagementBtnTextOn]}>
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  )
+                })}
+              </View>
               <Text style={styles.ceoLabel}>Contact email</Text>
               <TextInput
                 style={styles.ceoInput}
@@ -1352,6 +1386,19 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   ceoFormScroll: { paddingHorizontal: 20, paddingBottom: 40, gap: 6 },
+  ceoEngagementRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  ceoEngagementBtn: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#111111',
+  },
+  ceoEngagementBtnOn: { backgroundColor: '#FFDC00', borderColor: '#FFDC00' },
+  ceoEngagementBtnText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '700' },
+  ceoEngagementBtnTextOn: { color: '#0a0a0a' },
   ceoLabel: {
     marginTop: 10,
     fontSize: 10,

@@ -9,6 +9,8 @@ export type JobStoryFields = {
   budget: string
   location: string
   description: string
+  /** Saved listing type. Wins over words in the brief. */
+  engagement?: string | null
   /** When false, the listing is a staff role even if the text does not say so. */
   isFreelance?: boolean | null
 }
@@ -548,6 +550,7 @@ export function buildJobStoryHtml(fields: JobStoryFields): string {
     budget: fields.budget || '—',
     location: fields.location || '—',
     engagement: storyEngagementLabel({
+      engagement: fields.engagement,
       description: fields.description,
       title: fields.jobTitle,
       isFreelance: fields.isFreelance,
