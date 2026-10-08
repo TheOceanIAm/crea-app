@@ -2,13 +2,13 @@
   "expo": {
     "name": "CREA",
     "slug": "crea-app",
-    "version": "1.0.12",
+    "version": "1.0.13",
     "orientation": "portrait",
     "icon": "./assets/crea-icon.png",
     "scheme": "crea",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0a0a0a",
-    "runtimeVersion": "1.0.12",
+    "runtimeVersion": "1.0.13",
     "updates": {
       "url": "https://u.expo.dev/fe41eddf-6492-4a35-868c-abd3ffdaffd7",
       "enabled": true,
@@ -37,7 +37,7 @@
         "backgroundColor": "#0a0a0a"
       },
       "package": "de.creaservices.app",
-      "versionCode": 4,
+      "versionCode": 5,
       "permissions": [
         "android.permission.RECORD_AUDIO"
       ]
