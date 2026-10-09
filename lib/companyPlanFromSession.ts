@@ -1,4 +1,5 @@
 import type { User } from '@supabase/supabase-js'
+import { isStaffUnlimitedPro } from '@/lib/staffUnlimitedPro'
 
 /** Company billing tier — aligned with crea-services + DB check (free | pro). */
 export type CompanySubscriptionPlanDb = 'free' | 'pro'
@@ -20,6 +21,7 @@ export function resolveCompanySubscriptionPlanFromSources(
   profilesSubscriptionTier: unknown,
   companyProfileSubscriptionPlan: unknown
 ): CompanySubscriptionPlanDb {
+  if (isStaffUnlimitedPro(user?.id)) return 'pro'
   const meta = user?.user_metadata as Record<string, unknown> | undefined
   const metaPlan = meta?.company_plan
   if (String(metaPlan ?? '').trim() !== '') {

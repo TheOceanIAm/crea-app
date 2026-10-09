@@ -104,6 +104,7 @@ export function DashboardOverviewSection({
 
   const trialBanners = (
     <PlatformTrialBanners
+      userId={overview.userId}
       role={role}
       trialEndsAt={overview.trialEndsAt}
       accountCreatedAt={overview.accountCreatedAt}

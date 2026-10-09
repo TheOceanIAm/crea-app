@@ -1,11 +1,13 @@
 import type { User } from '@supabase/supabase-js'
 import type { NormalizedFreelancerPlan } from '@/lib/billingDisplay'
 import { normalizeFreelancerPlanKey } from '@/lib/billingDisplay'
+import { isStaffUnlimitedPro } from '@/lib/staffUnlimitedPro'
 
 /** @deprecated Use NormalizedFreelancerPlan — kept for gradual migration. */
 export type FreelancerPlan = NormalizedFreelancerPlan
 
 export function resolveFreelancerPlanFromUser(user: User | null | undefined): NormalizedFreelancerPlan {
+  if (isStaffUnlimitedPro(user?.id)) return 'pro'
   if (!user?.user_metadata) return 'free'
   const m = user.user_metadata as Record<string, unknown>
   const raw = m.freelancer_plan ?? m.plan ?? m.subscription_tier ?? m.freelancer_tier

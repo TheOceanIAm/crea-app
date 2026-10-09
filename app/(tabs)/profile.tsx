@@ -124,6 +124,7 @@ import {
   PLATFORM_TRIAL_DAYS,
   platformTrialDaysLeft,
 } from '@/lib/platformTrial'
+import { isStaffUnlimitedPro } from '@/lib/staffUnlimitedPro'
 import {
   cacheSettingsProfile,
   hydrateSettingsProfileFromDisk,
@@ -2275,7 +2276,7 @@ export default function ProfileScreen() {
                   companyPlan={iosDisplayCompanyPlan}
                 />
 
-                {!ceo && !iosStoreSubscribed ? (
+                {!ceo && !iosStoreSubscribed && !isStaffUnlimitedPro(authUserId) ? (
                   <PlatformTrialBar
                     trialEndsAt={trialEndsAt}
                     accountCreatedAt={accountCreatedAt}
@@ -2346,7 +2347,7 @@ export default function ProfileScreen() {
               </View>
             ) : (
             <>
-              {!ceo && !stripeCustomerId ? (
+              {!ceo && !stripeCustomerId && !isStaffUnlimitedPro(authUserId) ? (
                 <PlatformTrialBar
                   trialEndsAt={trialEndsAt}
                   accountCreatedAt={accountCreatedAt}

@@ -9,13 +9,16 @@ import {
   isFreelancerProfile,
 } from '@/lib/profileRole'
 import { clearBillingNotice, getBillingNotice } from '@/lib/billingNotice'
+import { isStaffUnlimitedPro } from '@/lib/staffUnlimitedPro'
 
 export function PlatformTrialBanners({
+  userId,
   role,
   trialEndsAt,
   accountCreatedAt,
   hasStripeCustomer,
 }: {
+  userId?: string | null
   role: string | null
   trialEndsAt: string | null
   accountCreatedAt: string | null
@@ -45,7 +48,10 @@ export function PlatformTrialBanners({
     isFreelancerProfile(role ?? undefined) || isCompanyProfile(role ?? undefined)
 
   const showTrialBar =
-    isBillableRole && !hasStripeCustomer && platformTrialDaysLeft(trialEndsAt, accountCreatedAt) !== null
+    isBillableRole &&
+    !isStaffUnlimitedPro(userId) &&
+    !hasStripeCustomer &&
+    platformTrialDaysLeft(trialEndsAt, accountCreatedAt) !== null
 
   const showCeoTrialHint = isCeo && !isBillableRole
 

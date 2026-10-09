@@ -541,6 +541,7 @@ export function PinboardFeedScreen() {
     <>
       {overview ? (
         <PlatformTrialBanners
+          userId={overview.userId}
           role={overview.role}
           trialEndsAt={overview.trialEndsAt}
           accountCreatedAt={overview.accountCreatedAt}
