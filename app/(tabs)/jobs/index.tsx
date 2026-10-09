@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   TextInput,
+  Image,
   Modal,
   ScrollView,
   KeyboardAvoidingView,
@@ -68,6 +69,33 @@ function engagementChip(raw: string | null | undefined): string | null {
 function companyInitial(name: string) {
   const t = name.trim()
   return t ? t.charAt(0).toUpperCase() : '?'
+}
+
+function httpsLogo(raw: string | null | undefined): string {
+  const logo = raw?.trim() ?? ''
+  return /^https?:\/\//i.test(logo) ? logo : ''
+}
+
+function ExternalCompanyMark({ name, logoUrl }: { name: string; logoUrl?: string | null }) {
+  const logo = httpsLogo(logoUrl)
+  const [failed, setFailed] = useState(false)
+  if (logo && !failed) {
+    return (
+      <View style={styles.companyLogo}>
+        <Image
+          source={{ uri: logo }}
+          style={styles.companyLogoImage}
+          resizeMode="contain"
+          onError={() => setFailed(true)}
+        />
+      </View>
+    )
+  }
+  return (
+    <View style={styles.companyLogoPlaceholder}>
+      <Text style={styles.companyLogoLetter}>{companyInitial(name)}</Text>
+    </View>
+  )
 }
 
 function openExternalUrl(url: string, label: string) {
@@ -516,9 +544,7 @@ export default function JobsListScreen() {
             {showExternalFeed && !isCreaJobItem(item) ? (
               <>
                 <View style={styles.companyRow}>
-                  <View style={styles.companyLogoPlaceholder}>
-                    <Text style={styles.companyLogoLetter}>{companyInitial(item.company)}</Text>
-                  </View>
+                  <ExternalCompanyMark name={item.company} logoUrl={item.logo_url} />
                   <Text style={styles.companyName} numberOfLines={1}>
                     {item.company}
                   </Text>
@@ -618,8 +644,13 @@ export default function JobsListScreen() {
               contentContainerStyle={styles.modalScrollContent}
             >
               <Text style={styles.modalKicker}>View contact</Text>
-              <Text style={styles.modalTitle}>{activeExternalJob?.title}</Text>
-              <Text style={styles.modalSub}>{activeExternalJob?.company}</Text>
+              <View style={styles.modalCompanyRow}>
+                <ExternalCompanyMark name={activeExternalJob?.company || ''} logoUrl={activeExternalJob?.logo_url} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalTitle}>{activeExternalJob?.title}</Text>
+                  <Text style={styles.modalSub}>{activeExternalJob?.company}</Text>
+                </View>
+              </View>
 
               <View style={styles.modalDetailsCard}>
                 <Text style={styles.modalContactLabel}>Job details</Text>
@@ -1058,6 +1089,12 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 10,
     backgroundColor: '#1a1a1a',
+    overflow: 'hidden',
+    padding: 4,
+  },
+  companyLogoImage: {
+    width: '100%',
+    height: '100%',
   },
   companyLogoPlaceholder: {
     width: 36,
@@ -1180,6 +1217,12 @@ const styles = StyleSheet.create({
   modalScrollContent: {
     paddingBottom: 4,
   },
+  modalCompanyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
   modalKicker: {
     color: '#FFDC00',
     textTransform: 'uppercase',
@@ -1196,7 +1239,6 @@ const styles = StyleSheet.create({
   modalSub: {
     color: 'rgba(255,255,255,0.5)',
     marginTop: 2,
-    marginBottom: 10,
   },
   modalStoryBtn: {
     backgroundColor: '#FFDC00',
