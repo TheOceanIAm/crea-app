@@ -85,7 +85,7 @@ function ExternalCompanyMark({ name, logoUrl }: { name: string; logoUrl?: string
         <Image
           source={{ uri: logo }}
           style={styles.companyLogoImage}
-          resizeMode="contain"
+          resizeMode="cover"
           onError={() => setFailed(true)}
         />
       </View>
@@ -1090,7 +1090,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: '#1a1a1a',
     overflow: 'hidden',
-    padding: 4,
   },
   companyLogoImage: {
     width: '100%',
