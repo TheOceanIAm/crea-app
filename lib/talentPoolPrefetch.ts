@@ -36,13 +36,13 @@ type TalentPoolCache = {
   folders: Folder[]
 }
 
-const TALENT_POOL_MAX_ROWS = 60
+const TALENT_POOL_PAGE_SIZE = 1000
 const TALENT_POOL_CACHE_TTL_MS = LIST_MEM_TTL_MS
 const DISK_TTL_MS = LIST_DISK_TTL_MS
 const FOLDERS_TABLE = 'talent_pool_folders'
 
 export function talentPoolCacheKey(userId: string): string {
-  return `talent-pool:${userId}`
+  return `talent-pool:v3:${userId}`
 }
 
 function foldersStorageKey(uid: string) {
@@ -50,40 +50,53 @@ function foldersStorageKey(uid: string) {
 }
 
 function talentPoolDiskKey(userId: string) {
-  return `crea:talent-pool:${userId}`
+  return `crea:talent-pool:v3:${userId}`
 }
 
 async function loadFreelancerDirectoryRows(userId: string) {
   const out: Array<{ id: string; location: string | null; plan_tier: string | null }> = []
+  const seen = new Set<string>()
   let offset = 0
-  const pageSize = 100
-  while (out.length < TALENT_POOL_MAX_ROWS) {
-    const end = Math.min(offset + pageSize - 1, TALENT_POOL_MAX_ROWS - 1)
+  while (true) {
     const { data, error } = await supabase
       .from('freelancer_profiles')
       .select('id, location, plan_tier')
       .neq('id', userId)
-      .range(offset, end)
+      .order('id', { ascending: true })
+      .range(offset, offset + TALENT_POOL_PAGE_SIZE - 1)
     if (error) return { rows: [] as typeof out, error: error.message }
     const chunk = (data ?? []) as typeof out
-    out.push(...chunk)
-    if (chunk.length < pageSize) break
-    offset += pageSize
+    let added = 0
+    for (const row of chunk) {
+      const id = row?.id?.trim()
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      out.push(row)
+      added += 1
+    }
+    if (chunk.length < TALENT_POOL_PAGE_SIZE || added === 0) break
+    offset += TALENT_POOL_PAGE_SIZE
   }
   return { rows: out, error: null as string | null }
 }
 
 async function loadProfilesForTalentIds(ids: string[]) {
   if (!ids.length) return { profiles: [] as Array<Record<string, unknown>>, error: null as string | null }
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, name, email, headline, location, avatar_url, role, skills')
-    .in('id', ids)
-    .neq('role', 'company')
-    .neq('role', 'ceo')
-    .order('name', { ascending: true })
-  if (error) return { profiles: [] as Array<Record<string, unknown>>, error: error.message }
-  return { profiles: (data ?? []) as Array<Record<string, unknown>>, error: null }
+  const profiles: Array<Record<string, unknown>> = []
+  const chunkSize = 100
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize)
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, name, email, headline, location, avatar_url, role, skills')
+      .in('id', chunk)
+      .neq('role', 'company')
+      .neq('role', 'ceo')
+      .order('name', { ascending: true })
+    if (error) return { profiles: [] as Array<Record<string, unknown>>, error: error.message }
+    profiles.push(...((data ?? []) as Array<Record<string, unknown>>))
+  }
+  return { profiles, error: null }
 }
 
 function buildTalentRows(
@@ -94,7 +107,8 @@ function buildTalentRows(
   return profilesOut.map((r) => {
     const id = String(r.id)
     const fp = fpById.get(id)
-    const url = (r.avatar_url as string | null)?.trim()
+    const rawAvatar = r.avatar_url
+    const url = typeof rawAvatar === 'string' ? rawAvatar.trim() : null
     const profileLoc = String(r.location ?? '').trim()
     const fpLoc = fp?.location ? String(fp.location).trim() : ''
     const rawSkills = (r as { skills?: unknown }).skills
@@ -182,6 +196,7 @@ let inflight: Promise<void> | null = null
 export async function prefetchTalentPoolData(userId: string): Promise<void> {
   if (inflight) return inflight
   inflight = (async () => {
+    try {
     if (getCache<TalentPoolCache>(talentPoolCacheKey(userId))) return
     await hydrateTalentPoolFromDisk(userId)
     if (getCache<TalentPoolCache>(talentPoolCacheKey(userId))) return
@@ -245,6 +260,9 @@ export async function prefetchTalentPoolData(userId: string): Promise<void> {
     }
     setCache(talentPoolCacheKey(userId), payload, TALENT_POOL_CACHE_TTL_MS)
     void writePersistedCache(talentPoolDiskKey(userId), payload, DISK_TTL_MS)
+    } catch {
+      // A failed prefetch must not reject during launch. The talent pool screen loads on its own.
+    }
   })().finally(() => {
     inflight = null
   })

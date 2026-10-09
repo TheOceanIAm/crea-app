@@ -145,6 +145,8 @@ type Props = {
   /** Job production window (Overview); required to pick shoot days per freelancer. */
   productionWindowStart: string
   productionWindowEnd: string
+  /** Opens a Crea profile. Passed in so this module does not import the router during app startup. */
+  onOpenProfile?: (profileId: string) => void
 }
 
 const roleLabel = (r: string) => {
@@ -161,6 +163,39 @@ function crewAvatarInitial(name: string | null | undefined) {
 function crewAvatarUri(raw: string | null | undefined): string | null {
   const u = (raw ?? '').trim()
   return u && /^https?:\/\//i.test(u) ? u : null
+}
+
+function CrewProfileAvatar({
+  name,
+  uri,
+  profileId,
+  onOpen,
+}: {
+  name: string
+  uri: string | null
+  profileId: string | null
+  onOpen: (profileId: string) => void
+}) {
+  const id = profileId?.trim() ?? ''
+  const photo = uri ? (
+    <Image source={{ uri }} style={styles.rowAvatar} />
+  ) : (
+    <View style={[styles.rowAvatar, styles.inviteAvatarPh]}>
+      <Text style={styles.inviteAvatarLetter}>{crewAvatarInitial(name)}</Text>
+    </View>
+  )
+  if (!id) return photo
+  return (
+    <TouchableOpacity
+      onPress={() => onOpen(id)}
+      activeOpacity={0.75}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${name}'s profile`}
+    >
+      {photo}
+    </TouchableOpacity>
+  )
 }
 
 function crewRowFromPack(m: OfflineCrewMember): CrewRow {
@@ -213,8 +248,12 @@ export function ProjectCrewTab({
   proFeaturesEnabled = true,
   productionWindowStart,
   productionWindowEnd,
+  onOpenProfile,
 }: Props) {
   const { height: windowHeight } = useWindowDimensions()
+  const openFreelancerProfile = (profileId: string) => {
+    onOpenProfile?.(profileId)
+  }
   const [rows, setRows] = useState<CrewRow[]>([])
   const [pendingInvites, setPendingInvites] = useState<ProjectCrewInvite[]>([])
   const [loading, setLoading] = useState(true)
@@ -1112,13 +1151,12 @@ export function ProjectCrewTab({
             const uri = crewAvatarUri(inv.avatarUrl)
             return (
               <View key={inv.id} style={styles.inviteRow}>
-                {uri ? (
-                  <Image source={{ uri }} style={styles.rowAvatar} />
-                ) : (
-                  <View style={[styles.rowAvatar, styles.inviteAvatarPh]}>
-                    <Text style={styles.inviteAvatarLetter}>{crewAvatarInitial(inv.name)}</Text>
-                  </View>
-                )}
+                <CrewProfileAvatar
+                  name={inv.name}
+                  uri={uri}
+                  profileId={inv.profileId}
+                  onOpen={openFreelancerProfile}
+                />
                 <View style={styles.rowText}>
                   <Text style={styles.name}>{inv.name}</Text>
                   <Text style={styles.invitePending}>Waiting for them to accept…</Text>
@@ -1142,7 +1180,14 @@ export function ProjectCrewTab({
         const canSwipeDelete = canRemoveMember(m)
         const rowContent = (
           <View style={styles.row}>
-            {m.source === 'registered' && m.avatar_url ? (
+            {m.source === 'registered' && m.member_role !== 'company' ? (
+              <CrewProfileAvatar
+                name={m.name}
+                uri={crewAvatarUri(m.avatar_url)}
+                profileId={m.profile_id}
+                onOpen={openFreelancerProfile}
+              />
+            ) : m.source === 'registered' && m.avatar_url ? (
               <Image source={{ uri: m.avatar_url }} style={styles.rowAvatar} />
             ) : null}
             <TouchableOpacity style={styles.rowText} onPress={() => openPersonCard(m)}>

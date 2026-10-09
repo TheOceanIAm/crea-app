@@ -692,25 +692,31 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                 <View style={styles.rowBody}>
                   <View style={styles.summary}>
                     <View style={styles.titleRow}>
-                      <Text style={[styles.title, m.completed && styles.titleDone]}>{m.title}</Text>
-                      <View style={[styles.badge, { borderColor: cfg.border, backgroundColor: cfg.bg }]}>
-                        <View style={[styles.priorityDot, { backgroundColor: cfg.color }]} />
-                        <Text style={[styles.badgeText, { color: cfg.color }]}>{cfg.short}</Text>
-                      </View>
-                      <View style={[styles.badge, { borderColor: statusCfg.border, backgroundColor: statusCfg.bg }]}>
-                        <Text style={[styles.badgeText, { color: statusCfg.color }]}>{statusCfg.label}</Text>
-                      </View>
-                    </View>
-                    {m.description ? (
-                      <Text style={styles.descriptionPreview} numberOfLines={isExpanded ? undefined : 3}>
-                        {m.description}
+                      <Text style={[styles.title, m.completed && styles.titleDone]} numberOfLines={isExpanded ? undefined : 1}>
+                        {m.title}
                       </Text>
-                    ) : (
-                      <Text style={styles.expandedEmpty}>No description</Text>
-                    )}
-                    {when ? <Text style={styles.when}>Delivery: {when}</Text> : null}
+                      {isExpanded ? (
+                        <>
+                          <View style={[styles.badge, { borderColor: cfg.border, backgroundColor: cfg.bg }]}>
+                            <View style={[styles.priorityDot, { backgroundColor: cfg.color }]} />
+                            <Text style={[styles.badgeText, { color: cfg.color }]}>{cfg.short}</Text>
+                          </View>
+                          <View style={[styles.badge, { borderColor: statusCfg.border, backgroundColor: statusCfg.bg }]}>
+                            <Text style={[styles.badgeText, { color: statusCfg.color }]}>{statusCfg.label}</Text>
+                          </View>
+                        </>
+                      ) : null}
+                    </View>
+                    {isExpanded ? (
+                      m.description ? (
+                        <Text style={styles.descriptionPreview}>{m.description}</Text>
+                      ) : (
+                        <Text style={styles.expandedEmpty}>No description</Text>
+                      )
+                    ) : null}
+                    {isExpanded && when ? <Text style={styles.when}>Delivery: {when}</Text> : null}
                   </View>
-                  {m.frameioUrl && reviewColors && reviewKind ? (
+                  {isExpanded && m.frameioUrl && reviewColors && reviewKind ? (
                     <TouchableOpacity
                       style={[
                         styles.frameioChip,
@@ -727,13 +733,13 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                       </Text>
                     </TouchableOpacity>
                   ) : null}
-                  {m.deliverables.length > 0 ? (
+                  {isExpanded && m.deliverables.length > 0 ? (
                     <View style={styles.expandedBlock}>
                       <Text style={styles.expandedLabel}>Deliverables</Text>
                       {canCheck ? (
                         <Text style={styles.expandedEmpty}>Check off each item as you finish it.</Text>
                       ) : null}
-                      {(isExpanded ? m.deliverables : m.deliverables.slice(0, 3)).map((d, i) => {
+                      {m.deliverables.map((d, i) => {
                         const done = m.deliverablesDone[i] === true
                         const rowInner = (
                           <>
@@ -760,16 +766,12 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                           </View>
                         )
                       })}
-                      {!isExpanded && m.deliverables.length > 3 ? (
-                        <Text style={styles.expandHint}>+{m.deliverables.length - 3} more · tap to expand</Text>
-                      ) : null}
                     </View>
-                  ) : (
+                  ) : isExpanded ? (
                     <Text style={styles.expandedEmpty}>No deliverables listed</Text>
-                  )}
-                  {!isExpanded ? <Text style={styles.expandHint}>Tap card to expand</Text> : null}
+                  ) : null}
                 </View>
-                {canManage ? (
+                {isExpanded && canManage ? (
                   <View style={styles.cardActions}>
                     <TouchableOpacity
                       onPress={() => (editingId === m.id ? setEditingId(null) : startEdit(m))}
@@ -785,9 +787,9 @@ export function ProjectMilestonesTab({ projectId, jobId, onCountsChanged, canMan
                       <Trash2 size={18} color="rgba(255,255,255,0.25)" strokeWidth={ICON_STROKE} />
                     </TouchableOpacity>
                   </View>
-                ) : (
+                ) : isExpanded ? (
                   <View style={styles.trashSpacer} />
-                )}
+                ) : null}
                 <ChevronDown
                   size={18}
                   color="rgba(255,255,255,0.45)"

@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router'
 import { ChevronLeft, ImageDown, Share2 } from 'lucide-react-native'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { useJobStoryShare } from '@/components/JobStoryExporter'
@@ -1221,6 +1221,7 @@ export default function ProjectWorkspaceScreen() {
                     proFeaturesEnabled={!starterFreelancerPlan}
                     productionWindowStart={scheduleStart}
                     productionWindowEnd={scheduleEnd}
+                    onOpenProfile={(profileId) => router.push(`/profile/${profileId}` as Href)}
                   />
                 )}
                 {tab === 'budget' && viewerIsCompanyOnProject ? (

@@ -604,11 +604,6 @@ export default function WorkspaceProjectsScreen() {
         </TouchableOpacity>
         <View style={styles.topActions}>
           {viewerRole === 'company' ? (
-            <TouchableOpacity style={styles.postListingBtn} onPress={() => router.push('/financing' as Href)}>
-              <Text style={styles.postListingBtnText}>Financing</Text>
-            </TouchableOpacity>
-          ) : null}
-          {viewerRole === 'company' ? (
             <TouchableOpacity
               style={styles.postListingBtn}
               onPress={() => router.push('/(tabs)/company-post-job' as Href)}

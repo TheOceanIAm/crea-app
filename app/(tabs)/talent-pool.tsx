@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -57,7 +57,7 @@ type Folder = {
 
 const foldersStorageKey = (uid: string) => `crea_app_talent_pool_folders_v1:${uid}`
 const FOLDERS_TABLE = 'talent_pool_folders'
-const TALENT_POOL_MAX_ROWS = 60
+const TALENT_POOL_PAGE_SIZE = 1000
 const TALENT_POOL_CACHE_TTL_MS = 60_000
 
 type TalentPoolCache = {
@@ -85,24 +85,80 @@ function rowMatchesTalentQuery(row: TalentRow, tokens: string[]): boolean {
   return tokens.every((tok) => hay.includes(tok))
 }
 
-async function loadFreelancerDirectoryRows(options: { excludeUserId: string; maxRows?: number; pageSize?: number }) {
-  const maxRows = options.maxRows ?? TALENT_POOL_MAX_ROWS
-  const pageSize = Math.max(1, Math.min(options.pageSize ?? 100, maxRows))
+/**
+ * Name search hits profiles directly. The on-screen list can still be a
+ * cached first page, and a name past that page would otherwise never match.
+ */
+async function searchTalentDirectory(options: {
+  tokens: string[]
+  excludeUserId: string
+}): Promise<TalentRow[]> {
+  const tokens = options.tokens
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2)
+    .slice(0, 5)
+  if (tokens.length === 0) return []
+
+  let query = supabase
+    .from('profiles')
+    .select('id, name, email, headline, location, avatar_url, role, skills')
+    .neq('id', options.excludeUserId)
+    .limit(40)
+
+  for (const token of tokens) {
+    const safe = token.replace(/[%_\\]/g, '').trim()
+    if (safe.length < 2) continue
+    query = query.ilike('name', `%${safe}%`)
+  }
+
+  const { data, error } = await query
+  if (error || !data?.length) return []
+
+  const profiles = (data as Array<Record<string, unknown>>).filter((row) => {
+    const role = String(row.role ?? '').toLowerCase()
+    return role !== 'company' && role !== 'ceo'
+  })
+  const ids = profiles
+    .map((row) => String(row.id ?? '').trim())
+    .filter((id) => id.length > 0 && id !== options.excludeUserId)
+  if (ids.length === 0) return []
+
+  const { data: fpData, error: fpErr } = await supabase
+    .from('freelancer_profiles')
+    .select('id, location, plan_tier')
+    .in('id', ids)
+  if (fpErr || !fpData?.length) return []
+
+  const fpRows = fpData as FreelancerDirectoryRow[]
+  const inDirectory = new Set(fpRows.map((row) => row.id))
+  const visibleProfiles = profiles.filter((row) => inDirectory.has(String(row.id)))
+  return buildTalentRows(fpRows, visibleProfiles)
+}
+
+async function loadFreelancerDirectoryRows(options: { excludeUserId: string }) {
   const out: FreelancerDirectoryRow[] = []
+  const seen = new Set<string>()
   let offset = 0
 
-  while (out.length < maxRows) {
-    const end = Math.min(offset + pageSize - 1, maxRows - 1)
+  while (true) {
     const { data, error } = await supabase
       .from('freelancer_profiles')
       .select('id, location, plan_tier')
       .neq('id', options.excludeUserId)
-      .range(offset, end)
+      .order('id', { ascending: true })
+      .range(offset, offset + TALENT_POOL_PAGE_SIZE - 1)
     if (error) return { rows: [] as FreelancerDirectoryRow[], error: error.message }
     const chunk = (data ?? []) as unknown as FreelancerDirectoryRow[]
-    out.push(...chunk)
-    if (chunk.length < pageSize) break
-    offset += pageSize
+    let added = 0
+    for (const row of chunk) {
+      const id = typeof row?.id === 'string' ? row.id.trim() : ''
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      out.push(row)
+      added += 1
+    }
+    if (chunk.length < TALENT_POOL_PAGE_SIZE || added === 0) break
+    offset += TALENT_POOL_PAGE_SIZE
   }
 
   return { rows: out, error: null as string | null }
@@ -285,6 +341,8 @@ export default function TalentPoolScreen() {
   const [renameFolderName, setRenameFolderName] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [skillsQuery, setSkillsQuery] = useState('')
+  const [remoteRows, setRemoteRows] = useState<TalentRow[]>([])
+  const [remoteSearchPending, setRemoteSearchPending] = useState(false)
   const [listFilter, setListFilter] = useState<'all' | 'favorites'>('all')
   const [proOnly, setProOnly] = useState(false)
   const [meId, setMeId] = useState<string | null>(null)
@@ -350,8 +408,6 @@ export default function TalentPoolScreen() {
     const [{ rows: fpRows, error: fpErr }, favoritesPayload] = await Promise.all([
       loadFreelancerDirectoryRows({
         excludeUserId: user.id,
-        maxRows: TALENT_POOL_MAX_ROWS,
-        pageSize: 100,
       }),
       loadTalentPoolFavorites(user.id, favUi, mode),
     ])
@@ -447,9 +503,41 @@ export default function TalentPoolScreen() {
   )
 
   const skillsTokens = useMemo(() => normalizeSkillTokens(skillsQuery), [skillsQuery])
+  const searchGenRef = useRef(0)
+
+  useEffect(() => {
+    const tokens = skillsTokens.filter((token) => token.length >= 2)
+    if (!meId || tokens.length === 0) {
+      searchGenRef.current += 1
+      setRemoteRows([])
+      setRemoteSearchPending(false)
+      return
+    }
+
+    const gen = ++searchGenRef.current
+    setRemoteSearchPending(true)
+    const timer = setTimeout(() => {
+      void searchTalentDirectory({ tokens, excludeUserId: meId }).then((found) => {
+        if (searchGenRef.current !== gen) return
+        setRemoteRows(found)
+        setRemoteSearchPending(false)
+      })
+    }, 280)
+
+    return () => clearTimeout(timer)
+  }, [skillsTokens, meId])
 
   const displayRows = useMemo(() => {
-    let out = rows.filter((r) => rowMatchesTalentQuery(r, skillsTokens))
+    const source =
+      skillsTokens.length === 0
+        ? rows
+        : (() => {
+            const byId = new Map<string, TalentRow>()
+            for (const row of rows) byId.set(row.id, row)
+            for (const row of remoteRows) if (!byId.has(row.id)) byId.set(row.id, row)
+            return [...byId.values()]
+          })()
+    let out = source.filter((r) => rowMatchesTalentQuery(r, skillsTokens))
     if (proOnly) out = out.filter((r) => r.isPro)
     if (listFilter === 'favorites' && showFavoriteUi) {
       const set = new Set(favoriteProfileIds)
@@ -461,7 +549,7 @@ export default function TalentPoolScreen() {
       }
     }
     return out
-  }, [rows, skillsTokens, proOnly, listFilter, favoriteProfileIds, showFavoriteUi, activeFolderId, folders])
+  }, [rows, remoteRows, skillsTokens, proOnly, listFilter, favoriteProfileIds, showFavoriteUi, activeFolderId, folders])
 
   const persistFolders = useCallback(
     async (nextFolders: Folder[]) => {
@@ -774,12 +862,14 @@ export default function TalentPoolScreen() {
         initialNumToRender={12}
         maxToRenderPerBatch={10}
         windowSize={7}
-        removeClippedSubviews
+        extraData={skillsQuery}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor="#FFDC00" />}
         ListEmptyComponent={
           !loadError ? (
             <Text style={styles.empty}>
-              {rows.length === 0
+              {remoteSearchPending && skillsTokens.length > 0
+                ? 'Searching…'
+                : rows.length === 0
                 ? 'No freelancers found yet.'
                 : listFilter === 'favorites'
                   ? 'No favorites match this search.'
