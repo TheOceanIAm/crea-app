@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native'
-import { ChevronDown } from 'lucide-react-native'
+import { ChevronDown, FileDown } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
 import {
@@ -40,6 +40,7 @@ import {
   subscribeOfflinePack,
   type OfflinePack,
 } from '@/lib/offlinePack'
+import { shareBudgetStatusPdf, type BudgetStatusProject } from '@/lib/budgetStatusPdf'
 
 type BudgetPlanRow = {
   project_id: string
@@ -68,6 +69,7 @@ type LineDraft = {
 
 type Props = {
   projectId: string
+  project?: BudgetStatusProject
   /** Solo / in-house workspaces have no crew tab — skip crew spend. */
   hideCrewBudgeting?: boolean
 }
@@ -133,7 +135,7 @@ function BudgetFold({
   )
 }
 
-export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props) {
+export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false }: Props) {
   const [loading, setLoading] = useState(true)
   const [savingPlan, setSavingPlan] = useState(false)
   const [savingLines, setSavingLines] = useState(false)
@@ -155,6 +157,7 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
   const [usingOfflinePack, setUsingOfflinePack] = useState(false)
   const [packDownloadedAt, setPackDownloadedAt] = useState<string | null>(null)
   const [packMissingBudget, setPackMissingBudget] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
 
   const applyPack = useCallback(
     (pack: OfflinePack) => {
@@ -352,6 +355,63 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
     return undefined
   }
 
+  const exportPdf = async () => {
+    setExportingPdf(true)
+    try {
+      await shareBudgetStatusPdf({
+        project: {
+          title: project?.title?.trim() || 'Project',
+          location: project?.location,
+          statusLabel: project?.statusLabel,
+          scheduleStart: project?.scheduleStart,
+          scheduleEnd: project?.scheduleEnd,
+          clientLabel: project?.clientLabel,
+        },
+        exportedAt: new Date(),
+        currency,
+        hideCrew: hideCrewBudgeting,
+        totalBudget: totalBudgetNum,
+        productionBudget: productionCapNum,
+        currentHeadroom,
+        crewLogged: currentCrew.logged,
+        crewLoggedHours: currentCrew.loggedHours,
+        crewOpen: currentCrew.open,
+        equipmentTotal: equipment.total,
+        otherCurrent,
+        productionRemaining: currentProduction,
+        forecastRemaining,
+        wrapUpVariance,
+        otherPlanned,
+        otherSpent,
+        crewBookedTotal: crew.total,
+        currenciesMixed: crew.currenciesMixed,
+        equipmentPeriod,
+        crewLines: crew.lines.map((line) => ({
+          displayName: line.displayName,
+          dayUnits: line.dayUnits,
+          dayRate: line.dayRate,
+          halfDayRate: line.halfDayRate,
+          subtotal: line.subtotal,
+        })),
+        equipmentLines: equipment.lines.map((line) => ({
+          displayName: line.displayName,
+          qty: line.qty,
+          unitPrice: line.unitPrice,
+          subtotal: line.subtotal,
+          period: line.period,
+        })),
+        expenseLines: lines.map((line) => ({
+          label: line.label,
+          planned: parseMoneyInput(line.plannedStr) ?? 0,
+          actual: parseMoneyInput(line.spentStr) ?? 0,
+        })),
+      })
+    } catch (error) {
+      Alert.alert('PDF', error instanceof Error ? error.message : 'Could not export the budget.')
+    }
+    setExportingPdf(false)
+  }
+
   const savePlan = async () => {
     if (usingOfflinePack) {
       Alert.alert('Downloaded version', 'Connect to the internet to edit the budget.')
@@ -494,6 +554,16 @@ export function ProjectBudgetTab({ projectId, hideCrewBudgeting = false }: Props
           ? 'Internal planning only. Equipment cost uses kit-list qty × unit price. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'
           : 'Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each person\'s public day / half-day rate when set. Equipment cost uses kit-list qty × unit price. Current uses logged hours during the shoot (10 hours = one day) and keeps unlogged days on the booking. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'}
       </Text>
+      <TouchableOpacity
+        style={[styles.exportBtn, exportingPdf && styles.dim]}
+        onPress={() => void exportPdf()}
+        disabled={exportingPdf}
+        accessibilityRole="button"
+        accessibilityLabel="Export budget PDF"
+      >
+        <FileDown size={16} color="#FFDC00" strokeWidth={ICON_STROKE} />
+        <Text style={styles.exportBtnText}>{exportingPdf ? 'Preparing PDF…' : 'Export PDF'}</Text>
+      </TouchableOpacity>
 
       <ProjectClientPaymentStatus projectId={projectId} />
 
@@ -895,6 +965,18 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 40, paddingHorizontal: 4 },
   center: { flex: 1, paddingVertical: 40, alignItems: 'center' },
   lead: { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 14, lineHeight: 19 },
+  exportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,220,0,0.45)',
+    paddingVertical: 12,
+    marginBottom: 14,
+  },
+  exportBtnText: { color: '#FFDC00', fontWeight: '800', fontSize: 14 },
   card: {
     backgroundColor: '#111',
     borderRadius: 14,

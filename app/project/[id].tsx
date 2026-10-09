@@ -1224,7 +1224,17 @@ export default function ProjectWorkspaceScreen() {
                   />
                 )}
                 {tab === 'budget' && viewerIsCompanyOnProject ? (
-                  <ProjectBudgetTab projectId={project.id} hideCrewBudgeting={isPrivateWorkspace} />
+                  <ProjectBudgetTab
+                    projectId={project.id}
+                    hideCrewBudgeting={isPrivateWorkspace}
+                    project={{
+                      title: project.title,
+                      location: project.location,
+                      statusLabel: projectStatusDisplayLabel(project.status),
+                      scheduleStart: project.scheduling_start_date,
+                      scheduleEnd: project.scheduling_end_date,
+                    }}
+                  />
                 ) : null}
                 {tab === 'timesheet' && !viewerIsCompanyOnProject && !isPrivateWorkspace ? (
                   <ScrollView
