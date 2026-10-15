@@ -34,6 +34,7 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProductionSunPlannerSection } from '@/components/project/ProductionSunPlannerSection'
 import { ProductionEquipmentSection, ProductionTasksSection } from '@/components/project/ProductionManualLists'
 import { FlexibleShotList } from '@/components/project/FlexibleShotList'
+import { ShotPhotos } from '@/components/project/ShotPhotos'
 import type { ProductionEquipmentItem, ProductionTask } from '@/lib/productionLists'
 import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
 import { OfflinePackCard } from '@/components/project/OfflinePackCard'
@@ -1531,6 +1532,7 @@ export function ProductionTab({
               </Text>
             </View>
           )}
+          <ShotPhotos shotKey={`${projectId}:${shootDay}:${s.id}`} readOnly={usingOfflinePack} />
         </View>
       ))}
 

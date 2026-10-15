@@ -13,6 +13,7 @@ import {
 } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Plus, Upload } from 'lucide-react-native'
+import { ShotPhotos } from '@/components/project/ShotPhotos'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { supabase } from '@/lib/supabase'
 import {
@@ -456,6 +457,7 @@ export function FlexibleShotList({
                     ))}
                   </View>
                 ) : null}
+                <ShotPhotos shotKey={`${projectId}:${shootDay}:${row.id}`} readOnly={readOnly} />
               </View>
             )
           })}
