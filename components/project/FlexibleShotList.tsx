@@ -457,7 +457,7 @@ export function FlexibleShotList({
                     ))}
                   </View>
                 ) : null}
-                <ShotPhotos shotKey={`${projectId}:${shootDay}:${row.id}`} readOnly={readOnly} />
+                <ShotPhotos projectId={projectId} shootDay={shootDay} shotId={row.id} readOnly={readOnly} />
               </View>
             )
           })}

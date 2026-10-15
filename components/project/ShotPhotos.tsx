@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Modal,
   ScrollView,
@@ -13,38 +14,53 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native'
-import AsyncStorage from '@react-native-async-storage/async-storage'
+import { decode } from 'base64-arraybuffer'
 import * as FileSystem from 'expo-file-system'
 import * as ImagePicker from 'expo-image-picker'
 import { Plus, X } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { supabase } from '@/lib/supabase'
 
-type ShotPhoto = { id: string; uri: string }
+type ShotPhoto = { id: string; uri: string; path: string }
 
-function storageKey(shotKey: string) {
-  return `crea.shot-photos.v1:${shotKey}`
-}
+const BUCKET = 'shot-photos'
 
 function newId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-async function keepPhoto(uri: string, base64?: string | null): Promise<string> {
-  const root = FileSystem.documentDirectory ?? FileSystem.cacheDirectory
-  if (!root) return uri
-  const dir = `${root}shot-photos/`
-  await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => undefined)
-  const dest = `${dir}${newId()}.jpg`
-  if (base64) {
-    await FileSystem.writeAsStringAsync(dest, base64, { encoding: FileSystem.EncodingType.Base64 })
-    return dest
-  }
-  await FileSystem.copyAsync({ from: uri, to: dest })
-  return dest
+async function signedPhotos(projectId: string, shootDay: string, shotId: string): Promise<ShotPhoto[]> {
+  const { data, error } = await supabase
+    .from('production_shot_photos')
+    .select('id, storage_path')
+    .eq('project_id', projectId)
+    .eq('shoot_date', shootDay)
+    .eq('shot_id', shotId)
+    .order('created_at', { ascending: true })
+  if (error || !data?.length) return []
+  const paths = data.map((row) => String(row.storage_path))
+  const signed = await supabase.storage.from(BUCKET).createSignedUrls(paths, 60 * 60)
+  return data
+    .map((row, rowIndex) => ({
+      id: String(row.id),
+      path: String(row.storage_path),
+      uri: signed.data?.[rowIndex]?.signedUrl ?? '',
+    }))
+    .filter((photo) => photo.uri)
 }
 
-export function ShotPhotos({ shotKey, readOnly = false }: { shotKey: string; readOnly?: boolean }) {
+export function ShotPhotos({
+  projectId,
+  shootDay,
+  shotId,
+  readOnly = false,
+}: {
+  projectId: string
+  shootDay: string
+  shotId: string
+  readOnly?: boolean
+}) {
   const { width, height } = useWindowDimensions()
   const insets = useSafeAreaInsets()
   const frameHeight = Math.max(height - insets.top - insets.bottom - 150, height * 0.55)
@@ -56,30 +72,40 @@ export function ShotPhotos({ shotKey, readOnly = false }: { shotKey: string; rea
   const photosRef = useRef(photos)
   photosRef.current = photos
 
+  const reload = useCallback(async () => {
+    try {
+      setPhotos(await signedPhotos(projectId, shootDay, shotId))
+    } catch {
+      setPhotos([])
+    }
+  }, [projectId, shootDay, shotId])
+
   useEffect(() => {
-    let cancelled = false
-    void AsyncStorage.getItem(storageKey(shotKey)).then((raw) => {
-      if (cancelled || !raw) return
-      try {
-        const parsed = JSON.parse(raw) as ShotPhoto[]
-        if (!Array.isArray(parsed)) return
-        setPhotos(parsed.filter((photo) => photo && typeof photo.uri === 'string' && typeof photo.id === 'string'))
-      } catch {
-        /* ignore a bad cache */
-      }
+    void reload()
+  }, [reload])
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`shot-photos-${projectId}-${shotId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'production_shot_photos', filter: `project_id=eq.${projectId}` },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as { shot_id?: string; shoot_date?: string }
+          if (row.shot_id && row.shot_id !== shotId) return
+          if (row.shoot_date && String(row.shoot_date) !== shootDay) return
+          void reload()
+        }
+      )
+      .subscribe()
+    const appState = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void reload()
     })
     return () => {
-      cancelled = true
+      appState.remove()
+      void supabase.removeChannel(channel)
     }
-  }, [shotKey])
-
-  const persist = useCallback(
-    (next: ShotPhoto[]) => {
-      setPhotos(next)
-      void AsyncStorage.setItem(storageKey(shotKey), JSON.stringify(next))
-    },
-    [shotKey]
-  )
+  }, [projectId, reload, shootDay, shotId])
 
   const openAt = (nextIndex: number) => {
     setIndex(nextIndex)
@@ -105,9 +131,28 @@ export function ShotPhotos({ shotKey, readOnly = false }: { shotKey: string; rea
     const asset = picked.assets[0]
     setSaving(true)
     try {
-      const uri = await keepPhoto(asset.uri, asset.base64)
+      const base64 =
+        asset.base64 ??
+        (await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 }))
+      const id = newId()
+      const path = `${projectId}/${id}.jpg`
+      const uploaded = await supabase.storage.from(BUCKET).upload(path, decode(base64), {
+        contentType: 'image/jpeg',
+        upsert: false,
+      })
+      if (uploaded.error) throw uploaded.error
+      const inserted = await supabase.from('production_shot_photos').insert({
+        project_id: projectId,
+        shoot_date: shootDay,
+        shot_id: shotId,
+        storage_path: path,
+      })
+      if (inserted.error) {
+        await supabase.storage.from(BUCKET).remove([path])
+        throw inserted.error
+      }
       const start = photosRef.current.length
-      persist([...photosRef.current, { id: newId(), uri }])
+      await reload()
       openAt(start)
     } catch {
       Alert.alert('Photos', 'Could not add that photo to the shot.')
@@ -117,14 +162,18 @@ export function ShotPhotos({ shotKey, readOnly = false }: { shotKey: string; rea
   }
 
   const removeCurrent = () => {
-    const next = photos.filter((_, photoIndex) => photoIndex !== index)
-    persist(next)
+    const current = photos[index]
+    if (!current) return
+    const next = photos.filter((photo) => photo.id !== current.id)
+    setPhotos(next)
     if (!next.length) {
       setOpen(false)
       setIndex(0)
-      return
+    } else {
+      setIndex(Math.min(index, next.length - 1))
     }
-    setIndex(Math.min(index, next.length - 1))
+    void supabase.from('production_shot_photos').delete().eq('id', current.id)
+    if (current.path) void supabase.storage.from(BUCKET).remove([current.path])
   }
 
   const onScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {

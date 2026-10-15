@@ -1532,7 +1532,7 @@ export function ProductionTab({
               </Text>
             </View>
           )}
-          <ShotPhotos shotKey={`${projectId}:${shootDay}:${s.id}`} readOnly={usingOfflinePack} />
+          <ShotPhotos projectId={projectId} shootDay={shootDay} shotId={s.id} readOnly={usingOfflinePack} />
         </View>
       ))}
 
