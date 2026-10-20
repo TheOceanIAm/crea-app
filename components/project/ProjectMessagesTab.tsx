@@ -16,6 +16,7 @@ import { useFocusEffect } from 'expo-router'
 import { Send, Trash2 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { supabase } from '@/lib/supabase'
+import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { loadProfileAvatarsByIds, normalizeProfileAvatarUrl } from '@/lib/profileAvatar'
@@ -373,7 +374,7 @@ export function ProjectMessagesTab({ projectId, userId }: Props) {
         renderItem={({ item }) => {
           const mine = item.sender_id === userId
           const prof = item.profiles
-          const name = prof?.name || 'Member'
+          const name = resolveProfileDisplayName(prof?.name, { fallback: 'Member' })
           return (
             <View style={[styles.bubbleWrap, mine && styles.bubbleWrapMine]}>
               {!mine && item.avatar_url ? (

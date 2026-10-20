@@ -16,6 +16,7 @@ import {
 import { Swipeable } from 'react-native-gesture-handler'
 import { Trash2, ChevronDown } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
+import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { cancelCrewInvite, listProjectCrewInvites, type ProjectCrewInvite } from '@/lib/crewInvites'
 import { fetchCreaApi } from '@/lib/creaApiFetch'
@@ -451,7 +452,7 @@ export function ProjectCrewTab({
         member_role: m.member_role,
         avatar_url: crewAvatarUri(p?.avatar_url),
         role_display: roleDisplay,
-        name: p?.name || 'Member',
+        name: resolveProfileDisplayName(p?.name, { email: profileEmail, fallback: 'Member' }),
         subtitle,
         email: profileEmail,
         phone: null,
@@ -546,7 +547,7 @@ export function ProjectCrewTab({
         setCrewSearchResults(
           list.map((r) => ({
             id: r.id,
-            name: r.name,
+            name: resolveProfileDisplayName(r.name, { fallback: 'Freelancer' }),
             avatar_url: r.avatar_url,
           }))
         )
@@ -1104,7 +1105,7 @@ export function ProjectCrewTab({
                       >
                         {crewSearchResults.map((item) => {
                           const uri = crewAvatarUri(item.avatar_url)
-                          const label = (item.name ?? '').trim() || 'Freelancer'
+                          const label = resolveProfileDisplayName(item.name, { fallback: 'Freelancer' })
                           return (
                             <TouchableOpacity
                               key={item.id}

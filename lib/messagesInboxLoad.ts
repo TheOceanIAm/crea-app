@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
 import { messagePreviewForInbox } from '@/lib/bookingDm'
 import { parseSupabaseTimestamp, supabaseTimestampMs } from '@/lib/supabaseTimestamp'
 import { fetchDmUnreadCountsByConversation } from '@/lib/dmUnreadCounts'
@@ -112,10 +113,20 @@ export async function loadDirectMessageInbox(userId: string): Promise<LoadInboxR
     otherIds.length
       ? supabase
           .from('profiles')
-          .select('id, name, avatar_url')
+          .select('id, name, email, avatar_url')
           .in('id', otherIds)
-          .then((r) => r.data ?? [])
-      : Promise.resolve([] as Array<{ id: string; name: string | null; avatar_url: string | null }>),
+          .then(
+            (r) =>
+              (r.data ?? []) as Array<{
+                id: string
+                name: string | null
+                email: string | null
+                avatar_url: string | null
+              }>
+          )
+      : Promise.resolve(
+          [] as Array<{ id: string; name: string | null; email: string | null; avatar_url: string | null }>
+        ),
     unreadCountsForConversations(convIds, userId),
   ])
 
@@ -145,7 +156,7 @@ export async function loadDirectMessageInbox(userId: string): Promise<LoadInboxR
     const cid = String(row.id)
     const convo: ConvoRow = {
       id: cid,
-      name: (p?.name && String(p.name).trim()) || 'User',
+      name: resolveProfileDisplayName(p?.name, { email: p?.email, fallback: 'User' }),
       avatar: typeof p?.avatar_url === 'string' ? p.avatar_url : '',
       lastMessage: (() => {
         const raw = typeof row.last_message === 'string' ? row.last_message.trim() : ''

@@ -26,7 +26,11 @@ begin
           select
             jsonb_build_object(
               'id', pr.id,
-              'name', coalesce(pr.name, ''),
+              'name', coalesce(
+                public.crea_meaningful_profile_name(pr.name),
+                public.crea_profile_name_from_auth_meta(u.raw_user_meta_data),
+                ''
+              ),
               'role', coalesce(pr.role, ''),
               'avatar_url', pr.avatar_url,
               'headline', coalesce(pr.headline, '')
@@ -74,7 +78,12 @@ begin
           select
             jsonb_build_object(
               'id', pr.id,
-              'name', coalesce(pr.name, ''),
+              'name', coalesce(
+                public.crea_meaningful_profile_name(pr.name),
+                public.crea_meaningful_profile_name(cp.company_name),
+                public.crea_profile_name_from_auth_meta(u.raw_user_meta_data),
+                ''
+              ),
               'role', coalesce(pr.role, ''),
               'avatar_url', pr.avatar_url,
               'headline', coalesce(pr.headline, ''),
@@ -83,11 +92,13 @@ begin
             u.created_at as sort_ts
           from public.profiles pr
           inner join auth.users u on u.id = pr.id
+          left join public.company_profiles cp on cp.id = pr.id
           where lower(trim(coalesce(pr.role, ''))) = 'company'
             and coalesce(pr.beta_invite, false) = false
             and (
               q = ''
               or pr.name ilike '%' || q || '%'
+              or coalesce(cp.company_name, '') ilike '%' || q || '%'
               or u.email::text ilike '%' || q || '%'
               or coalesce(pr.headline, '') ilike '%' || q || '%'
             )

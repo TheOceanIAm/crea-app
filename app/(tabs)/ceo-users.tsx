@@ -16,6 +16,7 @@ import { ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { useCeoAccess } from '@/lib/useCeoAccess'
+import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 
 type UserRow = {
@@ -37,7 +38,9 @@ function parseUsersPayload(raw: unknown): { ok: boolean; users: UserRow[] } {
       const av = x.avatar_url
       return {
         id: String(x.id ?? ''),
-        name: String(x.name ?? ''),
+        name: resolveProfileDisplayName(typeof x.name === 'string' ? x.name : null, {
+          fallback: String(x.role ?? '').toLowerCase() === 'company' ? 'Company' : 'Freelancer',
+        }),
         role: String(x.role ?? ''),
         avatar_url: typeof av === 'string' ? av : null,
         headline: String(x.headline ?? ''),
@@ -185,7 +188,7 @@ export default function CeoUsersScreen() {
                 )}
                 <View style={styles.rowBody}>
                   <Text style={styles.rowName} numberOfLines={1}>
-                    {item.name.trim() || 'Unnamed'}
+                    {item.name}
                   </Text>
                   {item.headline.trim() ? (
                     <Text style={styles.rowSub} numberOfLines={1}>

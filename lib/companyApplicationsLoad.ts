@@ -10,6 +10,7 @@ import { isWithinPlatformTrialPeriod } from '@/lib/platformTrial'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { supabase } from '@/lib/supabase'
+import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
 import { LIST_DISK_TTL_MS, LIST_MEM_TTL_MS } from '@/lib/cachePolicy'
 
 export type CompanyApplicationRow = {
@@ -117,14 +118,14 @@ export async function loadCompanyApplicationsCache(user: User): Promise<CompanyA
 
   const fIds = [...new Set(apps.map((a) => a.freelancer_id as string).filter(Boolean))]
   const [{ data: profs }, { data: projs }] = await Promise.all([
-    supabase.from('profiles').select('id, name, avatar_url').in('id', fIds),
+    supabase.from('profiles').select('id, name, email, avatar_url').in('id', fIds),
     supabase.from('projects').select('id, job_id').in('job_id', jobIds),
   ])
   const profMap = new Map<string, { name: string; avatar_url: string | null }>()
   for (const pr of profs ?? []) {
     const url = pr.avatar_url?.trim()
     profMap.set(pr.id as string, {
-      name: (pr.name || 'Freelancer').trim() || 'Freelancer',
+      name: resolveProfileDisplayName(pr.name, { email: pr.email, fallback: 'Freelancer' }),
       avatar_url: url && /^https?:\/\//i.test(url) ? url : null,
     })
   }

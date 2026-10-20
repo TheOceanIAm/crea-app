@@ -42,7 +42,7 @@ const DISK_TTL_MS = LIST_DISK_TTL_MS
 const FOLDERS_TABLE = 'talent_pool_folders'
 
 export function talentPoolCacheKey(userId: string): string {
-  return `talent-pool:v3:${userId}`
+  return `talent-pool:v4:${userId}`
 }
 
 function foldersStorageKey(uid: string) {
@@ -50,7 +50,7 @@ function foldersStorageKey(uid: string) {
 }
 
 function talentPoolDiskKey(userId: string) {
-  return `crea:talent-pool:v3:${userId}`
+  return `crea:talent-pool:v4:${userId}`
 }
 
 async function loadFreelancerDirectoryRows(userId: string) {

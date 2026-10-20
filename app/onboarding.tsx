@@ -23,7 +23,11 @@ import { pickAndUploadAvatarOnly } from '@/lib/uploadProfileAvatar'
 import { openPrivacy, openTerms } from '@/lib/creaLegal'
 import { postTrialPlan } from '@/lib/trialPlanApi'
 import { IOS_SUBSCRIPTION_PURCHASE_ON_WEB_ONLY, getLoggedOutEntryRoute } from '@/lib/iosAppStoreCompliance'
-import { isMeaningfulProfileName, PROFILE_DISPLAY_NAME_MIN } from '@/lib/resolveProfileDisplayName'
+import {
+  isMeaningfulProfileName,
+  nameFromAuthMetadata,
+  PROFILE_DISPLAY_NAME_MIN,
+} from '@/lib/resolveProfileDisplayName'
 import {
   freelancerPlanDescription,
   freelancerPlanLabel,
@@ -104,15 +108,10 @@ export default function OnboardingScreen() {
       return
     }
 
-    const metaName =
-      typeof user.user_metadata?.name === 'string'
-        ? user.user_metadata.name.trim()
-        : typeof user.user_metadata?.full_name === 'string'
-          ? user.user_metadata.full_name.trim()
-          : ''
-    const fromProfile = typeof profile?.name === 'string' ? profile.name.trim() : ''
-    if (fromProfile.length >= 2) setDisplayName(fromProfile)
-    else if (metaName.length >= 2) setDisplayName(metaName)
+    const metaName = nameFromAuthMetadata(user.user_metadata as Record<string, unknown>) ?? ''
+    const fromProfile = isMeaningfulProfileName(profile?.name) ? String(profile?.name).trim() : ''
+    if (fromProfile) setDisplayName(fromProfile)
+    else if (metaName) setDisplayName(metaName)
 
     const existingAvatar = typeof profile?.avatar_url === 'string' ? profile.avatar_url.trim() : ''
     if (hasOnboardingPhoto(existingAvatar)) setAvatarPublicUrl(existingAvatar)

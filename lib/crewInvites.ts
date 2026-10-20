@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
 
 /**
  * Crew invite -> accept helpers.
@@ -80,7 +81,10 @@ export async function listProjectCrewInvites(projectId: string): Promise<Project
       return {
         id: String(r.id),
         profileId: String(r.profile_id),
-        name: (typeof r.name === 'string' && r.name.trim()) || 'Freelancer',
+        name: resolveProfileDisplayName(typeof r.name === 'string' ? r.name : null, {
+          email: typeof r.email === 'string' ? r.email : null,
+          fallback: 'Freelancer',
+        }),
         avatarUrl: url && /^https?:\/\//i.test(url) ? url : null,
         invitedAt: String(r.invited_at ?? new Date().toISOString()),
       }
