@@ -646,9 +646,7 @@ export default function ProjectWorkspaceScreen() {
 
   const tabs = useMemo(() => {
     let list = [...BASE_TABS]
-    if (isPrivateWorkspace) {
-      list = list.filter((t) => t.id !== 'messages' && t.id !== 'crew')
-    } else if (workspaceOnlyPlan) {
+    if (isPrivateWorkspace || workspaceOnlyPlan) {
       list = list.filter((t) => t.id !== 'messages')
     }
     if (viewerIsCompanyOnProject) {
@@ -656,7 +654,7 @@ export default function ProjectWorkspaceScreen() {
       const miles = list.findIndex((t) => t.id === 'milestones')
       const insertAt = ix >= 0 ? ix + 1 : miles >= 0 ? miles + 1 : list.length
       list = [...list.slice(0, insertAt), { id: 'budget' as const, label: 'Budget' }, ...list.slice(insertAt)]
-    } else if (!isPrivateWorkspace) {
+    } else {
       const productionIdx = list.findIndex((t) => t.id === 'production')
       const insertAt = productionIdx >= 0 ? productionIdx + 1 : list.length
       list = [...list.slice(0, insertAt), { id: 'timesheet' as const, label: 'Timesheet' }, ...list.slice(insertAt)]
@@ -666,14 +664,12 @@ export default function ProjectWorkspaceScreen() {
 
   useEffect(() => {
     if ((workspaceOnlyPlan || isPrivateWorkspace) && tab === 'messages') setTab('overview')
-    if (isPrivateWorkspace && tab === 'crew') setTab('overview')
   }, [workspaceOnlyPlan, isPrivateWorkspace, tab])
 
   useEffect(() => {
     if (tab === 'budget' && !viewerIsCompanyOnProject) setTab('overview')
-    if (tab === 'timesheet' && isPrivateWorkspace) setTab('overview')
     if (tab === 'timesheet' && viewerIsCompanyOnProject) setTab('budget')
-  }, [tab, viewerIsCompanyOnProject, isPrivateWorkspace])
+  }, [tab, viewerIsCompanyOnProject])
 
   // Deep-link capture: /project/[id]?tab=milestones&tool=shotlist&day=2026-09-15
   useEffect(() => {
@@ -1039,7 +1035,7 @@ export default function ProjectWorkspaceScreen() {
 
   const statsRow = (
     <View style={styles.statsRow}>
-      {viewerIsCompanyOnProject && project.job_id && !isPrivateWorkspace ? (
+      {viewerIsCompanyOnProject && (project.job_id || isPrivateWorkspace) ? (
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>Applicants</Text>
           <Text style={styles.statValue}>{pipelineStatCount}</Text>
@@ -1210,14 +1206,13 @@ export default function ProjectWorkspaceScreen() {
                     />
                   </Suspense>
                 )}
-                {tab === 'crew' && !isPrivateWorkspace && (
+                {tab === 'crew' && (
                   <ProjectCrewTab
                     projectId={project.id}
                     canManage={canManageCrew}
                     viewerIsCompany={canEditProductionSchedule}
                     viewerId={userId}
                     workspaceOnly={workspaceOnlyPlan}
-                    inHouseWorkspace={isPrivateWorkspace}
                     proFeaturesEnabled={!starterFreelancerPlan}
                     productionWindowStart={scheduleStart}
                     productionWindowEnd={scheduleEnd}
@@ -1227,7 +1222,7 @@ export default function ProjectWorkspaceScreen() {
                 {tab === 'budget' && viewerIsCompanyOnProject ? (
                   <ProjectBudgetTab
                     projectId={project.id}
-                    hideCrewBudgeting={isPrivateWorkspace}
+                    hideCrewBudgeting={false}
                     project={{
                       title: project.title,
                       location: project.location,
@@ -1237,7 +1232,7 @@ export default function ProjectWorkspaceScreen() {
                     }}
                   />
                 ) : null}
-                {tab === 'timesheet' && !viewerIsCompanyOnProject && !isPrivateWorkspace ? (
+                {tab === 'timesheet' && !viewerIsCompanyOnProject ? (
                   <ScrollView
                     style={{ flex: 1 }}
                     contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: 4 }}
