@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
@@ -11,6 +10,7 @@ import {
   Alert,
 } from 'react-native'
 import { router } from 'expo-router'
+import { PasswordField } from '@/components/PasswordField'
 import { supabase } from '@/lib/supabase'
 import { userFacingErrorMessage } from '@/lib/userFacingError'
 
@@ -79,26 +79,22 @@ export default function ResetPasswordScreen() {
         <Text style={styles.title}>New password</Text>
         <Text style={styles.sub}>Choose a new password for your account.</Text>
 
-        <TextInput
+        <PasswordField
+          containerStyle={styles.fieldGap}
           style={styles.input}
           placeholder="New password"
-          placeholderTextColor="rgba(255,255,255,0.3)"
           value={password}
           onChangeText={setPassword}
-          secureTextEntry
-          autoCapitalize="none"
           textContentType="newPassword"
           autoComplete="password-new"
         />
-        <TextInput
+        <PasswordField
           style={styles.input}
           placeholder="Confirm password"
-          placeholderTextColor="rgba(255,255,255,0.3)"
           value={confirm}
           onChangeText={setConfirm}
-          secureTextEntry
-          autoCapitalize="none"
           textContentType="newPassword"
+          autoComplete="password-new"
         />
 
         <TouchableOpacity
@@ -137,6 +133,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 32,
   },
+  fieldGap: { marginBottom: 12 },
   input: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
@@ -146,7 +143,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     color: '#ffffff',
     fontSize: 15,
-    marginBottom: 12,
   },
   button: {
     backgroundColor: '#FFDC00',

@@ -42,6 +42,7 @@ import {
 import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { SubscriptionLegalLinks } from '@/components/SubscriptionLegalLinks'
 import { LocationAutocompleteInput } from '@/components/LocationAutocompleteInput'
+import { PasswordField } from '@/components/PasswordField'
 import { supabase } from '@/lib/supabase'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { userFacingErrorMessage } from '@/lib/userFacingError'
@@ -2815,23 +2816,24 @@ export default function ProfileScreen() {
                 <Text style={styles.inlineHint}>Tied to your login — can’t be changed here.</Text>
 
                 <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>New password</Text>
-                <TextInput
+                <PasswordField
                   style={styles.input}
                   value={newPassword}
                   onChangeText={setNewPassword}
                   placeholder="New password"
                   placeholderTextColor="rgba(255,255,255,0.28)"
-                  secureTextEntry
-                  autoCapitalize="none"
+                  textContentType="newPassword"
+                  autoComplete="password-new"
                 />
-                <TextInput
-                  style={[styles.input, styles.inputSpaced]}
+                <PasswordField
+                  containerStyle={styles.inputSpaced}
+                  style={styles.input}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   placeholder="Confirm password"
                   placeholderTextColor="rgba(255,255,255,0.28)"
-                  secureTextEntry
-                  autoCapitalize="none"
+                  textContentType="newPassword"
+                  autoComplete="password-new"
                 />
                 <TouchableOpacity
                   style={[styles.secondaryBtn, savingPassword && styles.btnDisabled]}

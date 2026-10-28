@@ -7,6 +7,7 @@ import {
 import { router } from 'expo-router'
 import Purchases from 'react-native-purchases'
 import { CreaWordmark } from '@/components/CreaWordmark'
+import { PasswordField } from '@/components/PasswordField'
 import { supabase } from '@/lib/supabase'
 import { isRetryableSupabaseError, sleep, userFacingErrorMessage } from '@/lib/userFacingError'
 import {
@@ -74,13 +75,13 @@ export default function LoginScreen() {
             textContentType="emailAddress"
             autoComplete="email"
           />
-          <TextInput
+          <PasswordField
             style={styles.input}
             placeholder="Password"
-            placeholderTextColor="rgba(255,255,255,0.3)"
             value={password}
             onChangeText={setPassword}
-            secureTextEntry
+            textContentType="password"
+            autoComplete="password"
           />
 
           <TouchableOpacity

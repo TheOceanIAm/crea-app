@@ -22,6 +22,7 @@ import {
   getCreaWebRegisterUrl,
 } from '@/lib/iosAppStoreCompliance'
 import { isMeaningfulProfileName, PROFILE_DISPLAY_NAME_MIN } from '@/lib/resolveProfileDisplayName'
+import { PasswordField } from '@/components/PasswordField'
 
 function RegisterIosWebOnly() {
   return (
@@ -164,13 +165,13 @@ function RegisterForm() {
             textContentType="emailAddress"
             autoComplete="email"
           />
-          <TextInput
+          <PasswordField
             style={styles.input}
             placeholder="Password"
-            placeholderTextColor="rgba(255,255,255,0.3)"
             value={password}
             onChangeText={setPassword}
-            secureTextEntry
+            textContentType="newPassword"
+            autoComplete="password-new"
           />
 
           <TouchableOpacity
