@@ -151,6 +151,8 @@ export default function ProjectWorkspaceScreen() {
     bootShell?.jobOwnerCompanyId ?? null
   )
   const [companyTeamOnJob, setCompanyTeamOnJob] = useState(false)
+  const [budgetManager, setBudgetManager] = useState(false)
+  const [budgetAccessReady, setBudgetAccessReady] = useState(false)
   const [pipelineStatCount, setPipelineStatCount] = useState(0)
   const initialTabRaw = Array.isArray(tabParam) ? tabParam[0] : tabParam
   const initialTool = Array.isArray(toolParam) ? toolParam[0] : toolParam
@@ -635,6 +637,36 @@ export default function ProjectWorkspaceScreen() {
   }, [tab, refreshProjectCounts])
 
   const viewerIsCompanyOnProject = Boolean(project && userId && project.company_id === userId)
+  const canOpenBudget = viewerIsCompanyOnProject || budgetManager
+
+  useEffect(() => {
+    if (!project?.id || !userId) {
+      setBudgetManager(false)
+      setBudgetAccessReady(false)
+      return
+    }
+    if (project.company_id === userId) {
+      setBudgetManager(false)
+      setBudgetAccessReady(true)
+      return
+    }
+    let cancelled = false
+    setBudgetAccessReady(false)
+    void supabase
+      .from('project_members')
+      .select('can_manage_budget')
+      .eq('project_id', project.id)
+      .eq('profile_id', userId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        setBudgetManager(Boolean((data as { can_manage_budget?: boolean } | null)?.can_manage_budget))
+        setBudgetAccessReady(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [project?.id, project?.company_id, userId])
 
   const linkedJobId = useMemo(() => {
     if (!project) return null
@@ -649,27 +681,32 @@ export default function ProjectWorkspaceScreen() {
     if (isPrivateWorkspace || workspaceOnlyPlan) {
       list = list.filter((t) => t.id !== 'messages')
     }
-    if (viewerIsCompanyOnProject) {
+    if (canOpenBudget) {
       const ix = list.findIndex((t) => t.id === 'crew')
       const miles = list.findIndex((t) => t.id === 'milestones')
       const insertAt = ix >= 0 ? ix + 1 : miles >= 0 ? miles + 1 : list.length
       list = [...list.slice(0, insertAt), { id: 'budget' as const, label: 'Budget' }, ...list.slice(insertAt)]
-    } else {
+    } else if (budgetAccessReady) {
       const productionIdx = list.findIndex((t) => t.id === 'production')
       const insertAt = productionIdx >= 0 ? productionIdx + 1 : list.length
       list = [...list.slice(0, insertAt), { id: 'timesheet' as const, label: 'Timesheet' }, ...list.slice(insertAt)]
     }
     return list
-  }, [workspaceOnlyPlan, isPrivateWorkspace, viewerIsCompanyOnProject])
+  }, [workspaceOnlyPlan, isPrivateWorkspace, canOpenBudget, budgetAccessReady])
 
   useEffect(() => {
     if ((workspaceOnlyPlan || isPrivateWorkspace) && tab === 'messages') setTab('overview')
   }, [workspaceOnlyPlan, isPrivateWorkspace, tab])
 
   useEffect(() => {
-    if (tab === 'budget' && !viewerIsCompanyOnProject) setTab('overview')
-    if (tab === 'timesheet' && viewerIsCompanyOnProject) setTab('budget')
-  }, [tab, viewerIsCompanyOnProject])
+    if (viewerIsCompanyOnProject) {
+      if (tab === 'timesheet') setTab('budget')
+      return
+    }
+    if (!budgetAccessReady) return
+    if (tab === 'budget' && !canOpenBudget) setTab('overview')
+    if (tab === 'timesheet' && canOpenBudget) setTab('budget')
+  }, [tab, viewerIsCompanyOnProject, budgetAccessReady, canOpenBudget])
 
   // Deep-link capture: /project/[id]?tab=milestones&tool=shotlist&day=2026-09-15
   useEffect(() => {
@@ -1219,10 +1256,11 @@ export default function ProjectWorkspaceScreen() {
                     onOpenProfile={(profileId) => router.push(`/profile/${profileId}` as Href)}
                   />
                 )}
-                {tab === 'budget' && viewerIsCompanyOnProject ? (
+                {tab === 'budget' && canOpenBudget ? (
                   <ProjectBudgetTab
                     projectId={project.id}
                     hideCrewBudgeting={false}
+                    mirrorListing={viewerIsCompanyOnProject}
                     project={{
                       title: project.title,
                       location: project.location,
@@ -1232,7 +1270,7 @@ export default function ProjectWorkspaceScreen() {
                     }}
                   />
                 ) : null}
-                {tab === 'timesheet' && !viewerIsCompanyOnProject ? (
+                {tab === 'timesheet' && !canOpenBudget ? (
                   <ScrollView
                     style={{ flex: 1 }}
                     contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: 4 }}

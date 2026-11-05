@@ -41,6 +41,8 @@ import {
   type OfflinePack,
 } from '@/lib/offlinePack'
 import { shareBudgetStatusPdf, type BudgetStatusProject } from '@/lib/budgetStatusPdf'
+import { BudgetReceiptsPanel } from '@/components/project/BudgetReceiptsPanel'
+import { applyServerSpent, receiptBlocksLine, type BudgetReceiptRow } from '@/lib/budgetReceiptLines'
 
 type BudgetPlanRow = {
   project_id: string
@@ -72,6 +74,8 @@ type Props = {
   project?: BudgetStatusProject
   /** Solo / in-house workspaces have no crew tab — skip crew spend. */
   hideCrewBudgeting?: boolean
+  /** Host mirrors the total onto the public listing. A budget manager does not. */
+  mirrorListing?: boolean
 }
 
 function parseMoneyInput(raw: string): number | null {
@@ -135,7 +139,7 @@ function BudgetFold({
   )
 }
 
-export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false }: Props) {
+export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false, mirrorListing = true }: Props) {
   const [loading, setLoading] = useState(true)
   const [savingPlan, setSavingPlan] = useState(false)
   const [savingLines, setSavingLines] = useState(false)
@@ -158,6 +162,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
   const [packDownloadedAt, setPackDownloadedAt] = useState<string | null>(null)
   const [packMissingBudget, setPackMissingBudget] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
+  const [receipts, setReceipts] = useState<BudgetReceiptRow[]>([])
 
   const applyPack = useCallback(
     (pack: OfflinePack) => {
@@ -431,17 +436,19 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
       Alert.alert('Save failed', error.message)
       return
     }
-    const synced = await syncProjectListingBudget(supabase, projectId, {
-      total_budget: payload.total_budget,
-      currency: payload.currency,
-    })
-    if (!synced.ok) {
-      Alert.alert(
-        'Saved with warning',
-        `Budget targets saved, but overview sync failed:\n${'error' in synced ? synced.error : 'Unknown error'}`
-      )
-      void load()
-      return
+    if (mirrorListing) {
+      const synced = await syncProjectListingBudget(supabase, projectId, {
+        total_budget: payload.total_budget,
+        currency: payload.currency,
+      })
+      if (!synced.ok) {
+        Alert.alert(
+          'Saved with warning',
+          `Budget targets saved, but overview sync failed:\n${'error' in synced ? synced.error : 'Unknown error'}`
+        )
+        void load()
+        return
+      }
     }
     Alert.alert('Saved', 'Budget targets updated.')
     void load()
@@ -526,6 +533,11 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
 
   const removeLine = (id: string) => {
     if (usingOfflinePack) return
+    const line = lines.find((entry) => entry.id === id)
+    if (line && receiptBlocksLine(receipts, line)) {
+      Alert.alert('Receipts', 'Remove the receipts on this category first. That subtracts them from Actual.')
+      return
+    }
     if (/^[0-9a-f-]{36}$/i.test(id)) {
       setDeletedLineIds((d) => [...d, id])
     }
@@ -554,6 +566,14 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
           ? 'Internal planning only. Equipment cost uses kit-list qty × unit price. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'
           : 'Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each person\'s public day / half-day rate when set. Equipment cost uses kit-list qty × unit price. Current uses logged hours during the shoot (10 hours = one day) and keeps unlogged days on the booking. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'}
       </Text>
+      <BudgetReceiptsPanel
+        projectId={projectId}
+        currency={currency}
+        lines={lines}
+        disabled={usingOfflinePack}
+        onApplied={(input) => setLines((prev) => applyServerSpent(prev, input))}
+        onReceipts={setReceipts}
+      />
       <TouchableOpacity
         style={[styles.exportBtn, exportingPdf && styles.dim]}
         onPress={() => void exportPdf()}

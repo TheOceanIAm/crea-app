@@ -55,6 +55,7 @@ type Member = {
   contact_phone?: string | null
   contact_label?: string | null
   works_as?: string | null
+  can_manage_budget?: boolean | null
   profiles: {
     name: string | null
     avatar_url: string | null
@@ -98,6 +99,7 @@ type CrewRow =
       /** Resolved shoot days (booked_dates or legacy scheduling range). */
       bookingDates: string[]
       bookingSlots: BookedDateEntry[]
+      can_manage_budget?: boolean
     }
   | {
       source: 'manual'
@@ -275,6 +277,7 @@ export function ProjectCrewTab({
   const [manualHalfDayRate, setManualHalfDayRate] = useState('')
   const [manualAddSlots, setManualAddSlots] = useState<BookedDateEntry[]>([])
   const [personModalOpen, setPersonModalOpen] = useState(false)
+  const [budgetAccessBusy, setBudgetAccessBusy] = useState(false)
   const [selectedCrew, setSelectedCrew] = useState<CrewRow | null>(null)
   const [personName, setPersonName] = useState('')
   const [personRole, setPersonRole] = useState('crew')
@@ -337,7 +340,7 @@ export function ProjectCrewTab({
       supabase
         .from('project_members')
         .select(
-          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, booked_dates, contact_email, contact_phone, contact_label, works_as, profiles(name, avatar_url, headline, email)'
+          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, booked_dates, contact_email, contact_phone, contact_label, works_as, can_manage_budget, profiles(name, avatar_url, headline, email)'
         )
         .eq('project_id', projectId)
         .order('member_role', { ascending: true }),
@@ -465,6 +468,7 @@ export function ProjectCrewTab({
           typeof sEnd === 'string' ? sEnd.slice(0, 10) : sEnd != null ? String(sEnd).slice(0, 10) : null,
         bookingDates,
         bookingSlots,
+        can_manage_budget: m.can_manage_budget === true,
       }
     })
 
@@ -1639,6 +1643,58 @@ export function ProjectCrewTab({
                     {(selectedCrew.role_display ?? '').trim() || roleLabel(selectedCrew.member_role)}
                   </Text>
                 </View>
+                {viewerIsCompany && selectedCrew.member_role !== 'company' ? (
+                  <View style={styles.projectContactSection}>
+                    <Text style={styles.modalSectionKicker}>Budget access</Text>
+                    <Text style={styles.modalHintSmall}>
+                      They can view and edit this project's internal budget and file receipts, including crew costs and
+                      what is left. Billing, invoices, and the job listing stay with you. They see it after reopening
+                      the project.
+                    </Text>
+                    <TouchableOpacity
+                      style={[styles.modalSave, budgetAccessBusy && styles.dim]}
+                      disabled={budgetAccessBusy || usingOfflinePack}
+                      onPress={() => {
+                        if (selectedCrew.source !== 'registered' || usingOfflinePack) return
+                        const next = !selectedCrew.can_manage_budget
+                        const memberId = selectedCrew.id
+                        setBudgetAccessBusy(true)
+                        void supabase
+                          .rpc('crea_set_project_budget_access', {
+                            p_member_id: memberId,
+                            p_enabled: next,
+                          })
+                          .then(({ error }) => {
+                            setBudgetAccessBusy(false)
+                            if (error) {
+                              Alert.alert('Budget access', error.message)
+                              return
+                            }
+                            setSelectedCrew((current) =>
+                              current && current.source === 'registered' && current.id === memberId
+                                ? { ...current, can_manage_budget: next }
+                                : current,
+                            )
+                            setRows((prev) =>
+                              prev.map((row) =>
+                                row.source === 'registered' && row.id === memberId
+                                  ? { ...row, can_manage_budget: next }
+                                  : row,
+                              ),
+                            )
+                          })
+                      }}
+                    >
+                      <Text style={styles.modalSaveText}>
+                        {budgetAccessBusy
+                          ? 'Saving…'
+                          : selectedCrew.can_manage_budget
+                            ? 'Remove budget access'
+                            : 'Allow budget access'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
                 <View style={styles.projectContactSection}>
                   <Text style={styles.modalSectionKicker}>On this project</Text>
                   <Text style={styles.modalHintSmall}>
