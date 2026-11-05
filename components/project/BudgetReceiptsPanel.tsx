@@ -10,6 +10,7 @@ import {
   type BudgetLineSpendDraft,
   type BudgetReceiptRow,
   parseReceiptAmount,
+  receiptFileKind,
 } from '@/lib/budgetReceiptLines'
 import { formatMoneyAmount } from '@/lib/projectInternalBudget'
 
@@ -47,7 +48,7 @@ export function BudgetReceiptsPanel({ projectId, currency, lines, disabled, onAp
   const [amount, setAmount] = useState('')
   const [vendor, setVendor] = useState('')
   const [category, setCategory] = useState(PRESETS[0])
-  const [photo, setPhoto] = useState<{ base64: string } | null>(null)
+  const [photo, setPhoto] = useState<{ base64: string; mediaType: string; ext: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [reading, setReading] = useState(false)
   const [readNote, setReadNote] = useState<string | null>(null)
@@ -112,13 +113,15 @@ export function BudgetReceiptsPanel({ projectId, currency, lines, disabled, onAp
       Alert.alert('Receipt', 'Could not read that photo.')
       return
     }
-    setPhoto({ base64 })
+    const kind = receiptFileKind(base64)
+    setPhoto({ base64, mediaType: kind.mediaType, ext: kind.ext })
     setReadNote(null)
     const generation = readGeneration.current + 1
     readGeneration.current = generation
     const amountBeforeRead = amount
+    const vendorBeforeRead = vendor
     setReading(true)
-    const { data, error } = await fetchCreaApi<{ ok?: boolean; amount?: number; error?: string }>(
+    const { data, error } = await fetchCreaApi<{ ok?: boolean; amount?: number; vendor?: string | null; error?: string }>(
       '/api/app/budget/read-receipt',
       {
         method: 'POST',
@@ -126,7 +129,7 @@ export function BudgetReceiptsPanel({ projectId, currency, lines, disabled, onAp
         body: JSON.stringify({
           projectId,
           imageBase64: base64,
-          mediaType: 'image/jpeg',
+          mediaType: kind.mediaType,
         }),
         timeoutMs: 45_000,
       },
@@ -134,17 +137,21 @@ export function BudgetReceiptsPanel({ projectId, currency, lines, disabled, onAp
     if (readGeneration.current !== generation) return
     setReading(false)
     const total = typeof data?.amount === 'number' ? data.amount : null
+    const vendorName = typeof data?.vendor === 'string' ? data.vendor.trim() : ''
+    if (vendorName) {
+      setVendor((current) => (current === vendorBeforeRead ? vendorName : current))
+    }
     if (total != null && total > 0) {
       setAmount((current) => (current === amountBeforeRead ? total.toFixed(2) : current))
       setReadNote(null)
       return
     }
+    const readable =
+      error && error !== 'network_error' && error !== 'missing_web_url' && error !== 'no_session' && !/media type|base64|messages\.0/i.test(error)
+        ? error
+        : null
     setReadNote(
-      error === 'timeout'
-        ? 'Reading the total took too long. Type the amount.'
-        : error && error !== 'network_error' && error !== 'missing_web_url' && error !== 'no_session'
-          ? error
-          : 'Could not read the total. Type the amount.',
+      error === 'timeout' ? 'Reading the total took too long. Type the amount.' : readable || 'Could not read the total. Type the amount.',
     )
   }
 
@@ -164,9 +171,9 @@ export function BudgetReceiptsPanel({ projectId, currency, lines, disabled, onAp
     let path: string | null = null
     try {
       if (photo) {
-        path = `${projectId}/${newId()}.jpg`
+        path = `${projectId}/${newId()}.${photo.ext}`
         const uploaded = await supabase.storage.from(BUDGET_RECEIPT_BUCKET).upload(path, decode(photo.base64), {
-          contentType: 'image/jpeg',
+          contentType: photo.mediaType,
           upsert: false,
         })
         if (uploaded.error) throw uploaded.error
