@@ -561,11 +561,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
           for set.
         </Text>
       ) : null}
-      <Text style={styles.lead}>
-        {hideCrewBudgeting
-          ? 'Internal planning only. Equipment cost uses kit-list qty × unit price. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'
-          : 'Internal planning only — freelancers never see this. Crew cost uses booked shoot days (full or half) × each person\'s public day / half-day rate when set. Equipment cost uses kit-list qty × unit price. Current uses logged hours during the shoot (10 hours = one day) and keeps unlogged days on the booking. Enter planned estimates before the shoot; after wrap, enter actual spend for the final balance.'}
-      </Text>
+      <Text style={styles.lead}>Internal planning only — freelancers never see this.</Text>
       <BudgetReceiptsPanel
         projectId={projectId}
         currency={currency}
@@ -593,7 +589,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         open={targetsOpen}
         onToggle={() => setTargetsOpen((v) => !v)}
       >
-        <Text style={styles.hint}>Currency (ISO)</Text>
+        <Text style={styles.hint}>Currency</Text>
         <TextInput
           style={styles.input}
           value={currency}
@@ -615,7 +611,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         />
         {!hideCrewBudgeting ? (
           <>
-            <Text style={styles.hint}>Production bucket (crew day-rate burn)</Text>
+            <Text style={styles.hint}>Crew budget</Text>
             <TextInput
               style={styles.input}
               value={productionStr}
@@ -641,7 +637,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         open={forecastOpen}
         onToggle={() => setForecastOpen((v) => !v)}
       >
-        <Text style={styles.muted}>Before the shoot — uses planned other expenses.</Text>
+        <Text style={styles.muted}>Before the shoot. Uses planned expenses.</Text>
         {!hideCrewBudgeting ? (
           <View style={styles.snapRow}>
             <Text style={styles.snapLabel}>Crew (booked)</Text>
@@ -672,7 +668,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
             </Text>
           </View>
         ) : (
-          <Text style={styles.muted}>Set a total budget above to forecast headroom with planned expenses.</Text>
+          <Text style={styles.muted}>Set a total budget to see what is left.</Text>
         )}
       </BudgetFold>
 
@@ -684,7 +680,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         onToggle={() => setCurrentOpen((v) => !v)}
         cardStyle={currentTone === 'over' ? styles.wrapCardOver : currentTone === 'under' ? styles.wrapCardUnder : undefined}
       >
-        <Text style={styles.muted}>During the shoot — logged hours so far, plus booked days that have no timesheet yet.</Text>
+        <Text style={styles.muted}>Logged hours, plus days still booked.</Text>
         {!hideCrewBudgeting ? (
           <>
             <View style={styles.snapRow}>
@@ -724,7 +720,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
             </Text>
           </View>
         ) : (
-          <Text style={styles.muted}>Set a total budget to see whether the shoot is running over.</Text>
+          <Text style={styles.muted}>Set a total budget to see if you are over.</Text>
         )}
       </BudgetFold>
 
@@ -740,7 +736,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         onToggle={() => setWrapOpen((v) => !v)}
         cardStyle={wrapUpTone === 'over' ? styles.wrapCardOver : wrapUpTone === 'under' ? styles.wrapCardUnder : undefined}
       >
-        <Text style={styles.muted}>After the shoot — uses actual spend on other expenses.</Text>
+        <Text style={styles.muted}>After the shoot. Uses actual spend.</Text>
         {!hideCrewBudgeting ? (
           <View style={styles.snapRow}>
             <Text style={styles.snapLabel}>Crew (booked)</Text>
@@ -778,7 +774,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
             </View>
           </>
         ) : (
-          <Text style={styles.muted}>Set a total budget to see the final wrap-up balance.</Text>
+          <Text style={styles.muted}>Set a total budget for the final balance.</Text>
         )}
       </BudgetFold>
 
@@ -805,13 +801,9 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         {crewOpen ? (
           <View style={styles.foldBody}>
             {crew.currenciesMixed ? (
-              <Text style={styles.warn}>
-                Some day rates use a different currency than the plan — totals may be misleading.
-              </Text>
+              <Text style={styles.warn}>Mixed currencies. Totals may be off.</Text>
             ) : null}
-            <Text style={styles.muted}>
-              Booked day-equivalents × profile rates (excludes client row). Half-days use half-day rate when set.
-            </Text>
+            <Text style={styles.muted}>Booked days × day rate. Half-days use the half-day rate.</Text>
             {crew.lines.length === 0 ? (
               <Text style={styles.muted}>No booked days or rates yet.</Text>
             ) : (
@@ -857,10 +849,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         {equipmentOpen ? (
           <View style={styles.foldBody}>
             {equipmentPeriod ? <Text style={styles.periodLine}>Rental: {equipmentPeriod}</Text> : null}
-            <Text style={styles.muted}>
-              Kit-list qty × unit price (same currency as this plan). Items without a price are skipped. Edit prices on
-              the Equipment tab.
-            </Text>
+            <Text style={styles.muted}>Kit qty × price. Edit prices on Equipment.</Text>
             {equipment.lines.length === 0 ? (
               <Text style={styles.muted}>No priced kit items yet.</Text>
             ) : (
@@ -902,9 +891,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         </TouchableOpacity>
         {otherOpen ? (
           <View style={styles.foldBody}>
-            <Text style={styles.muted}>
-              Manual lines (catering, travel, cars, etc.). Kit-list prices are already in Equipment (auto).
-            </Text>
+            <Text style={styles.muted}>Catering, travel, and the rest. Kit is already in Equipment.</Text>
             {!usingOfflinePack ? (
               <View style={styles.presetRow}>
                 {PRESETS.map((p) => (

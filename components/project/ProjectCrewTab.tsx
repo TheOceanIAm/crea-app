@@ -1647,9 +1647,7 @@ export function ProjectCrewTab({
                   <View style={styles.projectContactSection}>
                     <Text style={styles.modalSectionKicker}>Budget access</Text>
                     <Text style={styles.modalHintSmall}>
-                      They can view and edit this project's internal budget and file receipts, including crew costs and
-                      what is left. Billing, invoices, and the job listing stay with you. They see it after reopening
-                      the project.
+                      Can edit this budget and file receipts. Reopen the project to see it.
                     </Text>
                     <TouchableOpacity
                       style={[styles.modalSave, budgetAccessBusy && styles.dim]}

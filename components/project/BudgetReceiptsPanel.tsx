@@ -268,7 +268,7 @@ export function BudgetReceiptsPanel({ projectId, currency, lines, disabled, onAp
       {open && !disabled ? (
         <View style={styles.form}>
           <Text style={styles.hint}>
-            Photograph a receipt, tag the category, and confirm the amount. It is added to Actual for that category.
+            Snap it, pick a category, confirm the amount.
           </Text>
           <Text style={styles.fieldLabel}>Amount ({currency})</Text>
           <TextInput
