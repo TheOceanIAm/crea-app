@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Linking, StyleSheet, Text, TextInput, Touchab
 import { decode } from 'base64-arraybuffer'
 import * as FileSystem from 'expo-file-system'
 import * as ImagePicker from 'expo-image-picker'
+import { fetchCreaApi } from '@/lib/creaApiFetch'
 import { supabase } from '@/lib/supabase'
 import {
   BUDGET_RECEIPT_BUCKET,
@@ -48,6 +49,9 @@ export function BudgetReceiptsPanel({ projectId, currency, lines, disabled, onAp
   const [category, setCategory] = useState(PRESETS[0])
   const [photo, setPhoto] = useState<{ base64: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [reading, setReading] = useState(false)
+  const [readNote, setReadNote] = useState<string | null>(null)
+  const readGeneration = useRef(0)
   const onReceiptsRef = useRef(onReceipts)
   onReceiptsRef.current = onReceipts
 
@@ -109,6 +113,39 @@ export function BudgetReceiptsPanel({ projectId, currency, lines, disabled, onAp
       return
     }
     setPhoto({ base64 })
+    setReadNote(null)
+    const generation = readGeneration.current + 1
+    readGeneration.current = generation
+    const amountBeforeRead = amount
+    setReading(true)
+    const { data, error } = await fetchCreaApi<{ ok?: boolean; amount?: number; error?: string }>(
+      '/api/app/budget/read-receipt',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          imageBase64: base64,
+          mediaType: 'image/jpeg',
+        }),
+        timeoutMs: 45_000,
+      },
+    )
+    if (readGeneration.current !== generation) return
+    setReading(false)
+    const total = typeof data?.amount === 'number' ? data.amount : null
+    if (total != null && total > 0) {
+      setAmount((current) => (current === amountBeforeRead ? total.toFixed(2) : current))
+      setReadNote(null)
+      return
+    }
+    setReadNote(
+      error === 'timeout'
+        ? 'Reading the total took too long. Type the amount.'
+        : error && error !== 'network_error' && error !== 'missing_web_url' && error !== 'no_session'
+          ? error
+          : 'Could not read the total. Type the amount.',
+    )
   }
 
   const saveReceipt = async () => {
@@ -266,7 +303,10 @@ export function BudgetReceiptsPanel({ projectId, currency, lines, disabled, onAp
               <Text style={styles.secondaryBtnText}>Choose photo</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.hint}>{photo ? 'Photo attached.' : 'Photo is optional.'}</Text>
+          <Text style={styles.hint}>
+            {reading ? 'Reading the total…' : photo ? 'Photo attached.' : 'Photo is optional.'}
+          </Text>
+          {readNote ? <Text style={styles.hint}>{readNote}</Text> : null}
           <TouchableOpacity style={[styles.primaryBtn, saving && styles.dim]} onPress={() => void saveReceipt()} disabled={saving}>
             {saving ? <ActivityIndicator color="#0a0a0a" /> : <Text style={styles.primaryBtnText}>Add to budget</Text>}
           </TouchableOpacity>
