@@ -1,16 +1,21 @@
 import * as FileSystem from 'expo-file-system'
 import * as Print from 'expo-print'
 import {
-  CALL_SHEET_PLACE_ORDER,
   DEFAULT_CALL_SHEET_SAFETY,
-  callSheetDayLabel,
-  formatCallSheetDate,
   parseCallSheet,
   personCallTime,
   personIsCast,
-  personLocation,
   type CallSheetDocument,
 } from '@/lib/callSheet'
+import {
+  buildStudioCallSheetHtml,
+  type StudioCallSheet,
+  type StudioCastRow,
+  type StudioCrewRow,
+  type StudioKeyContact,
+  type StudioLocation,
+  type StudioScheduleRow,
+} from '@/lib/callSheetStudio'
 
 export type CallSheetPdfCrew = {
   key: string
@@ -28,15 +33,23 @@ export function escapeCallSheetHtml(s: string) {
     .replace(/"/g, '&quot;')
 }
 
-function escapeMultiline(s: string) {
-  return escapeCallSheetHtml(s).replace(/\n/g, '<br/>')
+/** Rough department from a free-text role, for grouping the crew list (same as web). */
+export function departmentForRole(role: string): string {
+  const r = role.toLowerCase()
+  const has = (...words: string[]) => words.some((w) => r.includes(w))
+  if (has('director', 'producer', 'production', ' ad', '1st ad', '2nd ad', 'assistant director', 'upm', 'pm', 'coordinator', 'runner', 'pa ', 'script')) return 'Production'
+  if (has('dop', 'dp', 'cinematograph', 'camera', 'ac', 'focus', 'dit', 'steadicam', 'operator', 'video')) return 'Camera'
+  if (has('gaffer', 'spark', 'light', 'electric', 'grip', 'best boy')) return 'Lighting & grip'
+  if (has('sound', 'boom', 'audio', 'mixer')) return 'Sound'
+  if (has('art', 'props', 'set dress', 'designer', 'construction')) return 'Art'
+  if (has('hmu', 'make-up', 'makeup', 'hair', 'mua')) return 'HMU'
+  if (has('wardrobe', 'stylist', 'costume')) return 'Wardrobe'
+  if (has('photo', 'bts')) return 'Photo & BTS'
+  if (has('catering', 'driver', 'location', 'security', 'medic')) return 'Locations & logistics'
+  return 'Crew'
 }
 
-function cell(value: string | null | undefined, fallback = '—') {
-  const t = (value ?? '').trim()
-  return escapeCallSheetHtml(t || fallback)
-}
-
+/** Studio call sheet (lib/callSheetStudio.ts), identical to the web export. */
 export function buildCallSheetHtml(opts: {
   projectTitle: string
   shootDay: string
@@ -48,138 +61,112 @@ export function buildCallSheetHtml(opts: {
   dayNumber?: number | null
   dayCount?: number | null
   advanceLabel?: string | null
+  company?: { name: string; address?: string; logoUrl?: string | null } | null
 }): string {
   const doc = parseCallSheet(opts.callSheet)
-  const dayLabel = callSheetDayLabel(opts.dayNumber ?? null, opts.dayCount ?? null)
   const general = doc.day.general_call.trim()
   const wrap = (opts.wrapTime ?? '').trim()
 
-  const rowsHtml = opts.crew
-    .map((m) => {
-      const name = escapeCallSheetHtml(m.name || 'Member')
-      const role = escapeCallSheetHtml(m.roleLabel)
-      const ov = doc.people[m.key]
-      const call = cell(personCallTime(ov, general))
-      const loc = cell(
-        personLocation(ov, [doc.places.basecamp, opts.locationFallback])
-      )
-      return `<tr><td>${name}</td><td>${role}</td><td>${call}</td><td>${loc}</td></tr>`
-    })
-    .join('')
-
-  const chips = [
-    ['Breakfast', doc.day.breakfast],
-    ['Shoot call', doc.day.shoot_call],
-    ['Lunch', doc.day.lunch],
-    ['Wrap', wrap],
-  ]
+  const keyContacts: StudioKeyContact[] = (
+    [
+      ['UPM', doc.contacts.upm],
+      ['1st AD', doc.contacts.first_ad],
+      ['2nd AD', doc.contacts.second_ad],
+      ['Set medic', [doc.contacts.medic_name, doc.contacts.medic_phone].map((v) => v.trim()).filter(Boolean).join(' · ')],
+    ] as const
+  )
     .filter(([, v]) => v.trim())
-    .map(([k, v]) => `<span class="chip"><b>${escapeCallSheetHtml(k)}</b> ${escapeCallSheetHtml(v)}</span>`)
-    .join('')
-
-  const placesHtml = CALL_SHEET_PLACE_ORDER.map((place) => {
-    const val = doc.places[place.key].trim()
-    return `<div class="place"><div class="place-k">${escapeCallSheetHtml(place.label)}</div><div>${cell(val, place.key === 'hospital' ? 'TBD' : '—')}</div></div>`
-  }).join('')
-
-  const safetyNote = doc.day.safety_note.trim() || DEFAULT_CALL_SHEET_SAFETY
-  const safetyMeeting = doc.day.safety_meeting.trim()
-  const special = doc.special.trim()
-  const deptBits = [
-    ['Camera', doc.departments.camera],
-    ['Sound', doc.departments.sound],
-    ['Wardrobe', doc.departments.wardrobe],
-  ].filter(([, v]) => v.trim())
-  const contacts = [
-    ['UPM', doc.contacts.upm],
-    ['1st AD', doc.contacts.first_ad],
-    ['2nd AD', doc.contacts.second_ad],
-  ].filter(([, v]) => v.trim())
-
-  const notesBlock = opts.notes?.trim()
-    ? `<h2>Notes</h2><div class="notes">${escapeMultiline(opts.notes.trim())}</div>`
-    : ''
-
-  const medic = [doc.contacts.medic_name, doc.contacts.medic_phone].map((v) => v.trim()).filter(Boolean)
-  const medicHtml = medic.length
-    ? `<div class="place"><div class="place-k">Set medic</div><div>${escapeCallSheetHtml(medic.join(' · '))}</div></div>`
-    : ''
-
-  const sceneRows = doc.scenes
-    .map((row) => {
-      const move = row.move.trim() ? `<tr><td colspan="5"><b>Move</b> ${escapeCallSheetHtml(row.move)}</td></tr>` : ''
-      return `<tr><td>${cell(row.scene)}</td><td>${cell(row.int_ext)}</td><td>${cell(row.description)}</td><td>${cell(row.cast)}</td><td>${cell(row.location)}</td></tr>${move}`
+    .map(([role, v]) => {
+      const [name, ...rest] = v.split('·').map((x) => x.trim())
+      return { role, name: name || v.trim(), phone: rest.join(' · ') || undefined }
     })
-    .join('')
-  const scenesHtml = sceneRows
-    ? `<h2>Today's scenes</h2><table><thead><tr><th>Scene</th><th>INT/EXT</th><th>Description</th><th>Cast</th><th>Location</th></tr></thead><tbody>${sceneRows}</tbody></table>`
-    : ''
 
-  const castRows = opts.crew
+  const safety = [
+    doc.day.safety_note.trim() || DEFAULT_CALL_SHEET_SAFETY,
+    doc.day.safety_meeting.trim() ? `Safety meeting: ${doc.day.safety_meeting.trim()}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const setLabel = doc.places.basecamp.trim() || (opts.locationFallback ?? '').trim()
+  const setNote = [
+    doc.places.hmu.trim() ? `HMU: ${doc.places.hmu.trim()}` : '',
+    doc.places.wardrobe.trim() ? `Wardrobe: ${doc.places.wardrobe.trim()}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const locations: StudioLocation[] =
+    setLabel || doc.places.parking.trim() || doc.places.hospital.trim()
+      ? [
+          {
+            set: { name: doc.places.basecamp.trim() ? 'Basecamp' : 'Set', address: setLabel, note: setNote || undefined },
+            parking: doc.places.parking.trim() ? { name: 'Crew parking', address: doc.places.parking.trim() } : undefined,
+            hospital: doc.places.hospital.trim() ? { name: 'Nearest hospital', address: doc.places.hospital.trim() } : undefined,
+          },
+        ]
+      : []
+
+  const schedule: StudioScheduleRow[] = []
+  for (const row of doc.scenes) {
+    schedule.push({ kind: 'scene', start: '', scene: row.scene, intExt: row.int_ext, description: row.description, dayNight: '', cast: row.cast, location: row.location, pages: '', est: '' })
+    if (row.move.trim()) schedule.push({ kind: 'break', start: '', label: 'Move', description: row.move.trim(), est: '' })
+  }
+
+  const cast: StudioCastRow[] = opts.crew
     .filter((m) => personIsCast(doc.people[m.key]))
-    .map((m) => {
-      const person = doc.people[m.key] ?? {}
-      return `<tr><td>${cell(person.cast_no ? String(person.cast_no) : '')}</td><td>${escapeCallSheetHtml(m.name)}</td><td>${cell(person.character)}</td><td>${cell(person.status)}</td><td>${cell(personCallTime(person, general))}</td><td>${cell(person.hmu)}</td><td>${cell(person.wardrobe)}</td><td>${cell(person.ready)}</td><td>${cell(person.location)}</td><td>${cell(person.remarks || person.report)}</td></tr>`
+    .map((m, i) => {
+      const c = doc.people[m.key] ?? {}
+      return {
+        no: c.cast_no ? String(c.cast_no) : String(i + 1),
+        name: m.name || 'Member',
+        character: c.character ?? '',
+        status: c.status ?? '',
+        pickup: c.report ?? '',
+        call: personCallTime(c, general),
+        hmu: c.hmu ?? '',
+        onSet: c.ready ?? '',
+        wrap: '',
+      }
     })
-    .join('')
-  const castHtml = castRows
-    ? `<h2>Cast calls</h2><table><thead><tr><th>#</th><th>Name</th><th>Character</th><th>Status</th><th>Call</th><th>HMU</th><th>Wardrobe</th><th>Ready</th><th>Set</th><th>Note</th></tr></thead><tbody>${castRows}</tbody></table>`
-    : ''
 
-  const bgRows = doc.background
-    .map(
-      (row) =>
-        `<tr><td>${escapeCallSheetHtml(row.label)}</td><td>${cell(row.count ? String(row.count) : '')}</td><td>${cell(row.in)}</td><td>${cell(row.ready)}</td></tr>`
-    )
-    .join('')
-  const bgHtml = bgRows
-    ? `<h2>Extras & stand-ins</h2><table><thead><tr><th>Who</th><th>Qty</th><th>Arrive</th><th>Ready</th></tr></thead><tbody>${bgRows}</tbody></table>`
-    : ''
+  const crew: StudioCrewRow[] = opts.crew
+    .filter((m) => !personIsCast(doc.people[m.key]))
+    .map((m) => ({
+      department: departmentForRole(m.roleLabel),
+      name: m.name || 'Member',
+      role: m.roleLabel,
+      call: personCallTime(doc.people[m.key], general),
+    }))
 
-  const advanceHtml = opts.advanceLabel?.trim()
-    ? `<h2>Next shoot day</h2><div class="notes">${escapeCallSheetHtml(opts.advanceLabel.trim())}</div>`
-    : ''
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
-        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; color:#111; padding:24px; }
-        h1 { font-size:22px; margin:0 0 4px; }
-        h2 { font-size:13px; letter-spacing:0.12em; text-transform:uppercase; margin:22px 0 8px; color:#333; }
-        .sub { color:#555; margin-bottom:6px; font-size:13px; }
-        .call { font-size:28px; font-weight:800; margin:8px 0 12px; }
-        .chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
-        .chip { border:1px solid #ddd; border-radius:8px; padding:6px 10px; font-size:12px; background:#fafafa; }
-        .places { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
-        .place { width:31%; min-width:140px; border:1px solid #ddd; border-radius:8px; padding:8px 10px; font-size:12px; }
-        .place-k { font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:#666; margin-bottom:4px; font-weight:700; }
-        .safety { border:1px solid #111; padding:10px 12px; font-size:12px; margin:12px 0; }
-        table { width:100%; border-collapse:collapse; font-size:13px; }
-        th, td { border:1px solid #ccc; padding:8px 10px; text-align:left; }
-        th { background:#f4f4f4; }
-        .notes { white-space:pre-wrap; font-size:12px; line-height:1.45; border:1px solid #ddd; padding:12px; border-radius:8px; background:#fafafa; }
-        .foot { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; margin-top:18px; }
-      </style></head><body>
-        <h1>${escapeCallSheetHtml(opts.projectTitle)}</h1>
-        <div class="sub">Call sheet · ${escapeCallSheetHtml(formatCallSheetDate(opts.shootDay))}${dayLabel ? ` · ${escapeCallSheetHtml(dayLabel)}` : ''}</div>
-        <div class="call">${cell(general, 'General call TBD')}</div>
-        ${chips ? `<div class="chips">${chips}</div>` : ''}
-        <div class="safety"><b>Safety first.</b> ${escapeCallSheetHtml(safetyNote)}${safetyMeeting ? `<br/>Meeting: ${escapeCallSheetHtml(safetyMeeting)}` : ''}</div>
-        <h2>Locations</h2>
-        <div class="places">${placesHtml}${medicHtml}</div>
-        ${scenesHtml}
-        ${castHtml}
-        ${bgHtml}
-        ${special ? `<h2>Special instructions</h2><div class="notes">${escapeMultiline(special)}</div>` : ''}
-        ${deptBits.length ? `<h2>Department notes</h2><div class="notes">${deptBits.map(([k, v]) => `<b>${escapeCallSheetHtml(k)}:</b> ${escapeMultiline(v)}`).join('<br/>')}</div>` : ''}
-        <h2>Crew calls</h2>
-        <table>
-          <thead><tr><th>Name</th><th>Role</th><th>Call</th><th>Location</th></tr></thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-        ${notesBlock}
-        ${advanceHtml}
-        ${contacts.length ? `<div class="foot">${contacts.map(([k, v]) => `<span><b>${escapeCallSheetHtml(k)}</b> ${escapeCallSheetHtml(v)}</span>`).join('')}</div>` : ''}
-        <p style="margin:28px 0 0;text-align:center;font-size:10px;color:#999;font-family:system-ui,-apple-system,sans-serif">Made with <a href="https://creaservices.de/?ref=callsheet" style="color:#777;text-decoration:none;font-weight:600">CREA</a> · creaservices.de</p>
-      </body></html>`
+  const sheet: StudioCallSheet = {
+    company: { name: opts.company?.name ?? '', address: opts.company?.address, logoDataUrl: opts.company?.logoUrl ?? null },
+    keyContacts,
+    projectTitle: opts.projectTitle,
+    date: opts.shootDay,
+    dayNumber: opts.dayNumber ?? null,
+    dayCount: opts.dayCount ?? null,
+    generalCall: general,
+    safetyNote: safety,
+    times: { crewCall: general, breakfast: doc.day.breakfast, shootingCall: doc.day.shoot_call, lunch: doc.day.lunch, wrap },
+    notice: doc.special.trim() || undefined,
+    locations,
+    schedule,
+    cast,
+    crew,
+    extras: doc.background.map((b) => ({ label: b.label, count: b.count ? String(b.count) : '', arrive: b.in ?? '', ready: b.ready ?? '' })),
+    notes: [
+      ...(
+        [
+          ['Camera', doc.departments.camera],
+          ['Sound', doc.departments.sound],
+          ['Wardrobe', doc.departments.wardrobe],
+        ] as const
+      ).map(([k, v]) => ({ title: `${k} notes`, body: v.trim() })),
+      { title: 'Notes / wrap', body: (opts.notes ?? '').trim() },
+      { title: 'Next shoot day', body: (opts.advanceLabel ?? '').trim() },
+    ],
+  }
+  return buildStudioCallSheetHtml(sheet)
 }
 
 export async function generateCallSheetPdfFile(html: string, destPath: string): Promise<boolean> {
