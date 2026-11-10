@@ -178,6 +178,7 @@ export function buildCallSheetHtml(opts: {
         ${notesBlock}
         ${advanceHtml}
         ${contacts.length ? `<div class="foot">${contacts.map(([k, v]) => `<span><b>${escapeCallSheetHtml(k)}</b> ${escapeCallSheetHtml(v)}</span>`).join('')}</div>` : ''}
+        <p style="margin:28px 0 0;text-align:center;font-size:10px;color:#999;font-family:system-ui,-apple-system,sans-serif">Made with <a href="https://creaservices.de/?ref=callsheet" style="color:#777;text-decoration:none;font-weight:600">CREA</a> · creaservices.de</p>
       </body></html>`
 }
 
