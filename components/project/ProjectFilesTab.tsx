@@ -18,6 +18,7 @@ import { FileText, ImageIcon, Upload } from 'lucide-react-native'
 import { useFocusEffect } from 'expo-router'
 import { requireOptionalNativeModule } from 'expo-modules-core'
 import { supabase } from '@/lib/supabase'
+import { fetchCreaApi } from '@/lib/creaApiFetch'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
@@ -277,19 +278,30 @@ export function ProjectFilesTab({ projectId, jobId, userId }: Props) {
       return
     }
 
-    const { error: insErr } = await supabase.from('job_attachments').insert({
-      job_id: jobId,
-      uploaded_by: userId,
-      storage_path: path,
-      file_name: baseName,
-      file_size: byteLength,
-      content_type: mime || null,
-    })
-    if (insErr) {
+    const { data: inserted, error: insErr } = await supabase
+      .from('job_attachments')
+      .insert({
+        job_id: jobId,
+        uploaded_by: userId,
+        storage_path: path,
+        file_name: baseName,
+        file_size: byteLength,
+        content_type: mime || null,
+      })
+      .select('id')
+      .single()
+    if (insErr || !inserted) {
       await supabase.storage.from(JOB_ATTACHMENTS_BUCKET).remove([path])
-      Alert.alert('Upload failed', insErr.message)
+      Alert.alert('Upload failed', insErr?.message || 'Could not save file metadata.')
       setBusy(false)
       return
+    }
+    const attachmentId = String((inserted as { id?: string }).id ?? '')
+    if (attachmentId) {
+      void fetchCreaApi(`/api/job-attachments/${attachmentId}/index`, {
+        method: 'POST',
+        timeoutMs: 20_000,
+      })
     }
 
     void load()

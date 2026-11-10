@@ -13,7 +13,8 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router'
-import { ChevronLeft, ImageDown, Share2 } from 'lucide-react-native'
+import { ChevronDown, ChevronLeft, ImageDown, Share2 } from 'lucide-react-native'
+import { ProjectWorkspaceSearch } from '@/components/project/ProjectWorkspaceSearch'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { useJobStoryShare } from '@/components/JobStoryExporter'
 import { jobShareUrl } from '@/lib/shareLinks'
@@ -145,6 +146,8 @@ export default function ProjectWorkspaceScreen() {
   const [sunPlannerLockedHint, setSunPlannerLockedHint] = useState<string | null>(null)
   const [isPrivateWorkspace, setIsPrivateWorkspace] = useState(Boolean(bootShell?.isPrivateWorkspace))
   const [jobShareOpen, setJobShareOpen] = useState(false)
+  const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false)
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const { shareStory, busy: storyBusy, holder: storyHolder } = useJobStoryShare()
   /** `jobs.company_id` — same owner check as web ManageJobClient (`isOwner`). */
   const [jobOwnerCompanyId, setJobOwnerCompanyId] = useState<string | null>(
@@ -1070,44 +1073,64 @@ export default function ProjectWorkspaceScreen() {
   const statusKey = projectStatusVariant(project.status)
   const pillTheme = PROJECT_STATUS_PILL[statusKey]
 
+  const statusEditable = Boolean(linkedJobId && canEditJobProjectStatus)
   const statsRow = (
-    <View style={styles.statsRow}>
-      {viewerIsCompanyOnProject && (project.job_id || isPrivateWorkspace) ? (
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Applicants</Text>
-          <Text style={styles.statValue}>{pipelineStatCount}</Text>
-          <Text style={styles.statSub}>in crew pipeline</Text>
-        </View>
-      ) : null}
-      <View style={styles.statCard}>
-        <Text style={styles.statLabel}>Milestones</Text>
-        <Text style={styles.statValue}>
-          {project.milestones_completed}/{project.milestones_total}
-        </Text>
-        <Text style={styles.statSub}>completed</Text>
-      </View>
-      <View style={styles.statCard}>
-        <Text style={styles.statLabel}>Budget</Text>
-        <Text style={styles.statValueBudget} numberOfLines={2}>
-          {budgetLine}
-        </Text>
-        <Text style={styles.statSub}>total</Text>
-      </View>
-      <View style={styles.statCard}>
-        <Text style={styles.statLabel}>Status</Text>
-        <View
-          style={[
-            styles.statusPill,
-            {
-              backgroundColor: pillTheme.backgroundColor,
-              borderColor: pillTheme.borderColor,
-            },
-          ]}
-        >
-          <Text style={[styles.statusPillText, { color: pillTheme.color }]}>
-            {projectStatusDisplayLabel(project.status)}
+    <View style={[styles.statsBlock, statusMenuOpen && styles.statsBlockOpen]}>
+      <View style={styles.compactRow}>
+        {viewerIsCompanyOnProject && (project.job_id || isPrivateWorkspace) ? (
+          <View style={styles.compactCard}>
+            <Text style={styles.statLabel}>Applicants</Text>
+            <Text style={styles.statValue}>{pipelineStatCount}</Text>
+          </View>
+        ) : null}
+        <View style={styles.compactCard}>
+          <Text style={styles.statLabel}>Milestones</Text>
+          <Text style={styles.statValue}>
+            {project.milestones_completed}/{project.milestones_total}
           </Text>
         </View>
+        <View style={styles.compactCard}>
+          <Text style={styles.statLabel}>Status</Text>
+          <TouchableOpacity
+            style={styles.statusMenuBtn}
+            activeOpacity={statusEditable ? 0.7 : 1}
+            disabled={!statusEditable || savingJobPhaseStatus}
+            onPress={() => setStatusMenuOpen((open) => !open)}
+          >
+            <Text style={[styles.statusMenuValue, { color: pillTheme.color }]} numberOfLines={1}>
+              {savingJobPhaseStatus ? 'Saving…' : projectStatusDisplayLabel(project.status)}
+            </Text>
+            {statusEditable ? (
+              <ChevronDown size={14} color={pillTheme.color} strokeWidth={ICON_STROKE} />
+            ) : null}
+          </TouchableOpacity>
+        </View>
+      </View>
+      {statusMenuOpen && statusEditable ? (
+        <View style={styles.statusMenu}>
+          {JOB_PROJECT_PHASES.map((phase) => {
+            const active = (project.status || '').toLowerCase() === phase
+            const label = phase === 'recruiting' ? 'Recruiting' : phase === 'active' ? 'Active' : 'Completed'
+            return (
+              <TouchableOpacity
+                key={phase}
+                style={[styles.statusMenuItem, active && styles.statusMenuItemActive]}
+                onPress={() => {
+                  setStatusMenuOpen(false)
+                  if (!active) void persistJobProjectPhase(phase)
+                }}
+              >
+                <Text style={[styles.statusMenuItemText, active && styles.statusMenuItemTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            )
+          })}
+        </View>
+      ) : null}
+      <View style={styles.budgetCard}>
+        <Text style={styles.statLabel}>Budget</Text>
+        <Text style={styles.statValueBudget} numberOfLines={1}>
+          {budgetLine}
+        </Text>
       </View>
     </View>
   )
@@ -1142,41 +1165,49 @@ export default function ProjectWorkspaceScreen() {
         style={styles.keyboardWrap}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={12}
+        enabled={!workspaceSearchOpen}
       >
-        <View style={styles.topRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={exitProjectWorkspace}>
-            <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
-            <Text style={styles.backLabel}>Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {project.title}
-          </Text>
-          {canShareListing ? (
-            <View style={styles.headerActions}>
-              <TouchableOpacity
-                style={styles.headerIconBtn}
-                onPress={openListingStory}
-                disabled={storyBusy}
-                hitSlop={8}
-                accessibilityLabel="Download story image"
-              >
-                {storyBusy ? (
-                  <ActivityIndicator color="#FFDC00" size="small" />
-                ) : (
-                  <ImageDown size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.headerIconBtn}
-                onPress={() => setJobShareOpen(true)}
-                hitSlop={8}
-                accessibilityLabel="Share listing"
-              >
-                <Share2 size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
-              </TouchableOpacity>
-            </View>
-          ) : null}
-        </View>
+        <ProjectWorkspaceSearch
+          projectId={project.id}
+          jobId={linkedJobId}
+          title={project.title}
+          includeMessages={!isPrivateWorkspace && !workspaceOnlyPlan}
+          onOpenTab={setTab}
+          onOpenChange={setWorkspaceSearchOpen}
+          leading={
+            <TouchableOpacity style={styles.backBtn} onPress={exitProjectWorkspace}>
+              <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
+              <Text style={styles.backLabel}>Back</Text>
+            </TouchableOpacity>
+          }
+          trailing={
+            canShareListing ? (
+              <>
+                <TouchableOpacity
+                  style={styles.headerIconBtn}
+                  onPress={openListingStory}
+                  disabled={storyBusy}
+                  hitSlop={8}
+                  accessibilityLabel="Download story image"
+                >
+                  {storyBusy ? (
+                    <ActivityIndicator color="#FFDC00" size="small" />
+                  ) : (
+                    <ImageDown size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.headerIconBtn}
+                  onPress={() => setJobShareOpen(true)}
+                  hitSlop={8}
+                  accessibilityLabel="Share listing"
+                >
+                  <Share2 size={20} color="#FFDC00" strokeWidth={ICON_STROKE} />
+                </TouchableOpacity>
+              </>
+            ) : null
+          }
+        />
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll}>
           <View style={styles.tabRow}>
@@ -1302,39 +1333,6 @@ export default function ProjectWorkspaceScreen() {
               automaticallyAdjustKeyboardInsets
             >
               {tab === 'overview' ? statsRow : null}
-
-              {tab === 'overview' && linkedJobId ? (
-                <View style={styles.jobPhaseCard}>
-                  <Text style={styles.scheduleTitle}>Project status</Text>
-                  <Text style={styles.scheduleSub}>
-                    Matches the web job workspace (Recruiting → Active → Completed).
-                  </Text>
-                  <View style={styles.statusRow}>
-                    {JOB_PROJECT_PHASES.map((s) => {
-                      const active = (project.status || '').toLowerCase() === s
-                      const locked = !canEditJobProjectStatus || savingJobPhaseStatus
-                      const label =
-                        s === 'recruiting' ? 'Recruiting' : s === 'active' ? 'Active' : 'Completed'
-                      return (
-                        <TouchableOpacity
-                          key={s}
-                          style={[styles.statusChip, active && styles.statusChipActive, locked && styles.statusChipLocked]}
-                          onPress={() => {
-                            if (!canEditJobProjectStatus || savingJobPhaseStatus) return
-                            void persistJobProjectPhase(s)
-                          }}
-                          disabled={locked}
-                        >
-                          <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>{label}</Text>
-                        </TouchableOpacity>
-                      )
-                    })}
-                  </View>
-                  {!canEditJobProjectStatus ? (
-                    <Text style={styles.scheduleLockedHint}>Only the job owner can change this.</Text>
-                  ) : null}
-                </View>
-              ) : null}
 
             {tab === 'overview' && !workspaceOnlyPlan ? (
               <ProjectOverviewProductionWindow
@@ -1578,24 +1576,52 @@ const styles = StyleSheet.create({
   statusChipTextActive: { color: '#0a0a0a' },
   statusChipLocked: { opacity: 0.55 },
   overviewContentInput: { minHeight: 120 },
-  statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
-  statCard: {
-    width: '48%',
-    flexGrow: 1,
+  statsBlock: { marginBottom: 16, zIndex: 5 },
+  statsBlockOpen: { zIndex: 20 },
+  compactRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8, marginBottom: 8 },
+  compactCard: {
+    flex: 1,
     backgroundColor: '#111',
-    borderRadius: 14,
-    padding: 14,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    minHeight: 58,
+  },
+  budgetCard: {
+    backgroundColor: '#111',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
   },
   statLabel: {
     fontSize: 9,
     color: 'rgba(255,255,255,0.35)',
-    letterSpacing: 1.2,
-    marginBottom: 6,
+    letterSpacing: 1.1,
+    marginBottom: 2,
     textTransform: 'uppercase',
   },
-  statValue: { fontSize: 22, fontWeight: '900', color: '#FFDC00' },
+  statValue: { fontSize: 16, fontWeight: '800', color: '#FFDC00' },
+  statusMenuBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
+  statusMenuValue: { flexShrink: 1, fontSize: 15, fontWeight: '800' },
+  statusMenu: {
+    alignSelf: 'flex-end',
+    width: 148,
+    marginTop: -2,
+    marginBottom: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#1a1a1a',
+    overflow: 'hidden',
+  },
+  statusMenuItem: { paddingHorizontal: 10, paddingVertical: 9 },
+  statusMenuItemActive: { backgroundColor: 'rgba(255,220,0,0.12)' },
+  statusMenuItemText: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '700' },
+  statusMenuItemTextActive: { color: '#FFDC00' },
   statValueBudget: {
     fontSize: 15,
     fontWeight: '800',

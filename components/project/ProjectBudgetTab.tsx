@@ -15,6 +15,7 @@ import { supabase } from '@/lib/supabase'
 import {
   budgetVarianceTone,
   computeCrewSpendLines,
+  crewAutoWithTimesheet,
   computeCurrentCrewCost,
   computeCurrentHeadroom,
   computeCurrentOtherSpend,
@@ -311,6 +312,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
   }, [load, projectId])
 
   const crew = useMemo(() => computeCrewSpendLines(members, currency), [members, currency])
+  const crewAuto = useMemo(() => crewAutoWithTimesheet(crew.lines, sheetEntries), [crew.lines, sheetEntries])
   const equipment = useMemo(() => computeEquipmentSpend(equipmentRows), [equipmentRows])
   const lineTotals = useMemo(
     () =>
@@ -347,7 +349,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
   const currentTone = budgetVarianceTone(currentHeadroom)
   const currentProduction =
     productionCapNum != null ? Math.round((productionCapNum - currentCrew.projected) * 100) / 100 : null
-  const wrapUpVariance = computeWrapUpVariance(totalBudgetNum, crew.total, otherSpent, equipment.total)
+  const wrapUpVariance = computeWrapUpVariance(totalBudgetNum, currentCrew.projected, otherSpent, equipment.total)
   const wrapUpTone = budgetVarianceTone(wrapUpVariance)
   const remainingProduction =
     productionCapNum != null ? Math.round((productionCapNum - crew.total) * 100) / 100 : null
@@ -389,6 +391,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         otherPlanned,
         otherSpent,
         crewBookedTotal: crew.total,
+        crewActualTotal: currentCrew.projected,
         currenciesMixed: crew.currenciesMixed,
         equipmentPeriod,
         crewLines: crew.lines.map((line) => ({
@@ -680,7 +683,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         onToggle={() => setCurrentOpen((v) => !v)}
         cardStyle={currentTone === 'over' ? styles.wrapCardOver : currentTone === 'under' ? styles.wrapCardUnder : undefined}
       >
-        <Text style={styles.muted}>Logged hours, plus days still booked.</Text>
+        <Text style={styles.muted}>Hours replace the day rate. People without a timesheet stay on booked days.</Text>
         {!hideCrewBudgeting ? (
           <>
             <View style={styles.snapRow}>
@@ -739,8 +742,8 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         <Text style={styles.muted}>After the shoot. Uses actual spend.</Text>
         {!hideCrewBudgeting ? (
           <View style={styles.snapRow}>
-            <Text style={styles.snapLabel}>Crew (booked)</Text>
-            <Text style={styles.snapVal}>{formatMoneyAmount(crew.total, currency)}</Text>
+            <Text style={styles.snapLabel}>Crew</Text>
+            <Text style={styles.snapVal}>{formatMoneyAmount(currentCrew.projected, currency)}</Text>
           </View>
         ) : null}
         <View style={styles.snapRow}>
@@ -756,7 +759,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
             <View style={styles.snapRow}>
               <Text style={styles.snapLabel}>Committed total</Text>
               <Text style={styles.snapVal}>
-                {formatMoneyAmount(crew.total + equipment.total + otherSpent, currency)}
+                {formatMoneyAmount(currentCrew.projected + equipment.total + otherSpent, currency)}
               </Text>
             </View>
             <View style={styles.snapRow}>
@@ -789,7 +792,7 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
         >
           <View style={styles.foldHeaderText}>
             <Text style={styles.foldTitle}>Crew (auto)</Text>
-            <Text style={styles.foldAmount}>{formatMoneyAmount(crew.total, currency)}</Text>
+            <Text style={styles.foldAmount}>{formatMoneyAmount(crewAuto.total, currency)}</Text>
           </View>
           <ChevronDown
             size={18}
@@ -803,11 +806,13 @@ export function ProjectBudgetTab({ projectId, project, hideCrewBudgeting = false
             {crew.currenciesMixed ? (
               <Text style={styles.warn}>Mixed currencies. Totals may be off.</Text>
             ) : null}
-            <Text style={styles.muted}>Booked days × day rate. Half-days use the half-day rate.</Text>
-            {crew.lines.length === 0 ? (
+            <Text style={styles.muted}>
+              Booked days × day rate, until hours are logged. Then this line is €0 and the timesheet is the cost.
+            </Text>
+            {crewAuto.lines.length === 0 ? (
               <Text style={styles.muted}>No booked days or rates yet.</Text>
             ) : (
-              crew.lines.map((ln) => (
+              crewAuto.lines.map((ln) => (
                 <View key={ln.profileIdKey} style={styles.crewRow}>
                   <Text style={styles.crewName}>{ln.displayName}</Text>
                   <View style={styles.crewDetailRow}>

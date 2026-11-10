@@ -52,6 +52,8 @@ export type BudgetStatusExportInput = {
   otherPlanned: number;
   otherSpent: number;
   crewBookedTotal: number;
+  /** Timesheet-aware crew cost. Falls back to the booked day-rate total. */
+  crewActualTotal?: number;
   currenciesMixed: boolean;
   equipmentPeriod?: string | null;
   crewLines: BudgetStatusCrewLine[];
@@ -275,7 +277,12 @@ export function buildBudgetStatusDocument(input: BudgetStatusExportInput): Budge
   });
 
   const wrapRows: BudgetStatusRow[] = [];
-  if (!input.hideCrew) wrapRows.push({ label: "Crew (booked)", value: money(input.crewBookedTotal, currency) });
+  if (!input.hideCrew) {
+    wrapRows.push({
+      label: "Crew",
+      value: money(input.crewActualTotal ?? input.crewBookedTotal, currency),
+    });
+  }
   wrapRows.push(
     { label: "Equipment (kit list)", value: money(input.equipmentTotal, currency) },
     { label: "Other expenses (actual)", value: money(input.otherSpent, currency) },

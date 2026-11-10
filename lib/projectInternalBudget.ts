@@ -276,9 +276,33 @@ export function visibleTimesheetDates(person: TimesheetPerson, entries: readonly
   return [...dates].sort()
 }
 
+/** Person keys that already have logged hours. Their day rate no longer applies. */
+export function timesheetPersonKeys(entries: readonly TimesheetHourEntry[]): Set<string> {
+  const keys = new Set<string>()
+  for (const entry of entries) {
+    const key = entry.personKey.trim()
+    if (key && entry.hours > 0) keys.add(key)
+  }
+  return keys
+}
+
 /**
- * During the shoot: logged hours replace that day's booked cost.
- * Booked days with no hours stay on the plan. Extra logged days are added.
+ * Crew (auto) is day rate × booked days until that person logs hours.
+ * Then their line is €0 and only the timesheet hours count.
+ */
+export function crewAutoWithTimesheet(
+  lines: CrewSpendLine[],
+  entries: readonly TimesheetHourEntry[],
+): { lines: CrewSpendLine[]; total: number } {
+  const switched = timesheetPersonKeys(entries)
+  const next = lines.map((line) => (switched.has(line.profileIdKey) ? { ...line, subtotal: 0 } : line))
+  const total = Math.round(next.reduce((sum, line) => sum + line.subtotal, 0) * 100) / 100
+  return { lines: next, total }
+}
+
+/**
+ * Logged hours replace that person's day rate entirely.
+ * People with no timesheet stay on booked days. Extra logged days are added.
  */
 export function computeCurrentCrewCost(
   rows: CrewSpendMemberRow[],
@@ -304,9 +328,11 @@ export function computeCurrentCrewCost(
     if (!key) continue
     const { dayRate, halfDayRate } = crewRates(row)
     const loggedDates = hoursByPerson.get(key) ?? new Map<string, number>()
-    for (const slot of memberBookedSlotsFromRow(row)) {
-      if (loggedDates.has(slot.date)) continue
-      open += crewCostForBookedUnits(slot.units, dayRate, halfDayRate)
+    if (loggedDates.size === 0) {
+      for (const slot of memberBookedSlotsFromRow(row)) {
+        open += crewCostForBookedUnits(slot.units, dayRate, halfDayRate)
+      }
+      continue
     }
     for (const hours of loggedDates.values()) {
       loggedHours += hours
