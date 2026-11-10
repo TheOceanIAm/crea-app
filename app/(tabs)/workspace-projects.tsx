@@ -692,8 +692,8 @@ export default function WorkspaceProjectsScreen() {
             </Text>
             <Text style={styles.modalSub}>
               {viewerRole === 'company'
-                ? 'Private workspace for your team. It will not appear as a public listing, and you cannot invite external freelancers from the marketplace.'
-                : 'Creates a private workspace only. It will not appear on the Jobs tab for other users.'}
+                ? 'Your team\'s workspace for one production. Brief, crew, call sheet and budget in one place. Only people you invite can see it.'
+                : 'Your own workspace for one job. Brief, crew, call sheet and invoice in one place. Only people you invite can see it.'}
             </Text>
 
             <Text style={styles.fieldLabel}>Project name</Text>
@@ -701,7 +701,7 @@ export default function WorkspaceProjectsScreen() {
               style={styles.input}
               value={title}
               onChangeText={setTitle}
-              placeholder="e.g. Brand film — spring"
+              placeholder="e.g. Brand film, spring"
               placeholderTextColor="rgba(255,255,255,0.3)"
               returnKeyType="next"
             />
@@ -785,7 +785,7 @@ export default function WorkspaceProjectsScreen() {
               onChangeText={setNotes}
               multiline
               textAlignVertical="top"
-              placeholder="Short context for yourself — you can add more in the workspace."
+              placeholder="Short context for yourself. You can add more in the workspace."
               placeholderTextColor="rgba(255,255,255,0.3)"
             />
 
