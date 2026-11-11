@@ -1903,7 +1903,7 @@ export default function ProfileScreen() {
               {!company ? (
                 <View style={styles.sectionCard}>
                   <Text style={styles.cardTitle}>Portfolio projects</Text>
-                  <Text style={styles.cardSubtitle}>Highlights on your profile.</Text>
+                  <Text style={styles.cardSubtitle}>Highlights on your profile. YouTube and Vimeo links play in CREA.</Text>
 
                   {portfolioProjects.map((p, i) => (
                     <View key={`${p.title}-${i}`} style={styles.projectRow}>

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react-native'
 import { AvailabilityMonthPreview } from '@/components/profile/AvailabilityMonthPreview'
 import { BookFreelancerModal } from '@/components/profile/BookFreelancerModal'
+import { PortfolioVideoModal } from '@/components/profile/PortfolioVideoModal'
 import { ShareSheetModal } from '@/components/ShareSheetModal'
 import { SocialLinkButton } from '@/components/SocialLinkButton'
 import { parseAvailabilityCalendar } from '@/lib/availabilityCalendar'
@@ -25,6 +26,8 @@ import { buildProfileSocialLinks } from '@/lib/profileSocialLinks'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { canFreelancerCreatePrivateProjects, isFreelancerProPlanTier, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
 import { enrichPortfolioProjectsThumbnails } from '@/lib/freelancerPortfolioTable'
+import { nativeBinaryHasWebView } from '@/lib/nativeWebView'
+import { portfolioVideoEmbed, type PortfolioVideoEmbed } from '@/lib/portfolioVideoEmbed'
 import { parsePortfolioProjects, type PortfolioProject } from '@/lib/profileSettingsExtras'
 import { profileShareUrl } from '@/lib/shareLinks'
 import { supabase } from '@/lib/supabase'
@@ -103,6 +106,9 @@ export function FreelancerPublicProfileContent({
   >([])
   const [companyJobsLoading, setCompanyJobsLoading] = useState(false)
   const [visibleProjectCount, setVisibleProjectCount] = useState(6)
+  const [playingProject, setPlayingProject] = useState<{ title: string; embed: PortfolioVideoEmbed } | null>(
+    null
+  )
 
   const parsedProjects = useMemo(
     () => parsePortfolioProjects(profileNorm.portfolio_projects),
@@ -269,8 +275,14 @@ export function FreelancerPublicProfileContent({
 
   const renderWorkTile = (proj: PortfolioProject, i: number, tileStyle: object) => {
     const sub = projectSubtitle(proj)
+    const link = strTrim(proj.link)
+    const embed = portfolioVideoEmbed(link)
     const openProject = () => {
-      const u = strTrim(proj.link)
+      if (embed && Platform.OS !== 'web' && nativeBinaryHasWebView()) {
+        setPlayingProject({ title: proj.title, embed })
+        return
+      }
+      const u = embed?.watchUrl || link
       if (u) Linking.openURL(u).catch(() => {})
     }
     return (
@@ -279,18 +291,25 @@ export function FreelancerPublicProfileContent({
         style={[styles.workTile, tileStyle]}
         activeOpacity={0.85}
         onPress={openProject}
-        disabled={!strTrim(proj.link)}
+        disabled={!link}
       >
-        {proj.image_url ? (
-          <Image
-            source={{ uri: proj.image_url }}
-            style={[styles.workThumb, workThumbStyle, isTablet && styles.workThumbTablet]}
-          />
-        ) : (
-          <View style={[styles.workThumbPlaceholder, workThumbStyle, isTablet && styles.workThumbTablet]}>
-            <Text style={styles.workThumbLetter}>{proj.title.charAt(0).toUpperCase() || '•'}</Text>
-          </View>
-        )}
+        <View style={styles.workMedia}>
+          {proj.image_url ? (
+            <Image
+              source={{ uri: proj.image_url }}
+              style={[styles.workThumb, workThumbStyle, isTablet && styles.workThumbTablet]}
+            />
+          ) : (
+            <View style={[styles.workThumbPlaceholder, workThumbStyle, isTablet && styles.workThumbTablet]}>
+              <Text style={styles.workThumbLetter}>{proj.title.charAt(0).toUpperCase() || '•'}</Text>
+            </View>
+          )}
+          {embed ? (
+            <View style={styles.playBadge} pointerEvents="none">
+              <Text style={styles.playBadgeText}>▶</Text>
+            </View>
+          ) : null}
+        </View>
         <Text style={[styles.workTileTitle, isTablet && styles.workTileTitleTablet]} numberOfLines={2}>
           {proj.title}
         </Text>
@@ -678,6 +697,14 @@ export function FreelancerPublicProfileContent({
 
   return (
     <View style={scrollMode === 'inner' ? styles.root : styles.embedRoot}>
+      {playingProject ? (
+        <PortfolioVideoModal
+          title={playingProject.title}
+          embed={playingProject.embed}
+          onClose={() => setPlayingProject(null)}
+        />
+      ) : null}
+
       <ShareSheetModal
         visible={shareOpen}
         onClose={() => setShareOpen(false)}
@@ -988,6 +1015,9 @@ const styles = StyleSheet.create({
   workTile: {
     marginBottom: 2,
   },
+  workMedia: {
+    width: '100%',
+  },
   workThumb: {
     width: '100%',
     aspectRatio: 1,
@@ -995,6 +1025,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#222',
     marginBottom: 0,
   },
+  playBadge: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFDC00',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playBadgeText: { color: '#0a0a0a', fontSize: 11, marginLeft: 1 },
   workThumbTablet: {
     borderRadius: 6,
   },
