@@ -22,6 +22,7 @@ import {
   getCreaWebRegisterUrl,
 } from '@/lib/iosAppStoreCompliance'
 import { isMeaningfulProfileName, PROFILE_DISPLAY_NAME_MIN } from '@/lib/resolveProfileDisplayName'
+import { CreaWordmark } from '@/components/CreaWordmark'
 import { PasswordField } from '@/components/PasswordField'
 
 function RegisterIosWebOnly() {
@@ -31,7 +32,7 @@ function RegisterIosWebOnly() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.inner}>
-        <Text style={styles.logo}>CREA</Text>
+        <CreaWordmark style={styles.logo} />
         <Text style={[styles.subtitle, { marginBottom: 32 }]}>
           Create your account on creaservices.de
         </Text>
@@ -132,7 +133,7 @@ function RegisterForm() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.inner}>
-        <Text style={styles.logo}>CREA</Text>
+        <CreaWordmark style={styles.logo} />
         {showPurchaseBanner ? (
           <View style={styles.purchaseBanner}>
             <Text style={styles.purchaseBannerText}>
@@ -222,10 +223,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
   inner: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
   logo: {
-    fontSize: 52,
-    color: '#FFDC00',
-    fontWeight: '900',
-    letterSpacing: 6,
+    alignSelf: 'flex-start',
     marginBottom: 8,
   },
   subtitle: {
