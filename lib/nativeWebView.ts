@@ -26,5 +26,8 @@ function installedRuntimeVersion(): string {
 
 export function nativeBinaryHasWebView(): boolean {
   if (Platform.OS !== 'ios') return true
+  // Dev clients ship WebView, but local Expo.plist leaves expo-updates disabled,
+  // so runtimeVersion is empty and the store-binary gate would hide the map.
+  if (__DEV__) return true
   return versionAtLeast(installedRuntimeVersion(), 1, 0, 12)
 }
