@@ -33,7 +33,7 @@ else
   echo '[crea-app] Metro already running on http://127.0.0.1:8081'
 fi
 
-open -a Simulator 2>/dev/null || true
+bash "$ROOT/scripts/open-simulator-gui.sh" "$IPHONE_ID"
 xcrun simctl boot "$IPHONE_ID" 2>/dev/null || true
 
 if ! app_installed; then

@@ -29,7 +29,7 @@ EOF
   done
 fi
 
-open -a Simulator 2>/dev/null || true
+bash "$ROOT/scripts/open-simulator-gui.sh" "$IPAD_ID"
 xcrun simctl boot "$IPAD_ID" 2>/dev/null || true
 
 if [ "$(device_family 2>/dev/null || echo missing)" != "universal" ]; then

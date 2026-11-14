@@ -37,7 +37,7 @@ if ! xcrun simctl list devices available | grep -F "$DEVICE" >/dev/null 2>&1; th
 fi
 
 xcrun simctl boot "$DEVICE" 2>/dev/null || true
-open -a Simulator
+bash "$ROOT/scripts/open-simulator-gui.sh"
 sleep 2
 
 if ! xcrun simctl list devices booted | grep -q Booted; then
