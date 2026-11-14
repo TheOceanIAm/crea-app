@@ -4,6 +4,7 @@ import { type PropsWithChildren, useEffect, useState } from 'react'
 import { Linking, Alert, Platform, StyleSheet, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SubscriptionPaywallGate } from '@/components/SubscriptionPaywallGate'
+import { LastSeenPing } from '@/components/LastSeenPing'
 import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
 import * as Notifications from 'expo-notifications'
 import { Stack, useRouter } from 'expo-router'
@@ -166,6 +167,7 @@ export default function RootLayout() {
           <QueryClientProvider client={queryClient}>
           <BootstrapAuthGate>
           <AuthDeepLinkBridge />
+          <LastSeenPing />
           <EasUpdateBootstrap />
           <SubscriptionPaywallGate />
           {Platform.OS !== 'web' ? <PushNotificationRouter /> : null}
