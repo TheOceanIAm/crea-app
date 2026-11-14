@@ -87,6 +87,7 @@ function RegisterForm() {
         data: {
           name: trimmedName,
           full_name: trimmedName,
+          signup_platform: 'ios',
         },
       },
     })
