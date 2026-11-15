@@ -39,6 +39,7 @@ begin
           from public.profiles pr
           inner join auth.users u on u.id = pr.id
           where public._ceo_is_platform_profile(pr.id, pr.role::text, pr.beta_invite)
+            and coalesce(pr.is_internal, false) = false
             and (
             q = ''
             or pr.name ilike '%' || q || '%'
@@ -95,6 +96,7 @@ begin
           left join public.company_profiles cp on cp.id = pr.id
           where lower(trim(coalesce(pr.role, ''))) = 'company'
             and coalesce(pr.beta_invite, false) = false
+            and coalesce(pr.is_internal, false) = false
             and (
               q = ''
               or pr.name ilike '%' || q || '%'

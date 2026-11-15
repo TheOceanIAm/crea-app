@@ -8,7 +8,22 @@ import {
   formatCatalogPrice,
 } from '@/lib/planCatalogPrices'
 
-/** Real platform users: freelancer + company with login, excluding beta testers and CEO-as-freelancer. */
+function isMissingInternalColumn(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false
+  const message = error.message ?? ''
+  if (!message.toLowerCase().includes('is_internal')) return false
+  return error.code === '42703' || /does not exist|schema cache|could not find/i.test(message)
+}
+
+async function withoutInternalAccounts<T extends { error: { message?: string; code?: string } | null }>(
+  run: (excludeInternal: boolean) => PromiseLike<T>
+): Promise<T> {
+  const first = await run(true)
+  if (first.error && isMissingInternalColumn(first.error)) return run(false)
+  return first
+}
+
+/** Real platform users: freelancer + company with login, excluding beta testers, CEO-as-freelancer, and internal accounts. */
 export type CeoPlatformUserStats = {
   allUsers: number
   newUsers: number
@@ -43,22 +58,19 @@ export async function loadCeoPlatformUserStats(
   const ceoIds = new Set(getAllCeoUserIds())
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
-  let freelancersQ = supabase
-    .from('profiles')
-    .select('id', { count: 'exact', head: true })
-    .eq('role', 'freelancer')
-  for (const id of ceoIds) {
-    freelancersQ = freelancersQ.neq('id', id)
-  }
-
-  let newFreelancersQ = supabase
-    .from('profiles')
-    .select('id', { count: 'exact', head: true })
-    .eq('role', 'freelancer')
-    .eq('beta_invite', false)
-    .gte('created_at', weekAgo)
-  for (const id of ceoIds) {
-    newFreelancersQ = newFreelancersQ.neq('id', id)
+  const countProfiles = (
+    role: 'freelancer' | 'company',
+    excludeInternal: boolean,
+    opts?: { beta?: boolean; since?: string; excludeCeo?: boolean }
+  ) => {
+    let query = supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', role)
+    if (excludeInternal) query = query.eq('is_internal', false)
+    if (opts?.beta != null) query = query.eq('beta_invite', opts.beta)
+    if (opts?.since) query = query.gte('created_at', opts.since)
+    if (opts?.excludeCeo) {
+      for (const id of ceoIds) query = query.neq('id', id)
+    }
+    return query
   }
 
   const [
@@ -69,25 +81,20 @@ export async function loadCeoPlatformUserStats(
     { count: newFreelancerN },
     { count: newCompanyN },
   ] = await Promise.all([
-    freelancersQ,
-    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'company'),
-    supabase
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('role', 'freelancer')
-      .eq('beta_invite', true),
-    supabase
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('role', 'company')
-      .eq('beta_invite', true),
-    newFreelancersQ,
-    supabase
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('role', 'company')
-      .eq('beta_invite', false)
-      .gte('created_at', weekAgo),
+    withoutInternalAccounts((excludeInternal) =>
+      countProfiles('freelancer', excludeInternal, { excludeCeo: true })
+    ),
+    withoutInternalAccounts((excludeInternal) => countProfiles('company', excludeInternal)),
+    withoutInternalAccounts((excludeInternal) =>
+      countProfiles('freelancer', excludeInternal, { beta: true })
+    ),
+    withoutInternalAccounts((excludeInternal) => countProfiles('company', excludeInternal, { beta: true })),
+    withoutInternalAccounts((excludeInternal) =>
+      countProfiles('freelancer', excludeInternal, { beta: false, since: weekAgo, excludeCeo: true })
+    ),
+    withoutInternalAccounts((excludeInternal) =>
+      countProfiles('company', excludeInternal, { beta: false, since: weekAgo })
+    ),
   ])
 
   const freelancers = Math.max(0, (freelancerRaw ?? 0) - (betaFreelancerN ?? 0))

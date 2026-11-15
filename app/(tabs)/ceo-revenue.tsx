@@ -12,20 +12,27 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, type Href } from 'expo-router'
 import { returnToPreviousScreen } from '@/lib/screenReturn'
 import { ChevronLeft } from 'lucide-react-native'
-import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { fetchCreaApi } from '@/lib/creaApiFetch'
 import { useCeoAccess } from '@/lib/useCeoAccess'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
-import {
-  COMPANY_PLAN_PRICE_EUR,
-  FREELANCER_PLAN_PRICE_EUR,
-} from '@/lib/planCatalogPrices'
-import {
-  computeCeoMrrTotals,
-  formatCeoMrr,
-  loadCeoMrrCounts,
-  type CeoMrrTotals,
-} from '@/lib/ceoPlatformMetrics'
+import { formatCeoMrr } from '@/lib/ceoPlatformMetrics'
+
+type SubscriptionBreakdown = {
+  payingMrrEur: number
+  payingCount: number
+  payingFreelancerMrrEur: number
+  payingFreelancerCount: number
+  payingCompanyMrrEur: number
+  payingCompanyCount: number
+  onProTrial: number
+  proViaVoucher: number
+  revenueCatUnpriced: number
+  legacyCatalogMrrEur: number
+  legacyFreelancerPro: number
+  legacyCompanyPro: number
+  stripeConfigured: boolean
+}
 
 type PlanRow = { label: string; count: number; price: number }
 
@@ -70,7 +77,7 @@ export default function CeoRevenueScreen() {
   const tabBarInset = useFloatingTabBarBottomInset()
   const { ready, allowed } = useCeoAccess()
   const [loading, setLoading] = useState(true)
-  const [mrr, setMrr] = useState<CeoMrrTotals | null>(null)
+  const [mrr, setMrr] = useState<SubscriptionBreakdown | null>(null)
   const [hint, setHint] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -81,8 +88,11 @@ export default function CeoRevenueScreen() {
       else setLoading(true)
       setHint(null)
       try {
-        const counts = await loadCeoMrrCounts(supabase)
-        setMrr(computeCeoMrrTotals(counts))
+        const { data, error } = await fetchCreaApi<SubscriptionBreakdown>('/api/app/ceo-subscription-metrics')
+        if (error || !data || typeof data.payingMrrEur !== 'number') {
+          throw new Error(error === 'HTTP 404' ? 'Subscription breakdown is not on the server yet.' : error || 'Could not load subscription data.')
+        }
+        setMrr(data)
       } catch (e) {
         setHint(e instanceof Error ? e.message : 'Could not load subscription data.')
         setMrr(null)
@@ -99,11 +109,10 @@ export default function CeoRevenueScreen() {
 
   const freelancerRows = useMemo<PlanRow[]>(
     () => [
-      { label: 'Free', count: mrr?.freelancerFree ?? 0, price: 0 },
       {
-        label: 'Pro',
-        count: mrr?.freelancerPro ?? 0,
-        price: FREELANCER_PLAN_PRICE_EUR.proMonthly,
+        label: 'Paying',
+        count: mrr?.payingFreelancerCount ?? 0,
+        price: mrr?.payingFreelancerCount ? (mrr.payingFreelancerMrrEur / mrr.payingFreelancerCount) : 0,
       },
     ],
     [mrr]
@@ -111,8 +120,11 @@ export default function CeoRevenueScreen() {
 
   const companyRows = useMemo<PlanRow[]>(
     () => [
-      { label: 'Free trial', count: mrr?.companyFree ?? 0, price: 0 },
-      { label: 'Pro', count: mrr?.companyPro ?? 0, price: COMPANY_PLAN_PRICE_EUR.proMonthly },
+      {
+        label: 'Paying',
+        count: mrr?.payingCompanyCount ?? 0,
+        price: mrr?.payingCompanyCount ? mrr.payingCompanyMrrEur / mrr.payingCompanyCount : 0,
+      },
     ],
     [mrr]
   )
@@ -150,8 +162,8 @@ export default function CeoRevenueScreen() {
       <Text style={styles.kicker}>PLATFORM</Text>
       <Text style={styles.title}>Monthly revenue</Text>
       <Text style={styles.subtitle}>
-        Recurring revenue from live plan counts — same basis as the web CEO dashboard. Beta testers
-        are excluded.
+        Paying MRR is money confirmed by Stripe or RevenueCat. Trials and voucher access are counted
+        beside it, and they are not added into the euro amount.
       </Text>
 
       {hint ? (
@@ -178,40 +190,43 @@ export default function CeoRevenueScreen() {
           <>
             <View style={styles.heroGrid}>
               <View style={[styles.heroCard, styles.heroCardAccent]}>
-                <Text style={styles.heroLabel}>Total MRR</Text>
-                <Text style={styles.heroValue}>{formatCeoMrr(mrr.totalMrr)}</Text>
+                <Text style={styles.heroLabel}>Paying</Text>
+                <Text style={styles.heroValue}>
+                  {mrr.stripeConfigured ? formatCeoMrr(mrr.payingMrrEur) : '—'}
+                </Text>
               </View>
               <View style={styles.heroCard}>
-                <Text style={styles.heroLabel}>Freelancer rev.</Text>
-                <Text style={styles.heroValueSm}>{formatCeoMrr(mrr.freelancerMrr)}</Text>
+                <Text style={styles.heroLabel}>On Pro trial</Text>
+                <Text style={styles.heroValueSm}>{mrr.onProTrial}</Text>
               </View>
               <View style={styles.heroCard}>
-                <Text style={styles.heroLabel}>Company rev.</Text>
-                <Text style={styles.heroValueSm}>{formatCeoMrr(mrr.companyMrr)}</Text>
+                <Text style={styles.heroLabel}>Voucher or partner code</Text>
+                <Text style={styles.heroValueSm}>{mrr.proViaVoucher}</Text>
               </View>
               <View style={styles.heroCard}>
-                <Text style={styles.heroLabel}>Active subs</Text>
-                <Text style={styles.heroValueSm}>{mrr.totalSubs}</Text>
+                <Text style={styles.heroLabel}>Before (list price)</Text>
+                <Text style={styles.heroValueSm}>{formatCeoMrr(mrr.legacyCatalogMrrEur)}</Text>
               </View>
             </View>
 
             <PlanBreakdown
               title="Freelancer subscriptions"
               rows={freelancerRows}
-              subtotal={mrr.freelancerMrr}
+              subtotal={mrr.payingFreelancerMrrEur}
             />
             <PlanBreakdown
               title="Company subscriptions"
               rows={companyRows}
-              subtotal={mrr.companyMrr}
+              subtotal={mrr.payingCompanyMrrEur}
             />
 
             <View style={styles.infoCard}>
               <Text style={styles.infoText}>
-                Counts come from freelancer and company plan rows in Supabase. Pro MRR uses list
-                prices ({formatCeoMrr(FREELANCER_PLAN_PRICE_EUR.proMonthly)}/mo freelancer,{' '}
-                {formatCeoMrr(COMPANY_PLAN_PRICE_EUR.proMonthly)}/mo company). Beta invite accounts
-                are omitted from these totals.
+                Before used {mrr.legacyFreelancerPro} freelancer Pro rows × €8.99 and {mrr.legacyCompanyPro}{' '}
+                company Pro rows × €89. Paying now uses the provider amount
+                {mrr.revenueCatUnpriced > 0
+                  ? `. ${mrr.revenueCatUnpriced} RevenueCat subscription${mrr.revenueCatUnpriced === 1 ? '' : 's'} still have no stored euro amount.`
+                  : '.'}
               </Text>
             </View>
 

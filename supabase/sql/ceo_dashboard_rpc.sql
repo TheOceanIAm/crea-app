@@ -61,12 +61,14 @@ begin
       from public.profiles pr
       inner join auth.users u on u.id = pr.id
       where public._ceo_is_platform_profile(pr.id, pr.role::text, pr.beta_invite)
+        and coalesce(pr.is_internal, false) = false
     ),
     'new_users', (
       select count(*)::int
       from public.profiles pr
       inner join auth.users u on u.id = pr.id
       where public._ceo_is_platform_profile(pr.id, pr.role::text, pr.beta_invite)
+        and coalesce(pr.is_internal, false) = false
         and u.created_at >= (now() - interval '7 days')
     ),
     'active_jobs', (select count(*)::int from public.jobs where lower(coalesce(status, '')) = 'active'),
