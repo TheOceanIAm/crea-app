@@ -15,6 +15,7 @@ import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo-router'
 import { returnToPreviousScreen } from '@/lib/screenReturn'
 import { ChevronLeft, Plus } from 'lucide-react-native'
+import * as WebBrowser from 'expo-web-browser'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { createPrivateWorkspaceProject } from '@/lib/createPrivateWorkspaceProject'
@@ -668,6 +669,19 @@ export default function WorkspaceProjectsScreen() {
                 <Text style={styles.emptyBtnText}>+ New private project</Text>
               </TouchableOpacity>
             ) : null}
+            <TouchableOpacity
+              style={styles.emptyDemo}
+              onPress={() => {
+                const base = process.env.EXPO_PUBLIC_CREA_WEB_URL || 'https://www.creaservices.de'
+                void WebBrowser.openBrowserAsync(`${base.replace(/\/$/, '')}/demo/overview`, {
+                  presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+                  controlsColor: '#FFDC00',
+                  toolbarColor: '#0a0a0a',
+                })
+              }}
+            >
+              <Text style={styles.emptyDemoText}>Explore demo project</Text>
+            </TouchableOpacity>
           </View>
         }
         renderItem={({ item }) => <View style={styles.cardWrap}>{renderCard(item)}</View>}
@@ -1018,6 +1032,8 @@ const styles = StyleSheet.create({
   emptyTitle: { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 8 },
   emptySub: { color: 'rgba(255,255,255,0.45)', fontSize: 13, textAlign: 'center', marginBottom: 14, lineHeight: 18 },
   emptyBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999, backgroundColor: '#FFDC00' },
+  emptyDemo: { marginTop: 14, paddingVertical: 8 },
+  emptyDemoText: { color: '#FFDC00', fontSize: 14, fontWeight: '600' },
   emptyBtnText: { color: '#0a0a0a', fontWeight: '800' },
   loadingShell: { flex: 1, paddingHorizontal: 20, paddingTop: 24, justifyContent: 'flex-start' },
   archiveWrap: { marginTop: 14 },
