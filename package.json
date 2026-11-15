@@ -54,6 +54,7 @@
     "@vis.gl/react-mapbox": "^8.1.1",
     "aes-js": "^3.1.2",
     "base64-arraybuffer": "^1.0.2",
+    "buffer": "^6.0.3",
     "expo": "~52.0.0",
     "expo-blur": "~14.0.3",
     "expo-clipboard": "~7.0.1",
@@ -75,6 +76,7 @@
     "expo-status-bar": "~2.0.1",
     "expo-updates": "~0.27.5",
     "fflate": "^0.8.3",
+    "jpeg-js": "^0.4.4",
     "lucide-react-native": "^1.8.0",
     "mapbox-gl": "^3.23.0",
     "react": "18.3.1",
@@ -90,7 +92,8 @@
     "react-native-svg": "15.8.0",
     "react-native-url-polyfill": "^2.0.0",
     "react-native-web": "~0.19.13",
-    "react-native-webview": "13.12.5"
+    "react-native-webview": "13.12.5",
+    "upng-js": "^2.1.0"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

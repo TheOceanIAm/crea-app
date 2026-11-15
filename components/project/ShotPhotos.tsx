@@ -20,6 +20,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { Plus, X } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { isImageCropFailure, requestImageCrop } from '@/lib/imageCropSession'
 import { supabase } from '@/lib/supabase'
 
 type ShotPhoto = { id: string; uri: string; path: string }
@@ -119,21 +120,37 @@ export function ShotPhotos({
       Alert.alert('Photos', 'Allow photo library access to attach references to this shot.')
       return
     }
-    // The iOS 26 multi-select checkmark closes the sheet and hands back no file.
-    // The crop confirm (same path as the profile photo) returns the image, then we keep our own copy.
+    // iOS 26's multi-select checkmark returns no file, and its editor cannot move the crop.
+    // Pick the original, then choose the section in our own crop screen.
     const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      allowsEditing: false,
       quality: 0.85,
       base64: true,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
     })
     if (picked.canceled || !picked.assets?.[0]?.uri) return
     const asset = picked.assets[0]
+    const original =
+      asset.base64 ??
+      (await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 }))
+    const cropped = await requestImageCrop({
+      uri: asset.uri,
+      base64: original,
+      width: asset.width || 0,
+      height: asset.height || 0,
+      aspect: asset.width > 0 && asset.height > 0 ? asset.width / asset.height : 'source',
+      shape: 'rect',
+      maxEdge: 2000,
+      maxBytes: 5 * 1024 * 1024,
+    })
+    if (isImageCropFailure(cropped)) {
+      if (!cropped.cancelled) Alert.alert('Photos', cropped.error || 'Could not crop that photo.')
+      return
+    }
     setSaving(true)
     try {
-      const base64 =
-        asset.base64 ??
-        (await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 }))
+      const base64 = cropped.base64
       const id = newId()
       const path = `${projectId}/${id}.jpg`
       const uploaded = await supabase.storage.from(BUCKET).upload(path, decode(base64), {

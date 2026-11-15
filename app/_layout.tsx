@@ -3,6 +3,7 @@ import '@/lib/pushNotifications'
 import { type PropsWithChildren, useEffect, useState } from 'react'
 import { Linking, Alert, Platform, StyleSheet, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
+import { ImageCropHost } from '@/components/ImageCropHost'
 import { SubscriptionPaywallGate } from '@/components/SubscriptionPaywallGate'
 import { LastSeenPing } from '@/components/LastSeenPing'
 import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
@@ -162,6 +163,7 @@ function EasUpdateBootstrap() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
+      <ImageCropHost />
       <AppBootstrapOverlayProvider>
         <RevenueCatProvider>
           <QueryClientProvider client={queryClient}>
