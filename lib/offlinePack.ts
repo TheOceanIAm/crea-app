@@ -1,6 +1,7 @@
 import { Platform } from 'react-native'
 import * as FileSystem from 'expo-file-system'
 import { supabase } from '@/lib/supabase'
+import { userIsActiveOnCompanyAccount } from '@/lib/companyAccount'
 import { isRetryableSupabaseError } from '@/lib/userFacingError'
 import { crewDisplayRole } from '@/lib/jobApplicationRole'
 import {
@@ -80,6 +81,7 @@ export type OfflineCrewMember = {
   bookingSlots: BookedDateEntry[]
   day_rate_amount?: number | null
   half_day_rate_amount?: number | null
+  claimed_profile_id?: string | null
   inviteStatus?: 'none' | 'pending'
   pendingInviteId?: string | null
 }
@@ -452,6 +454,23 @@ export function productionFromPack(
   }
 }
 
+/** Host (company owner or active company seat) or a member who can manage the budget. */
+async function viewerMayReadCrewDirectory(projectId: string): Promise<boolean> {
+  const { data: authData } = await supabase.auth.getUser()
+  const viewerId = authData.user?.id ?? null
+  if (!viewerId) return false
+  const { data: project } = await supabase.from('projects').select('company_id').eq('id', projectId).maybeSingle()
+  const companyId = String((project as { company_id?: string | null } | null)?.company_id ?? '').trim()
+  if (await userIsActiveOnCompanyAccount(viewerId, companyId || null)) return true
+  const { data: seat } = await supabase
+    .from('project_members')
+    .select('can_manage_budget')
+    .eq('project_id', projectId)
+    .eq('profile_id', viewerId)
+    .maybeSingle()
+  return Boolean((seat as { can_manage_budget?: boolean | null } | null)?.can_manage_budget)
+}
+
 export async function downloadOfflinePack(opts: {
   projectId: string
   projectTitle: string
@@ -470,6 +489,7 @@ export async function downloadOfflinePack(opts: {
   }
 
   const projectId = opts.projectId
+  const canReadCrewDirectory = await viewerMayReadCrewDirectory(projectId)
   let jobId = opts.jobId?.trim() || ''
   if (!jobId) {
     const { data: projRow, error: projErr } = await supabase
@@ -483,23 +503,40 @@ export async function downloadOfflinePack(opts: {
     jobId = String((projRow as { job_id?: string | null } | null)?.job_id ?? '').trim()
   }
 
+  const membersQuery = canReadCrewDirectory
+    ? supabase
+        .from('project_members')
+        .select(
+          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, booked_dates, contact_email, contact_phone, contact_label, works_as, profiles(name, avatar_url, headline, email)'
+        )
+        .eq('project_id', projectId)
+        .order('member_role', { ascending: true })
+    : supabase
+        .from('project_members')
+        .select(
+          'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, booked_dates, works_as, profiles(name, avatar_url, headline)'
+        )
+        .eq('project_id', projectId)
+        .order('member_role', { ascending: true })
+  const manualQuery = canReadCrewDirectory
+    ? supabase
+        .from('project_manual_crew_readable')
+        .select(
+          'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount, claimed_profile_id'
+        )
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true })
+    : supabase
+        .from('project_manual_crew_readable')
+        .select('id, name, member_role, booked_dates, scheduling_start_date, scheduling_end_date, claimed_profile_id')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true })
+
   const [shotsRes, daysRes, membersRes, manualRes] = await Promise.all([
     supabase.from('production_shots').select('*').eq('project_id', projectId).order('created_at', { ascending: true }),
     supabase.from('production_days').select('*').eq('project_id', projectId).order('date', { ascending: true }),
-    supabase
-      .from('project_members')
-      .select(
-        'id, profile_id, member_role, scheduling_start_date, scheduling_end_date, booked_dates, contact_email, contact_phone, contact_label, works_as, profiles(name, avatar_url, headline, email)'
-      )
-      .eq('project_id', projectId)
-      .order('member_role', { ascending: true }),
-    supabase
-      .from('project_manual_crew_readable')
-      .select(
-        'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount, claimed_profile_id'
-      )
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: true }),
+    membersQuery,
+    manualQuery,
   ])
 
   const firstErr = shotsRes.error || daysRes.error || membersRes.error
@@ -510,20 +547,13 @@ export async function downloadOfflinePack(opts: {
   if (daysRes.error) return { ok: false, error: daysRes.error.message }
   if (membersRes.error) return { ok: false, error: membersRes.error.message }
 
-  let manualData = manualRes.data as Array<Record<string, unknown>> | null
   if (manualRes.error) {
-    const fallback = await supabase
-      .from('project_manual_crew')
-      .select(
-        'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount, claimed_profile_id'
-      )
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: true })
-    if (fallback.error && isOfflineFetchError(fallback.error)) {
+    if (isOfflineFetchError(manualRes.error)) {
       return { ok: false, error: 'No internet connection. Connect to download.' }
     }
-    manualData = (fallback.data as Array<Record<string, unknown>> | null) ?? []
+    return { ok: false, error: manualRes.error.message }
   }
+  const manualData = (manualRes.data ?? []) as unknown as Array<Record<string, unknown>>
 
   const appliedRoleByProfile = new Map<string, string>()
   if (jobId) {
@@ -575,11 +605,14 @@ export async function downloadOfflinePack(opts: {
         name: p?.name || 'Member',
         subtitle,
         role_display: roleDisplay,
-        email: typeof p?.email === 'string' && p.email.trim() ? p.email.trim() : null,
+        email:
+          canReadCrewDirectory && typeof p?.email === 'string' && p.email.trim() ? p.email.trim() : null,
         phone: null,
         avatar_url: avatar,
-        contact_email: typeof m.contact_email === 'string' ? m.contact_email : null,
-        contact_phone: typeof m.contact_phone === 'string' ? m.contact_phone : null,
+        contact_email:
+          canReadCrewDirectory && typeof m.contact_email === 'string' ? m.contact_email : null,
+        contact_phone:
+          canReadCrewDirectory && typeof m.contact_phone === 'string' ? m.contact_phone : null,
         contact_label: typeof m.contact_label === 'string' ? m.contact_label : null,
         scheduling_start_date:
           typeof m.scheduling_start_date === 'string' ? m.scheduling_start_date.slice(0, 10) : null,
@@ -599,9 +632,11 @@ export async function downloadOfflinePack(opts: {
         scheduling_start_date: typeof m.scheduling_start_date === 'string' ? m.scheduling_start_date : null,
         scheduling_end_date: typeof m.scheduling_end_date === 'string' ? m.scheduling_end_date : null,
       })
-      const dayRate = parseOptionalRate(m.day_rate_amount)
+      const dayRate = canReadCrewDirectory ? parseOptionalRate(m.day_rate_amount) : null
       const rateNote = dayRate != null ? ` · €${dayRate}/day` : ''
       const shootNote = formatBookedSlotsSummary(bookingSlots)
+      const claimed =
+        typeof m.claimed_profile_id === 'string' && m.claimed_profile_id.trim() ? m.claimed_profile_id.trim() : null
       return {
         source: 'manual' as const,
         id: String(m.id),
@@ -609,12 +644,13 @@ export async function downloadOfflinePack(opts: {
         role_display: role || 'Crew',
         name: String(m.name ?? 'Crew'),
         subtitle: `${role || 'Crew'}${rateNote}${shootNote ? ` · ${shootNote}` : ''}`,
-        email: typeof m.email === 'string' && m.email.trim() ? m.email.trim() : null,
-        phone: typeof m.phone === 'string' && m.phone.trim() ? m.phone.trim() : null,
+        email: canReadCrewDirectory && typeof m.email === 'string' && m.email.trim() ? m.email.trim() : null,
+        phone: canReadCrewDirectory && typeof m.phone === 'string' && m.phone.trim() ? m.phone.trim() : null,
         bookingDates: calendarDatesFromSlots(bookingSlots),
         bookingSlots,
         day_rate_amount: dayRate,
-        half_day_rate_amount: parseOptionalRate(m.half_day_rate_amount),
+        half_day_rate_amount: canReadCrewDirectory ? parseOptionalRate(m.half_day_rate_amount) : null,
+        claimed_profile_id: claimed,
         inviteStatus: 'none' as const,
         pendingInviteId: null,
       }
@@ -645,9 +681,13 @@ export async function downloadOfflinePack(opts: {
   const tasks = tasksRes.error ? [] : tasksRes.rows
   const equipment = gearRes.error ? [] : gearRes.rows
 
-  const budget = await fetchBudgetSnapshotForPack(projectId)
-  if (budget === 'offline') {
-    return { ok: false, error: 'No internet connection. Connect to download.' }
+  let budget: OfflineBudgetSnapshot | null = null
+  if (canReadCrewDirectory) {
+    const budgetResult = await fetchBudgetSnapshotForPack(projectId)
+    if (budgetResult === 'offline') {
+      return { ok: false, error: 'No internet connection. Connect to download.' }
+    }
+    budget = budgetResult
   }
 
   const fromWindow = (opts.shootDates ?? []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))

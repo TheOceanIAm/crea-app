@@ -137,7 +137,7 @@ export async function searchWorkspaceWith(
       : Promise.resolve({ data: [] as unknown[], error: null }),
     projectId
       ? client
-          .from('project_manual_crew')
+          .from('project_manual_crew_readable')
           .select('id, name, member_role, email, phone')
           .eq('project_id', projectId)
           .limit(80)
@@ -252,13 +252,15 @@ export async function searchWorkspaceWith(
     })
   }
   for (const row of (manualRes.data ?? []) as Loose[]) {
-    const blob = [str(row, 'name'), str(row, 'member_role'), str(row, 'email'), str(row, 'phone')].join(' ')
+    const email = str(row, 'email').trim()
+    const phone = str(row, 'phone').trim()
+    const blob = [str(row, 'name'), str(row, 'member_role'), email, phone].join(' ')
     if (!includes(blob, needle)) continue
     people.push({
       kind: 'person',
       id: str(row, 'id'),
       title: str(row, 'name') || 'Crew',
-      snippet: [str(row, 'member_role'), str(row, 'email'), str(row, 'phone')].filter(Boolean).join(' · '),
+      snippet: [str(row, 'member_role'), email || null, phone || null].filter(Boolean).join(' · '),
       tab: 'crew',
       meta: 'Crew',
     })

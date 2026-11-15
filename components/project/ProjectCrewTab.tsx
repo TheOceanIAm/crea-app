@@ -139,6 +139,13 @@ type Props = {
   canManage: boolean
   /** True when the signed-in user is the hiring company (`projects.company_id`). Used for shoot days + job contact fields. */
   viewerIsCompany: boolean
+  /**
+   * Host (company owner or an active company seat) or a member with budget access.
+   * Everyone else gets the read-only roster and never queries manual crew.
+   */
+  canReadCrewDirectory: boolean
+  /** False until host and budget-manager checks have finished. */
+  crewDirectoryReady: boolean
   /** Signed-in user id from parent (avoids race before auth effect in this tab). */
   viewerId?: string | null
   workspaceOnly?: boolean
@@ -245,6 +252,8 @@ export function ProjectCrewTab({
   projectId,
   canManage,
   viewerIsCompany,
+  canReadCrewDirectory,
+  crewDirectoryReady,
   viewerId: viewerIdProp,
   workspaceOnly = false,
   inHouseWorkspace = false,
@@ -258,6 +267,9 @@ export function ProjectCrewTab({
     onOpenProfile?.(profileId)
   }
   const [rows, setRows] = useState<CrewRow[]>([])
+  const [roster, setRoster] = useState<
+    { id: string; profileId: string | null; name: string; role: string; avatarUrl: string | null; days: string | null }[]
+  >([])
   const [pendingInvites, setPendingInvites] = useState<ProjectCrewInvite[]>([])
   const [loading, setLoading] = useState(true)
   const [crewSearch, setCrewSearch] = useState('')
@@ -310,12 +322,85 @@ export function ProjectCrewTab({
   }, [viewerIdProp])
 
   const load = useCallback(async () => {
+    if (!crewDirectoryReady) {
+      setLoading(true)
+      return
+    }
     const offline = await resolveOfflineRead(projectId)
     if (offline) {
-      setRows(offline.pack.crew.map(crewRowFromPack))
+      if (!canReadCrewDirectory) {
+        setRoster(
+          offline.pack.crew.map((person) => ({
+            id: person.id,
+            profileId: person.source === 'registered' ? person.profile_id : null,
+            name: person.name,
+            role: person.role_display || person.member_role || 'Crew',
+            avatarUrl: person.source === 'registered' ? person.avatar_url : null,
+            days: formatBookedSlotsSummary(person.bookingSlots),
+          })),
+        )
+        setRows([])
+      } else {
+        setRoster([])
+        setRows(offline.pack.crew.map(crewRowFromPack))
+      }
       setPendingInvites([])
       setUsingOfflinePack(true)
       setPackDownloadedAt(offline.pack.downloadedAt)
+      setLoading(false)
+      return
+    }
+
+    if (!canReadCrewDirectory) {
+      const { data, error } = await supabase.rpc('list_project_crew_roster', { p_project_id: projectId })
+      if (error) {
+        if (isOfflineFetchError(error)) {
+          const pack = await readOfflinePack(projectId)
+          if (pack) {
+            setRoster(
+              pack.crew.map((person) => ({
+                id: person.id,
+                profileId: person.source === 'registered' ? person.profile_id : null,
+                name: person.name,
+                role: person.role_display || person.member_role || 'Crew',
+                avatarUrl: person.source === 'registered' ? person.avatar_url : null,
+                days: formatBookedSlotsSummary(person.bookingSlots),
+              })),
+            )
+            setUsingOfflinePack(true)
+            setPackDownloadedAt(pack.downloadedAt)
+            setLoading(false)
+            return
+          }
+        }
+        Alert.alert('Crew', error.message)
+        setRoster([])
+      } else {
+        const people = ((data ?? []) as Array<Record<string, unknown>>)
+          .map((row) => {
+            const slots = memberBookedSlotsFromRow({ booked_dates: row.booked_dates })
+            const profileId =
+              row.kind === 'member' && typeof row.profile_id === 'string' && row.profile_id.trim()
+                ? row.profile_id.trim()
+                : null
+            const avatar = typeof row.avatar_url === 'string' ? row.avatar_url.trim() : ''
+            return {
+              id: String(row.id ?? ''),
+              profileId,
+              name: (typeof row.name === 'string' && row.name.trim()) || 'Crew',
+              role: (typeof row.role === 'string' && row.role.trim()) || 'Crew',
+              avatarUrl: avatar || null,
+              days: formatBookedSlotsSummary(slots),
+            }
+          })
+          .filter((person) => person.id)
+          .sort((a, b) => a.name.localeCompare(b.name))
+        setRoster(people)
+        setUsingOfflinePack(false)
+        setPackDownloadedAt(null)
+      }
+      setRows([])
+      setPendingInvites([])
       setLoading(false)
       return
     }
@@ -371,23 +456,10 @@ export function ProjectCrewTab({
       return
     }
 
-    // Prefer masked view (hides day rates for non-hosts). Fall back to base table if the view is unavailable.
     let manualData = manualRes.data as ManualCrew[] | null
     if (manualRes.error) {
       console.warn('[ProjectCrewTab] project_manual_crew_readable', manualRes.error.message)
-      const fallback = await supabase
-        .from('project_manual_crew')
-        .select(
-          'id, project_id, name, member_role, email, phone, booked_dates, scheduling_start_date, scheduling_end_date, day_rate_amount, half_day_rate_amount, claimed_profile_id'
-        )
-        .eq('project_id', projectId)
-        .order('created_at', { ascending: true })
-      if (fallback.error) {
-        console.warn('[ProjectCrewTab] project_manual_crew', fallback.error.message)
-        manualData = []
-      } else {
-        manualData = (fallback.data as ManualCrew[]) ?? []
-      }
+      manualData = []
     }
 
     manualData = (manualData ?? []).filter(
@@ -509,7 +581,7 @@ export function ProjectCrewTab({
     setUsingOfflinePack(false)
     setPackDownloadedAt(null)
     setLoading(false)
-  }, [projectId, canManage, viewerIsCompany])
+  }, [projectId, canManage, viewerIsCompany, canReadCrewDirectory, crewDirectoryReady])
 
   useEffect(() => {
     setLoading(true)
@@ -1035,6 +1107,55 @@ export function ProjectCrewTab({
       <View style={styles.center}>
         <ActivityIndicator color="#FFDC00" />
       </View>
+    )
+  }
+
+  if (!canReadCrewDirectory) {
+    return (
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {usingOfflinePack ? <OfflinePackBanner downloadedAt={packDownloadedAt} /> : null}
+        <Text style={styles.label}>People on this project</Text>
+        {roster.length === 0 ? (
+          <Text style={styles.hint}>No crew yet.</Text>
+        ) : (
+          roster.map((person) => {
+            const uri = crewAvatarUri(person.avatarUrl)
+            const body = (
+              <View style={styles.row}>
+                {uri ? (
+                  <Image source={{ uri }} style={styles.rowAvatar} />
+                ) : (
+                  <View style={styles.rowAvatar}>
+                    <Text style={styles.dropdownName}>{crewAvatarInitial(person.name)}</Text>
+                  </View>
+                )}
+                <View style={styles.rowText}>
+                  <Text style={styles.name}>{person.name}</Text>
+                  <Text style={styles.role}>{person.role}</Text>
+                  {person.days ? (
+                    <Text style={styles.scheduleLine} numberOfLines={2}>
+                      {person.days}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            )
+            if (!person.profileId) {
+              return <View key={person.id}>{body}</View>
+            }
+            return (
+              <TouchableOpacity
+                key={person.id}
+                onPress={() => openFreelancerProfile(person.profileId!)}
+                accessibilityRole="link"
+                accessibilityLabel={`${person.name} profile`}
+              >
+                {body}
+              </TouchableOpacity>
+            )
+          })
+        )}
+      </ScrollView>
     )
   }
 

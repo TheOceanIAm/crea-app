@@ -154,6 +154,7 @@ export default function ProjectWorkspaceScreen() {
     bootShell?.jobOwnerCompanyId ?? null
   )
   const [companyTeamOnJob, setCompanyTeamOnJob] = useState(false)
+  const [companyTeamReady, setCompanyTeamReady] = useState(false)
   const [budgetManager, setBudgetManager] = useState(false)
   const [budgetAccessReady, setBudgetAccessReady] = useState(false)
   const [pipelineStatCount, setPipelineStatCount] = useState(0)
@@ -747,20 +748,25 @@ export default function ProjectWorkspaceScreen() {
     const companyId = (jobOwnerCompanyId && jobOwnerCompanyId.trim()) || project?.company_id || null
     if (!userId || !companyId) {
       setCompanyTeamOnJob(false)
+      setCompanyTeamReady(Boolean(userId && project?.id))
       return
     }
     if (userId === companyId) {
       setCompanyTeamOnJob(true)
+      setCompanyTeamReady(true)
       return
     }
     let cancelled = false
+    setCompanyTeamReady(false)
     void userIsActiveOnCompanyAccount(userId, companyId).then((ok) => {
-      if (!cancelled) setCompanyTeamOnJob(ok)
+      if (cancelled) return
+      setCompanyTeamOnJob(ok)
+      setCompanyTeamReady(true)
     })
     return () => {
       cancelled = true
     }
-  }, [userId, jobOwnerCompanyId, project?.company_id])
+  }, [userId, jobOwnerCompanyId, project?.company_id, project?.id])
 
   /**
    * Phase (recruiting / active / completed): same source as web `jobs.project_status`.
@@ -1279,6 +1285,8 @@ export default function ProjectWorkspaceScreen() {
                     projectId={project.id}
                     canManage={canManageCrew}
                     viewerIsCompany={canEditProductionSchedule}
+                    canReadCrewDirectory={companyTeamOnJob || budgetManager}
+                    crewDirectoryReady={budgetAccessReady && companyTeamReady}
                     viewerId={userId}
                     workspaceOnly={workspaceOnlyPlan}
                     proFeaturesEnabled={!starterFreelancerPlan}
