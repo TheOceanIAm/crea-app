@@ -88,6 +88,23 @@ export function listingProfileAvatarUrl(displayName: string, avatarUrl: string |
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName || 'You')}&background=333&color=fff&size=128`
 }
 
+const FINISHED_PROJECT_LABELS = new Set(['COMPLETED', 'CLOSED', 'ARCHIVED'])
+
+/** Latest project that is still in progress. Completed, closed, and archived work is skipped. */
+export function pickCurrentProject(listings: ProjectListing[]): ProjectListing | null {
+  let current: ProjectListing | null = null
+  let currentTs = -1
+  for (const item of listings) {
+    if (item.isArchived || FINISHED_PROJECT_LABELS.has(item.statusLabel)) continue
+    const ts = new Date(item.updatedAt || 0).getTime()
+    if (!current || ts >= currentTs) {
+      current = item
+      currentTs = ts
+    }
+  }
+  return current
+}
+
 export function mapJobStatusLabel(job: {
   status: string | null | undefined
   project_status?: string | null

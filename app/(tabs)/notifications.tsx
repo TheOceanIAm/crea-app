@@ -11,7 +11,9 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import { Check } from 'lucide-react-native'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
+import { ICON_STROKE } from '@/lib/iconTheme'
 import { useFocusEffect } from '@react-navigation/native'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
@@ -21,6 +23,7 @@ import {
   fetchAlertReadKeys,
   loadNotificationFeed,
   markAlertRead,
+  markAlertsRead,
   type NotificationRow,
 } from '@/lib/notificationsFeed'
 import { respondToCrewInvite } from '@/lib/crewInvites'
@@ -49,6 +52,9 @@ export default function NotificationsScreen() {
   const tabBarInset = useFloatingTabBarBottomInset()
   const [refreshing, setRefreshing] = useState(false)
   const [busyInviteId, setBusyInviteId] = useState<string | null>(null)
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [markingRead, setMarkingRead] = useState(false)
   const [nowTick, setNowTick] = useState(() => Date.now())
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -103,6 +109,7 @@ export default function NotificationsScreen() {
 
   const rows = alertsQuery.data?.rows ?? []
   const readKeys = useMemo(() => new Set(alertsQuery.data?.reads ?? []), [alertsQuery.data?.reads])
+  const unreadIds = useMemo(() => rows.filter((row) => !readKeys.has(row.id)).map((row) => row.id), [rows, readKeys])
   const loading = authQuery.isLoading || (enabled && alertsQuery.isLoading && rows.length === 0)
 
   const scheduleInvalidate = useCallback(() => {
@@ -218,8 +225,59 @@ export default function NotificationsScreen() {
     [busyInviteId, router, userId]
   )
 
+  const exitSelection = useCallback(() => {
+    setSelecting(false)
+    setSelected(new Set())
+  }, [])
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const toggleSelectAllUnread = useCallback(() => {
+    setSelected((prev) => {
+      const allSelected = unreadIds.length > 0 && unreadIds.every((id) => prev.has(id))
+      return allSelected ? new Set() : new Set(unreadIds)
+    })
+  }, [unreadIds])
+
+  const markSelectedRead = useCallback(async () => {
+    if (!userId || markingRead) return
+    const keys = [...selected].filter((id) => !readKeys.has(id))
+    if (keys.length === 0) {
+      exitSelection()
+      return
+    }
+    setMarkingRead(true)
+    const ok = await markAlertsRead(userId, keys)
+    setMarkingRead(false)
+    if (!ok) {
+      Alert.alert('Could not mark as read', 'Please try again.')
+      return
+    }
+    queryClient.setQueryData<NotificationsCache>(notificationsKey(userId), (prev) => {
+      const base = prev ?? { rows, reads: Array.from(readKeys) }
+      const reads = [...new Set([...base.reads, ...keys])]
+      const next = { ...base, reads }
+      cacheNotifications(userId, next)
+      void persistNotificationsToDisk(userId, next)
+      return next
+    })
+    invalidateAlertsBadge()
+    exitSelection()
+  }, [userId, markingRead, selected, readKeys, rows, exitSelection])
+
   const onPressRow = useCallback(
     async (item: NotificationRow) => {
+      if (selecting) {
+        toggleSelected(item.id)
+        return
+      }
       if (item.kind === 'crew_invite') return
       if (userId) {
         await markAlertRead(userId, item.id)
@@ -251,16 +309,62 @@ export default function NotificationsScreen() {
       }
       if (item.projectId) router.push(`/project/${item.projectId}`)
     },
-    [router, userId, rows, readKeys]
+    [router, userId, rows, readKeys, selecting, toggleSelected]
   )
+
+  const allUnreadSelected = unreadIds.length > 0 && unreadIds.every((id) => selected.has(id))
+  const selectedUnreadCount = unreadIds.filter((id) => selected.has(id)).length
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <TabScreenHeader title="Alerts" showMessages />
+      {rows.length > 0 ? (
+        <View style={styles.selectBar}>
+          {selecting ? (
+            <>
+              <TouchableOpacity onPress={exitSelection} hitSlop={8} accessibilityRole="button" style={styles.selectCancel}>
+                <Text style={styles.selectBarMuted}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={toggleSelectAllUnread}
+                disabled={unreadIds.length === 0}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.selectBarMuted, unreadIds.length === 0 && styles.selectBarDisabled]}>
+                  {allUnreadSelected ? 'Clear' : 'All'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.markReadBtn, (selectedUnreadCount === 0 || markingRead) && styles.markReadBtnDisabled]}
+                onPress={() => void markSelectedRead()}
+                disabled={selectedUnreadCount === 0 || markingRead}
+                accessibilityRole="button"
+              >
+                {markingRead ? (
+                  <ActivityIndicator color="#0a0a0a" size="small" />
+                ) : (
+                  <Text style={styles.markReadText}>Mark as read</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity
+              onPress={() => setSelecting(true)}
+              hitSlop={8}
+              disabled={unreadIds.length === 0}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.selectBarAction, unreadIds.length === 0 && styles.selectBarDisabled]}>Select</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : null}
       <FlatList
         style={{ flex: 1, marginBottom: tabBarInset + 12 }}
         data={rows}
         keyExtractor={(r) => r.id}
+        extraData={`${selecting}:${[...selected].join(',')}:${nowTick}`}
         initialNumToRender={14}
         maxToRenderPerBatch={8}
         windowSize={7}
@@ -269,14 +373,27 @@ export default function NotificationsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFDC00" />}
         renderItem={({ item }) => {
           const unread = !readKeys.has(item.id)
-          const isInviteAction = item.kind === 'crew_invite'
+          const isInviteAction = item.kind === 'crew_invite' && !selecting
           const inviteBusy = busyInviteId === item.id
+          const isSelected = selected.has(item.id)
           return (
             <TouchableOpacity
-              style={[styles.card, unread && styles.cardUnread]}
+              style={[styles.card, unread && styles.cardUnread, selecting && styles.cardSelecting]}
               activeOpacity={isInviteAction ? 1 : 0.85}
               onPress={() => void onPressRow(item)}
+              onLongPress={() => {
+                setSelecting(true)
+                toggleSelected(item.id)
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ selected: selecting ? isSelected : undefined }}
             >
+              {selecting ? (
+                <View style={[styles.check, isSelected && styles.checkOn]}>
+                  {isSelected ? <Check size={14} color="#0a0a0a" strokeWidth={ICON_STROKE} /> : null}
+                </View>
+              ) : null}
+              <View style={styles.cardBody}>
               <View style={styles.kickerRow}>
                 <Text style={styles.kicker}>
                   {item.kind === 'invite' || item.kind === 'crew_invite'
@@ -323,6 +440,7 @@ export default function NotificationsScreen() {
                   </TouchableOpacity>
                 </View>
               ) : null}
+              </View>
             </TouchableOpacity>
           )
         }}
@@ -343,7 +461,33 @@ export default function NotificationsScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0a0a0a' },
   list: { paddingHorizontal: 20, paddingBottom: 36, flexGrow: 1, paddingTop: 4 },
+  selectBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 16,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    minHeight: 36,
+  },
+  selectCancel: { marginRight: 'auto' },
+  selectBarAction: { color: '#FFDC00', fontSize: 14, fontWeight: '700' },
+  selectBarMuted: { color: 'rgba(255,255,255,0.72)', fontSize: 14, fontWeight: '600' },
+  selectBarDisabled: { opacity: 0.35 },
+  markReadBtn: {
+    backgroundColor: '#FFDC00',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    minWidth: 118,
+    alignItems: 'center',
+  },
+  markReadBtnDisabled: { opacity: 0.4 },
+  markReadText: { color: '#0a0a0a', fontSize: 13, fontWeight: '800' },
   card: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
@@ -351,6 +495,19 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
   },
+  cardSelecting: { alignItems: 'center' },
+  cardBody: { flex: 1, minWidth: 0 },
+  check: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  checkOn: { backgroundColor: '#FFDC00', borderColor: '#FFDC00' },
   cardUnread: {
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderColor: 'rgba(255,220,0,0.15)',

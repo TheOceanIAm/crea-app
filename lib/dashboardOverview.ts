@@ -383,39 +383,22 @@ async function loadDashboardOverviewLocal(userId: string): Promise<DashboardOver
   if (!isFreelancerPro(resolvedFreelancerPlan)) {
     return {
       ...base,
-      stats: [
-        { label: 'Applications', value: '—', sub: 'Pro to apply' },
-        { label: 'Profile views', value: '—', sub: 'Browse jobs on Free' },
-      ],
+      stats: [],
       income: null,
       freelancerPlan: resolvedFreelancerPlan,
     }
   }
 
-  const [{ count: appCount }, { count: viewCount }, { data: invs }] = await Promise.all([
-    supabase
-      .from('job_applications')
-      .select('id', { count: 'exact', head: true })
-      .eq('freelancer_id', userId)
-      .eq('status', 'pending'),
-    supabase
-      .from('profile_views')
-      .select('id', { count: 'exact', head: true })
-      .eq('viewed_freelancer_id', userId),
-    supabase
-      .from('invoices')
-      .select('amount, currency, status, due_date')
-      .eq('freelancer_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(INVOICE_STATS_LIMIT),
-  ])
+  const { data: invs } = await supabase
+    .from('invoices')
+    .select('amount, currency, status, due_date')
+    .eq('freelancer_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(INVOICE_STATS_LIMIT)
 
   return {
     ...base,
-    stats: [
-      { label: 'Applications', value: String(appCount ?? 0), sub: 'Pending' },
-      { label: 'Profile views', value: String(viewCount ?? 0), sub: 'Total' },
-    ],
+    stats: [],
     income: computeIncomeTotals(invs ?? []),
     freelancerPlan: resolvedFreelancerPlan,
   }

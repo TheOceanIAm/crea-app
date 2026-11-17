@@ -8,7 +8,7 @@ import { SubscriptionPaywallGate } from '@/components/SubscriptionPaywallGate'
 import { LastSeenPing } from '@/components/LastSeenPing'
 import { InAppNotificationBridge } from '@/components/InAppNotificationBridge'
 import * as Notifications from 'expo-notifications'
-import { Stack, useRouter } from 'expo-router'
+import { Stack, useRouter, type Href } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -21,6 +21,7 @@ import {
   resetInitialSupabaseAuthBootstrapForDev,
 } from '@/lib/authDeepLink'
 import { isAppStoreScreenshotDeepLink } from '@/lib/appStoreScreenshotDeepLink'
+import { hrefFromNotificationData, hrefFromNotificationResponse } from '@/lib/incomingEntryHref'
 import { isAppStoreScreenshotModeEnabled } from '@/lib/appStoreScreenshotMode'
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
@@ -87,30 +88,8 @@ function openDeepLinkFromPushData(
   router: ReturnType<typeof useRouter>,
   data: Record<string, unknown> | undefined,
 ) {
-  if (!data || typeof data !== 'object') return
-  const type = typeof data.type === 'string' ? data.type : ''
-  if (type === 'message') {
-    const cid = data.conversationId
-    if (typeof cid === 'string' && cid.length > 0) router.push(`/conversation/${cid}`)
-    return
-  }
-  if (type === 'invoice') {
-    const id = data.invoiceId
-    if (typeof id === 'string' && id.length > 0) router.push(`/(tabs)/invoices/${id}`)
-    return
-  }
-  if (type === 'job_application') {
-    router.push('/(tabs)/company-applications')
-    return
-  }
-  if (type === 'workspace_ready' || type === 'project_message' || type === 'workspace_activity') {
-    const pid = data.projectId
-    if (typeof pid === 'string' && pid.length > 0) router.push(`/project/${pid}`)
-    return
-  }
-  if (type === 'profile_completion') {
-    router.push('/(tabs)/profile')
-  }
+  const href = hrefFromNotificationData(data)
+  if (href) router.push(href as Href)
 }
 
 /** Must live in this file (not a separate module importing expo-router) to avoid circular-init undefined bindings on Hermes. */
@@ -121,8 +100,8 @@ function PushNotificationRouter() {
     if (Platform.OS === 'web') return
 
     void Notifications.getLastNotificationResponseAsync().then((r) => {
-      const data = r?.notification.request.content.data as Record<string, unknown> | undefined
-      openDeepLinkFromPushData(router, data)
+      const href = hrefFromNotificationResponse(r)
+      if (href) router.push(href as Href)
     })
 
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {

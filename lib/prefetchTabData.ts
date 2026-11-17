@@ -17,6 +17,7 @@ import {
   type PinboardFeedCache,
 } from '@/lib/pinboardFeed'
 import { setWarmedOverview, setWarmedPinboard } from '@/lib/warmAppCaches'
+import { hydrateWorkspaceProjectsFromDisk } from '@/lib/workspaceProjectsLoad'
 
 let inflight: Partial<Record<MainTabName, Promise<void>>> = {}
 
@@ -108,7 +109,10 @@ export async function hydrateMainTabFromDisk(userId: string, tab: MainTabName): 
   }
 
   if (tab === 'dashboard') {
-    const disk = await hydrateDashboardOverviewFromDisk(userId)
+    const [disk] = await Promise.all([
+      hydrateDashboardOverviewFromDisk(userId),
+      hydrateWorkspaceProjectsFromDisk(userId),
+    ])
     if (disk) setWarmedOverview(disk)
   }
 }

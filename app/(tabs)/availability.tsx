@@ -301,7 +301,7 @@ export default function AvailabilityScreen() {
     }
 
     Alert.alert('Saved', 'Your availability calendar was updated.', [
-      { text: 'OK', onPress: () => router.replace('/(tabs)/feed') },
+      { text: 'OK', onPress: () => router.replace('/(tabs)/dashboard') },
     ])
   }
 

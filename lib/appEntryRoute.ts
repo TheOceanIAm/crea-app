@@ -48,13 +48,17 @@ export async function writeLastMainTab(userId: string, tab: MainTabName): Promis
   await writePersistedCache(`${LAST_TAB_PREFIX}${userId}`, tab, 90 * 86_400_000)
 }
 
-/** Best tab to open after login — last visit if still valid for role, else Feed. */
+/**
+ * Screen after login. The job feed is not the home.
+ * A previous Feed visit opens the projects dashboard instead.
+ * Another tab is restored only when that tab is still allowed for the role.
+ */
 export async function resolveAppEntryTab(userId: string): Promise<MainTabName> {
   const hints = await readBootstrapHints(userId)
   const role = hints?.role ?? null
   const last = await readLastMainTab(userId)
-  if (last && isMainTabAllowed(last, role)) return last
-  return 'feed'
+  if (last && last !== 'feed' && isMainTabAllowed(last, role)) return last
+  return 'dashboard'
 }
 
 export async function resolveAppEntryHref(userId: string): Promise<Href> {

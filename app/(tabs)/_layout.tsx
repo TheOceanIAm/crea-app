@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, InteractionManager, Platform, StyleSheet, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
-import { Tabs, usePathname } from 'expo-router'
+import { Tabs, usePathname, useRouter, type Href } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Bell, Briefcase, House, Layers, LayoutDashboard, UserRound } from 'lucide-react-native'
+import { Bell, Briefcase, Clipboard, House, UserRound } from 'lucide-react-native'
 import { FloatingGlassTabBar } from '@/components/FloatingGlassTabBar'
 import { floatingTabBarSlotHeight } from '@/lib/floatingTabBarLayout'
 import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
@@ -32,8 +32,17 @@ import { fetchGoodNewsOfTheDayHeadline } from '@/lib/ceoLiveWidgets'
 /** Unique Supabase Realtime topic per subscription — reusing the same name returns an already-`subscribe()`d channel, which throws when chaining `.on()`. */
 let realtimeTopicSeq = 0
 
+function DashboardTabIcon({ color, size }: { color: string; size: number }) {
+  return <House size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+}
+
+function ProjectsTabIcon({ color, size }: { color: string; size: number }) {
+  return <Clipboard size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
+}
+
 export default function TabLayout() {
   const pathname = usePathname()
+  const router = useRouter()
   const insets = useSafeAreaInsets()
   const { isBootstrapOverlayBlocking } = useAppBootstrapOverlay()
   const [userId, setUserId] = useState<string | null>(null)
@@ -189,6 +198,13 @@ export default function TabLayout() {
   }, [])
 
   useEffect(() => {
+    // Feed is no longer a destination. History back from Projects used to land here.
+    if (pathname === '/feed') {
+      router.replace('/(tabs)/dashboard' as Href)
+    }
+  }, [pathname, router])
+
+  useEffect(() => {
     if (!userId) return
     const tab = mainTabFromPathname(pathname)
     if (!tab) return
@@ -269,7 +285,7 @@ export default function TabLayout() {
         onDismiss={dismissGoodNewsPopup}
       />
       <Tabs
-        initialRouteName="feed"
+        initialRouteName="dashboard"
         tabBar={(props) => <FloatingGlassTabBar {...props} />}
         screenOptions={{
           headerShown: false,
@@ -289,21 +305,18 @@ export default function TabLayout() {
         }}
       >
         <Tabs.Screen
-          name="feed"
-          options={{
-            title: 'Feed',
-            tabBarIcon: ({ color, size }) => (
-              <House size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
-            ),
-          }}
-        />
-        <Tabs.Screen
           name="dashboard"
           options={{
             title: 'Dashboard',
-            tabBarIcon: ({ color, size }) => (
-              <LayoutDashboard size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
-            ),
+            tabBarIcon: DashboardTabIcon,
+          }}
+        />
+        <Tabs.Screen
+          name="feed"
+          options={{
+            // Updates feed is not a tab. Old history entries redirect to the dashboard.
+            href: null,
+            title: 'Feed',
           }}
         />
         <Tabs.Screen
@@ -321,9 +334,7 @@ export default function TabLayout() {
           options={{
             href: showWorkspaceProjectsTab ? '/(tabs)/workspace-projects' : null,
             title: 'Projects',
-            tabBarIcon: ({ color, size }) => (
-              <Layers size={size} color={color} strokeWidth={ICON_STROKE_TAB} />
-            ),
+            tabBarIcon: ProjectsTabIcon,
           }}
         />
         <Tabs.Screen

@@ -303,7 +303,7 @@ export default function PaywallScreen() {
       } = await supabase.auth.getUser()
       if (user) {
         await refresh()
-        router.replace('/(tabs)/feed')
+        router.replace('/(tabs)/dashboard')
       } else {
         router.replace({
           pathname: '/register',
@@ -335,7 +335,7 @@ export default function PaywallScreen() {
         {
           text: 'OK',
           onPress: () => {
-            if (user) router.replace('/(tabs)/feed')
+            if (user) router.replace('/(tabs)/dashboard')
             else router.replace('/register')
           },
         },

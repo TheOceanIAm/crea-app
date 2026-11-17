@@ -4,6 +4,7 @@ import {
   Image,
   StyleSheet,
   Text,
+  Linking,
   TextInput,
   SectionList,
   TouchableOpacity,
@@ -13,9 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { KeyboardFormModal } from '@/components/KeyboardFormModal'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo-router'
-import { returnToPreviousScreen } from '@/lib/screenReturn'
 import { ChevronLeft, Plus } from 'lucide-react-native'
-import * as WebBrowser from 'expo-web-browser'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { createPrivateWorkspaceProject } from '@/lib/createPrivateWorkspaceProject'
@@ -580,7 +579,11 @@ export default function WorkspaceProjectsScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <ResponsiveScreen>
-        <TouchableOpacity style={styles.backRow} onPress={() => returnToPreviousScreen(router)} hitSlop={12}>
+        <TouchableOpacity
+          style={styles.backRow}
+          onPress={() => router.navigate('/(tabs)/dashboard' as Href)}
+          hitSlop={12}
+        >
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
@@ -599,7 +602,11 @@ export default function WorkspaceProjectsScreen() {
     <SafeAreaView style={styles.safe}>
       <ResponsiveScreen>
       <View style={styles.topRow}>
-        <TouchableOpacity style={styles.backRow} onPress={() => returnToPreviousScreen(router)} hitSlop={12}>
+        <TouchableOpacity
+          style={styles.backRow}
+          onPress={() => router.navigate('/(tabs)/dashboard' as Href)}
+          hitSlop={12}
+        >
           <ChevronLeft size={22} color="#FFDC00" strokeWidth={ICON_STROKE} />
           <Text style={styles.backText}>Dashboard</Text>
         </TouchableOpacity>
@@ -673,11 +680,7 @@ export default function WorkspaceProjectsScreen() {
               style={styles.emptyDemo}
               onPress={() => {
                 const base = process.env.EXPO_PUBLIC_CREA_WEB_URL || 'https://www.creaservices.de'
-                void WebBrowser.openBrowserAsync(`${base.replace(/\/$/, '')}/demo/overview`, {
-                  presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
-                  controlsColor: '#FFDC00',
-                  toolbarColor: '#0a0a0a',
-                })
+                void Linking.openURL(`${base.replace(/\/$/, '')}/demo/overview`).catch(() => {})
               }}
             >
               <Text style={styles.emptyDemoText}>Explore demo project</Text>

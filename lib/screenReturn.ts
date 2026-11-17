@@ -27,15 +27,16 @@ export function clearScreenReturn() {
   returnHref = null
 }
 
-/** Open the screen that launched this one, usually the dashboard. */
+function isFeedHref(href: Href): boolean {
+  const path = typeof href === 'string' ? href : href.pathname
+  return path === '/feed' || path === '/(tabs)/feed'
+}
+
+/** Open the screen that launched this one, usually the dashboard. Never the hidden feed. */
 export function returnToPreviousScreen(router: BackRouter, fallback: Href = '/(tabs)/dashboard') {
   const target = takeScreenReturn()
-  if (target) {
+  if (target && !isFeedHref(target)) {
     router.navigate(target)
-    return
-  }
-  if (router.canGoBack()) {
-    router.back()
     return
   }
   router.navigate(fallback)

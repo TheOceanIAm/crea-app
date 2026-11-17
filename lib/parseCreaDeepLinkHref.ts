@@ -97,7 +97,7 @@ function bookingDeepLinkQuerySuffix(raw: string): string {
 
 /**
  * Maps `crea://jobs/…` / `crea://project/…` (optional query) to an in-app expo-router href.
- * Job links use root **`/jobs/[id]`** (handoff → tabs) so navigation from Messages does not reset tabs to Feed.
+ * Job links use root **`/jobs/[id]`** (handoff → tabs) so navigation from Messages does not reset tabs to the projects dashboard.
  */
 export function parseCreaDeepLinkHref(raw: string): Href | null {
   const u = typeof raw === 'string' ? raw.trim() : ''

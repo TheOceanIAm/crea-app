@@ -10,6 +10,8 @@ import { resolveSessionForAppBootstrap } from '@/lib/authSession'
 import { consumeInitialSupabaseAuthUrlForBootstrap } from '@/lib/authDeepLink'
 import { getLoggedOutEntryRoute } from '@/lib/iosAppStoreCompliance'
 import { onboardingDoneFromHints, resolveAppEntryHref, resolveAppEntryTab } from '@/lib/appEntryRoute'
+import { resolveIncomingEntryHref } from '@/lib/incomingEntryHref'
+import { logStartScreenViewed, startAccountType } from '@/lib/startScreenAnalytics'
 import { awaitBootstrapReveal, resolveBootstrapMinRevealMs, BOOTSTRAP_MIN_REVEAL_QUICK_MS } from '@/lib/bootstrapRevealGate'
 import { prefetchMainTabDataAwait, hydrateMainTabFromDisk } from '@/lib/prefetchTabData'
 import { runPostLoginWarmup } from '@/lib/postLoginWarmup'
@@ -54,7 +56,7 @@ export default function Index() {
   const [loading, setLoading] = useState(true)
   const [session, setSession] = useState<Session | null>(null)
   const [onboardingDone, setOnboardingDone] = useState(true)
-  const [entryHref, setEntryHref] = useState<Href>('/(tabs)/feed' as Href)
+  const [entryHref, setEntryHref] = useState<Href>('/(tabs)/dashboard' as Href)
   const { showBootstrapOverlay, hideBootstrapOverlay } = useAppBootstrapOverlay()
 
   useLayoutEffect(() => {
@@ -84,7 +86,8 @@ export default function Index() {
 
     const enterLoggedIn = async (sessionToUse: Session, bootstrapStartedAt: number) => {
       const uid = sessionToUse.user.id
-      const [hints, entryTab, entry] = await Promise.all([
+      const [incoming, hints, entryTab, entry] = await Promise.all([
+        resolveIncomingEntryHref(),
         readBootstrapHints(uid),
         resolveAppEntryTab(uid),
         resolveAppEntryHref(uid),
@@ -93,14 +96,25 @@ export default function Index() {
 
       if (cancelled) return
 
+      setSession(sessionToUse)
+
+      // A job or project link wins over the projects dashboard.
+      if (incoming) {
+        setOnboardingDone(true)
+        setEntryHref(incoming as Href)
+        finishLoading()
+        runPostLoginWarmup(sessionToUse)
+        return
+      }
+
       const minMs = await resolveBootstrapMinRevealMs(uid, entryTab)
       showBootstrapOverlay({ quick: minMs <= BOOTSTRAP_MIN_REVEAL_QUICK_MS })
 
-      setSession(sessionToUse)
       setEntryHref(entry)
       // Unknown hints (null): do not assume complete — nameless accounts must hit onboarding.
       if (hinted === true) {
         setOnboardingDone(true)
+        if (entryTab === 'dashboard') logStartScreenViewed(startAccountType(hints?.role))
       } else {
         setOnboardingDone(false)
       }
@@ -114,8 +128,14 @@ export default function Index() {
         onOnboardingResolved: (done) => {
           if (cancelled) return
           setOnboardingDone(done)
-          void resolveAppEntryHref(uid).then((href) => {
-            if (!cancelled) setEntryHref(href)
+          void resolveAppEntryTab(uid).then((tab) => {
+            if (cancelled) return
+            if (done && tab === 'dashboard') {
+              void readBootstrapHints(uid).then((next) => {
+                logStartScreenViewed(startAccountType(next?.role ?? hints?.role))
+              })
+            }
+            if (!cancelled) setEntryHref(`/(tabs)/${tab}` as Href)
           })
         },
       })

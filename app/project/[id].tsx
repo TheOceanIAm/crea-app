@@ -1039,7 +1039,7 @@ export default function ProjectWorkspaceScreen() {
       router.back()
       return
     }
-    router.replace('/(tabs)/feed')
+    router.replace('/(tabs)/dashboard')
   }, [router])
 
   if (forbidden || (!loading && !project)) {

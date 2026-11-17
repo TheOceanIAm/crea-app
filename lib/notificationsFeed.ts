@@ -48,11 +48,22 @@ export async function fetchAlertReadKeys(userId: string): Promise<Set<string>> {
 }
 
 export async function markAlertRead(userId: string, alertKey: string): Promise<void> {
+  await markAlertsRead(userId, [alertKey])
+}
+
+export async function markAlertsRead(userId: string, alertKeys: string[]): Promise<boolean> {
+  const unique = [...new Set(alertKeys.map((key) => key.trim()).filter(Boolean))]
+  if (unique.length === 0) return true
+  const readAt = new Date().toISOString()
   const { error } = await supabase.from('user_alert_reads').upsert(
-    { user_id: userId, alert_key: alertKey, read_at: new Date().toISOString() },
+    unique.map((alert_key) => ({ user_id: userId, alert_key, read_at: readAt })),
     { onConflict: 'user_id,alert_key' }
   )
-  if (error) console.warn('[markAlertRead]', error.message)
+  if (error) {
+    console.warn('[markAlertsRead]', error.message)
+    return false
+  }
+  return true
 }
 
 export async function countUnreadAlerts(userId: string): Promise<number> {

@@ -38,6 +38,7 @@ import {
 import type { CompanySubscriptionPlanDb } from '@/lib/companyPlanFromSession'
 import { PLATFORM_TRIAL_DAYS } from '@/lib/platformTrial'
 import { mainTabHref, writeLastMainTab } from '@/lib/appEntryRoute'
+import { logStartScreenViewed, startAccountType } from '@/lib/startScreenAnalytics'
 import { writeBootstrapHints } from '@/lib/bootstrapHints'
 import { ensureOwnProfileName } from '@/lib/ensureProfileName'
 import { upsertFreelancerProfilesRow } from '@/lib/syncFreelancerProfileToWeb'
@@ -98,13 +99,14 @@ export default function OnboardingScreen() {
           'Database update needed',
           'Run supabase/sql/add_profile_onboarding.sql in the Supabase SQL Editor, then reopen the app.'
         )
-        router.replace('/(tabs)/feed')
+        router.replace('/(tabs)/dashboard')
         return
       }
     }
 
     if (!profileNeedsOnboarding(profile)) {
-      router.replace('/(tabs)/feed')
+      logStartScreenViewed(startAccountType(profile?.role))
+      router.replace('/(tabs)/dashboard')
       return
     }
 
@@ -297,8 +299,9 @@ export default function OnboardingScreen() {
       onboardingCompleted: true,
       role: roleChoice,
     })
-    await writeLastMainTab(user.id, 'feed')
-    router.replace(mainTabHref('feed'))
+    await writeLastMainTab(user.id, 'dashboard')
+    logStartScreenViewed(startAccountType(roleChoice))
+    router.replace(mainTabHref('dashboard'))
   }
 
   const goBack = () => {

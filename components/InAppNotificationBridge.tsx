@@ -9,9 +9,10 @@ import {
   Text,
 } from 'react-native'
 import * as Notifications from 'expo-notifications'
-import { useRouter } from 'expo-router'
+import { useRouter, type Href } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { supabase } from '@/lib/supabase'
+import { hrefFromNotificationData } from '@/lib/incomingEntryHref'
 import { invalidateAlertsBadge, subscribeAlertsLivePatch } from '@/lib/invalidateAlerts'
 
 function bannerDedupeKey(id: string): string {
@@ -78,32 +79,8 @@ export function InAppNotificationBridge() {
     if (Platform.OS === 'web') return
 
     const openFromPush = (data: Record<string, unknown> | null) => {
-      if (!data) return
-      const type = typeof data.type === 'string' ? data.type : ''
-      if (type === 'message') {
-        const cid = data.conversationId
-        if (typeof cid === 'string' && cid.length > 0) routerRef.current.push(`/conversation/${cid}`)
-        return
-      }
-      if (type === 'invoice') {
-        const id = data.invoiceId
-        if (typeof id === 'string' && id.length > 0) {
-          routerRef.current.push(`/(tabs)/invoices/${id}`)
-        }
-        return
-      }
-      if (type === 'job_application') {
-        routerRef.current.push('/(tabs)/company-applications')
-        return
-      }
-      if (type === 'workspace_ready' || type === 'project_message' || type === 'workspace_activity') {
-        const pid = data.projectId
-        if (typeof pid === 'string' && pid.length > 0) routerRef.current.push(`/project/${pid}`)
-        return
-      }
-      if (type === 'profile_completion') {
-        routerRef.current.push('/(tabs)/profile')
-      }
+      const href = hrefFromNotificationData(data)
+      if (href) routerRef.current.push(href as Href)
     }
 
     const sub = Notifications.addNotificationReceivedListener((notification) => {

@@ -38,6 +38,7 @@ import {
   type DashboardOverviewData,
 } from '@/lib/dashboardOverview'
 import { DashboardSkeleton } from '@/components/ScreenSkeletons'
+import { OwnProjectsSection } from '@/components/OwnProjectsSection'
 import { PlatformTrialBanners } from '@/components/PlatformTrialBanners'
 
 type CeoQuick = { label: string; icon: LucideIcon; onPress: () => void }
@@ -61,7 +62,7 @@ export function DashboardOverviewSection({
   const role = overview?.role ?? null
   const name = overview?.name ?? ''
   const avatarUrl = overview?.avatarUrl
-  const stats = overview?.stats ?? []
+  const stats = isCompanyProfile(overview?.role ?? undefined) ? (overview?.stats ?? []) : []
   const income = overview?.income
   const freelancerPlan = overview?.freelancerPlan ?? 'free'
   const companyPlan = overview?.companyPlan ?? 'free'
@@ -332,6 +333,8 @@ export function DashboardOverviewSection({
           </Text>
         </View>
       ) : null}
+
+      <OwnProjectsSection />
 
       {!workspaceOnly && stats.length > 0 ? (
         <View style={styles.statsRow}>
