@@ -11,7 +11,6 @@ import { consumeInitialSupabaseAuthUrlForBootstrap } from '@/lib/authDeepLink'
 import { getLoggedOutEntryRoute } from '@/lib/iosAppStoreCompliance'
 import { onboardingDoneFromHints, resolveAppEntryHref, resolveAppEntryTab } from '@/lib/appEntryRoute'
 import { resolveIncomingEntryHref } from '@/lib/incomingEntryHref'
-import { logStartScreenViewed, startAccountType } from '@/lib/startScreenAnalytics'
 import { awaitBootstrapReveal, resolveBootstrapMinRevealMs, BOOTSTRAP_MIN_REVEAL_QUICK_MS } from '@/lib/bootstrapRevealGate'
 import { prefetchMainTabDataAwait, hydrateMainTabFromDisk } from '@/lib/prefetchTabData'
 import { runPostLoginWarmup } from '@/lib/postLoginWarmup'
@@ -64,10 +63,15 @@ export default function Index() {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+    showBootstrapOverlay({ quick: true })
     void (async () => {
       const fast = await readFastBootstrapEnabled()
-      showBootstrapOverlay({ quick: fast })
+      if (!cancelled) showBootstrapOverlay({ quick: fast })
     })()
+    return () => {
+      cancelled = true
+    }
   }, [showBootstrapOverlay])
 
   useEffect(() => {
@@ -75,13 +79,14 @@ export default function Index() {
 
     const finishLoading = () => {
       if (cancelled) return
-      setLoading(false)
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (!cancelled) hideBootstrapOverlay()
-        })
-      })
       void markFastBootstrapEnabled()
+      // Stay on the black bridge until the blob has become the yellow field.
+      // Navigating first lets the native screen cover the overlay, so the yellow never shows.
+      hideBootstrapOverlay({
+        onReveal: () => {
+          if (!cancelled) setLoading(false)
+        },
+      })
     }
 
     const enterLoggedIn = async (sessionToUse: Session, bootstrapStartedAt: number) => {
@@ -114,7 +119,6 @@ export default function Index() {
       // Unknown hints (null): do not assume complete — nameless accounts must hit onboarding.
       if (hinted === true) {
         setOnboardingDone(true)
-        if (entryTab === 'dashboard') logStartScreenViewed(startAccountType(hints?.role))
       } else {
         setOnboardingDone(false)
       }
@@ -130,12 +134,7 @@ export default function Index() {
           setOnboardingDone(done)
           void resolveAppEntryTab(uid).then((tab) => {
             if (cancelled) return
-            if (done && tab === 'dashboard') {
-              void readBootstrapHints(uid).then((next) => {
-                logStartScreenViewed(startAccountType(next?.role ?? hints?.role))
-              })
-            }
-            if (!cancelled) setEntryHref(`/(tabs)/${tab}` as Href)
+            setEntryHref(`/(tabs)/${tab}` as Href)
           })
         },
       })
@@ -153,7 +152,7 @@ export default function Index() {
           initial.result.ok &&
           initial.result.destination === 'reset-password'
         ) {
-          hideBootstrapOverlay()
+          hideBootstrapOverlay({ immediate: true })
           router.replace('/auth/reset-password')
           setLoading(false)
           return

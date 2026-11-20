@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { RefreshControl, ScrollView, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { DashboardOverviewSection } from '@/components/DashboardOverviewSection'
+import { StartScreenBeacon } from '@/components/StartScreenBeacon'
 import { TabScreenHeader } from '@/components/TabScreenHeader'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useFloatingTabBarBottomInset } from '@/lib/floatingTabBarLayout'
@@ -19,6 +20,7 @@ export default function DashboardScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <StartScreenBeacon role={overview ? (overview.role ?? '') : null} />
       <TabScreenHeader title="Dashboard" showMessages />
       <ScrollView
         style={[styles.scroll, { marginBottom: tabBarInset + 12 }]}

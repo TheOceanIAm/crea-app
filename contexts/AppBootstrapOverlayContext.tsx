@@ -1,12 +1,23 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Animated, Easing, StyleSheet, View } from 'react-native'
+import { Platform, StyleSheet, View } from 'react-native'
+import { FullWindowOverlay } from 'react-native-screens'
 import { AppBootstrapLoading } from '@/components/AppBootstrapLoading'
 
 const FAILSAFE_MS = 8_000
-const FADE_OUT_MS = 280
+/** Hold long enough for the mark to land before the reveal, even if session resolves instantly. */
+const MIN_PLAY_MS = 1_150
+const MIN_PLAY_QUICK_MS = 880
+const EXIT_FAILSAFE_MS = 3_200
 
 type ShowBootstrapOptions = {
   quick?: boolean
+}
+
+type HideBootstrapOptions = {
+  /** Skip the minimum play time. The exit animation still runs. */
+  immediate?: boolean
+  /** Fires once the yellow field covers the screen, before the overlay is removed. */
+  onReveal?: () => void
 }
 
 type AppBootstrapOverlayContextValue = {
@@ -14,7 +25,7 @@ type AppBootstrapOverlayContextValue = {
   /** True while splash is visible or fading out — block modals (e.g. Good News) until clear. */
   isBootstrapOverlayBlocking: boolean
   showBootstrapOverlay: (opts?: ShowBootstrapOptions) => void
-  hideBootstrapOverlay: () => void
+  hideBootstrapOverlay: (opts?: HideBootstrapOptions) => void
 }
 
 const AppBootstrapOverlayContext = createContext<AppBootstrapOverlayContextValue | null>(null)
@@ -31,57 +42,97 @@ export function AppBootstrapOverlayProvider({ children }: { children: React.Reac
   const [visible, setVisible] = useState(false)
   const [isBootstrapOverlayBlocking, setIsBootstrapOverlayBlocking] = useState(false)
   const [quickBootstrap, setQuickBootstrap] = useState(true)
+  const [exiting, setExiting] = useState(false)
   const failsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const fadeRef = useRef(new Animated.Value(1)).current
+  const exitDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hidingRef = useRef(false)
+  const hidePendingRef = useRef(false)
+  const visibleRef = useRef(false)
+  const shownAtRef = useRef(0)
+  const quickRef = useRef(true)
+  const revealRef = useRef<(() => void) | null>(null)
 
-  const clearBlocking = useCallback(() => {
-    setIsBootstrapOverlayBlocking(false)
+  const releaseReveal = useCallback(() => {
+    const reveal = revealRef.current
+    revealRef.current = null
+    reveal?.()
   }, [])
 
-  const hideBootstrapOverlay = useCallback(() => {
+  const clearFailsafe = useCallback(() => {
     if (failsafeRef.current) {
       clearTimeout(failsafeRef.current)
       failsafeRef.current = null
     }
-    if (hidingRef.current) return
+  }, [])
+
+  const finishHide = useCallback(() => {
+    clearFailsafe()
+    if (exitDelayRef.current) {
+      clearTimeout(exitDelayRef.current)
+      exitDelayRef.current = null
+    }
+    hidingRef.current = false
+    hidePendingRef.current = false
+    visibleRef.current = false
+    releaseReveal()
+    setExiting(false)
+    setVisible(false)
+    setIsBootstrapOverlayBlocking(false)
+  }, [clearFailsafe, releaseReveal])
+
+  const beginExit = useCallback(() => {
+    exitDelayRef.current = null
+    if (!visibleRef.current) {
+      finishHide()
+      return
+    }
     hidingRef.current = true
-    Animated.timing(fadeRef, {
-      toValue: 0,
-      duration: FADE_OUT_MS,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      hidingRef.current = false
-      if (finished) {
-        setVisible(false)
-        fadeRef.setValue(1)
-        clearBlocking()
-      }
-    })
-  }, [fadeRef, clearBlocking])
+    setExiting(true)
+    clearFailsafe()
+    failsafeRef.current = setTimeout(finishHide, EXIT_FAILSAFE_MS)
+  }, [clearFailsafe, finishHide])
+
+  const hideBootstrapOverlay = useCallback(
+    (opts?: HideBootstrapOptions) => {
+      clearFailsafe()
+      if (opts?.onReveal) revealRef.current = opts.onReveal
+      if (hidingRef.current || hidePendingRef.current) return
+      hidePendingRef.current = true
+      const minPlay = quickRef.current ? MIN_PLAY_QUICK_MS : MIN_PLAY_MS
+      const wait = opts?.immediate ? 0 : Math.max(0, minPlay - (Date.now() - shownAtRef.current))
+      exitDelayRef.current = setTimeout(beginExit, wait)
+    },
+    [beginExit, clearFailsafe]
+  )
 
   const showBootstrapOverlay = useCallback(
     (opts?: ShowBootstrapOptions) => {
+      if (hidingRef.current || hidePendingRef.current) return
+      if (exitDelayRef.current) {
+        clearTimeout(exitDelayRef.current)
+        exitDelayRef.current = null
+      }
       hidingRef.current = false
-      fadeRef.setValue(1)
-      setQuickBootstrap(opts?.quick !== false)
+      hidePendingRef.current = false
+      revealRef.current = null
+      const quick = opts?.quick !== false
+      quickRef.current = quick
+      setQuickBootstrap(quick)
+      setExiting(false)
       setIsBootstrapOverlayBlocking(true)
+      if (!visibleRef.current) shownAtRef.current = Date.now()
+      visibleRef.current = true
       setVisible(true)
-      if (failsafeRef.current) clearTimeout(failsafeRef.current)
-      failsafeRef.current = setTimeout(() => {
-        failsafeRef.current = null
-        setVisible(false)
-        fadeRef.setValue(1)
-        clearBlocking()
-      }, FAILSAFE_MS)
+      clearFailsafe()
+      failsafeRef.current = setTimeout(finishHide, FAILSAFE_MS)
     },
-    [fadeRef, clearBlocking]
+    [clearFailsafe, finishHide]
   )
 
   useEffect(() => {
     return () => {
       if (failsafeRef.current) clearTimeout(failsafeRef.current)
+      if (exitDelayRef.current) clearTimeout(exitDelayRef.current)
     }
   }, [])
 
@@ -99,17 +150,29 @@ export function AppBootstrapOverlayProvider({ children }: { children: React.Reac
     <AppBootstrapOverlayContext.Provider value={ctx}>
       {children}
       {visible ? (
-        <Animated.View
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          pointerEvents="auto"
-          style={[styles.overlayWrap, { opacity: fadeRef }]}
-        >
-          <AppBootstrapLoading quick={quickBootstrap} />
-        </Animated.View>
+        <SplashWindow>
+          <View
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            pointerEvents="auto"
+            style={styles.overlayWrap}
+          >
+            <AppBootstrapLoading
+              quick={quickBootstrap}
+              exiting={exiting}
+              onCovered={releaseReveal}
+              onExitEnd={finishHide}
+            />
+          </View>
+        </SplashWindow>
       ) : null}
     </AppBootstrapOverlayContext.Provider>
   )
+}
+
+function SplashWindow({ children }: { children: React.ReactNode }) {
+  if (Platform.OS === 'ios') return <FullWindowOverlay>{children}</FullWindowOverlay>
+  return children
 }
 
 const styles = StyleSheet.create({

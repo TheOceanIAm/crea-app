@@ -38,7 +38,6 @@ import {
 import type { CompanySubscriptionPlanDb } from '@/lib/companyPlanFromSession'
 import { PLATFORM_TRIAL_DAYS } from '@/lib/platformTrial'
 import { mainTabHref, writeLastMainTab } from '@/lib/appEntryRoute'
-import { logStartScreenViewed, startAccountType } from '@/lib/startScreenAnalytics'
 import { writeBootstrapHints } from '@/lib/bootstrapHints'
 import { ensureOwnProfileName } from '@/lib/ensureProfileName'
 import { upsertFreelancerProfilesRow } from '@/lib/syncFreelancerProfileToWeb'
@@ -96,8 +95,8 @@ export default function OnboardingScreen() {
       const msg = error.message.toLowerCase()
       if (msg.includes('onboarding_completed') || msg.includes('column')) {
         Alert.alert(
-          'Database update needed',
-          'Run supabase/sql/add_profile_onboarding.sql in the Supabase SQL Editor, then reopen the app.'
+          'Couldn’t finish setup',
+          'Close the app and open it again. If it still fails, try once more in a few minutes.'
         )
         router.replace('/(tabs)/dashboard')
         return
@@ -105,7 +104,6 @@ export default function OnboardingScreen() {
     }
 
     if (!profileNeedsOnboarding(profile)) {
-      logStartScreenViewed(startAccountType(profile?.role))
       router.replace('/(tabs)/dashboard')
       return
     }
@@ -250,10 +248,7 @@ export default function OnboardingScreen() {
       setSaving(false)
       const em = error.message.toLowerCase()
       if (em.includes('terms_accepted_at') || em.includes('column')) {
-        Alert.alert(
-          'Database update needed',
-          'Run supabase/sql/add_profile_terms_accepted.sql in the Supabase SQL Editor, then tap Finish again.'
-        )
+        Alert.alert('Could not save', 'Try Finish again in a moment.')
       } else {
         Alert.alert('Could not save', error.message)
       }
@@ -300,7 +295,6 @@ export default function OnboardingScreen() {
       role: roleChoice,
     })
     await writeLastMainTab(user.id, 'dashboard')
-    logStartScreenViewed(startAccountType(roleChoice))
     router.replace(mainTabHref('dashboard'))
   }
 
