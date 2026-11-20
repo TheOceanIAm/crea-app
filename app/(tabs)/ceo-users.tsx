@@ -85,7 +85,7 @@ export default function CeoUsersScreen() {
     }
     const parsed = parseUsersPayload(data)
     if (!parsed.ok) {
-      setHint('CEO access required, or run supabase/sql/ceo_admin_rpcs.sql.')
+      setHint('CEO access required.')
       setRows([])
       return
     }

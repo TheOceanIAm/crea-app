@@ -74,7 +74,7 @@ export default function CeoCompaniesScreen() {
     setHint(null)
     const { data, error } = await supabase.rpc('ceo_list_companies', {
       p_search: debounced,
-      p_limit: 150,
+      p_limit: 2000,
     })
     setLoading(false)
     setRefreshing(false)
@@ -85,7 +85,7 @@ export default function CeoCompaniesScreen() {
     }
     const parsed = parseCompaniesPayload(data)
     if (!parsed.ok) {
-      setHint('CEO access required, or run supabase/sql/ceo_admin_rpcs.sql.')
+      setHint('CEO access required.')
       setRows([])
       return
     }
