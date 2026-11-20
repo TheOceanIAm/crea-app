@@ -55,8 +55,7 @@ async function uploadAvatarBase64(userId: string, base64: string): Promise<Avata
     return {
       ok: false,
       error:
-        upErr.message +
-        ' — Create a public bucket named "avatars" and storage policies (see supabase/sql/crea_app_features.sql).',
+        'Could not save that photo. Try again.',
     }
   }
 

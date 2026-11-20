@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   Modal,
   PanResponder,
+  PixelRatio,
   Pressable,
   StyleSheet,
   Text,
@@ -11,7 +11,8 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { cropImageBase64 } from "@/lib/cropImageBase64";
+import { cropImageBase64, imagePixelSize, releaseDecodedImageCache, renderFramePreview } from "@/lib/cropImageBase64";
+import { nativeBinaryHasWebView } from "@/lib/nativeWebView";
 import {
   frameSizeForAspect,
   initialCropView,
@@ -43,6 +44,14 @@ export function ImageCropHost() {
   );
 }
 
+type FrameJob = {
+  session: number;
+  base64: string;
+  view: CropView;
+  frameW: number;
+  frameH: number;
+};
+
 function ImageCropModal({
   request,
   onDone,
@@ -53,18 +62,49 @@ function ImageCropModal({
   const insets = useSafeAreaInsets();
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [view, setView] = useState<CropView | null>(null);
+  const [frameUri, setFrameUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const viewRef = useRef<CropView | null>(null);
   const naturalRef = useRef(natural);
   const frameRef = useRef({ width: 1, height: 1 });
+  const requestRef = useRef(request);
+  const viewRequestRef = useRef<ImageCropRequest | null>(null);
+  const fittedFrame = useRef({ w: 0, h: 0 });
   const grantRef = useRef<{ view: CropView; dist: number; count: number; originDx: number; originDy: number } | null>(null);
+  const sessionRef = useRef(0);
+  const latestJobRef = useRef<FrameJob | null>(null);
+  const bakingRef = useRef(false);
+  const aliveRef = useRef(true);
+  const webRef = useRef<{ injectJavaScript: (script: string) => void } | null>(null);
+  const webReadyRef = useRef(false);
+
+  requestRef.current = request;
+  naturalRef.current = natural;
+  viewRef.current = view;
 
   useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    sessionRef.current += 1;
+    latestJobRef.current = null;
     setBusy(false);
     setError(null);
     setView(null);
-    setNatural(request && request.width > 0 && request.height > 0 ? { w: request.width, h: request.height } : null);
+    setNatural(null);
+    setFrameUri(null);
+    viewRef.current = null;
+    viewRequestRef.current = null;
+    fittedFrame.current = { w: 0, h: 0 };
+    webReadyRef.current = false;
+    return () => {
+      releaseDecodedImageCache();
+    };
   }, [request]);
 
   const { width: screenW, height: screenH } = useWindowDimensions();
@@ -79,15 +119,92 @@ function ImageCropModal({
     [aspect, screenW, screenH, insets.top, insets.bottom]
   );
   frameRef.current = frame;
-  naturalRef.current = natural;
-  viewRef.current = view;
+
+  useEffect(() => {
+    if (!request?.base64) return;
+    const session = sessionRef.current;
+    const timer = setTimeout(() => {
+      if (session !== sessionRef.current) return;
+      try {
+        const size = imagePixelSize(request.base64);
+        if (session !== sessionRef.current) return;
+        setNatural({ w: size.width, h: size.height });
+      } catch (err) {
+        if (session !== sessionRef.current) return;
+        setError(err instanceof Error ? err.message : "Could not open that photo.");
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [request]);
 
   useEffect(() => {
     if (!natural) return;
+    const requestNow = requestRef.current;
+    if (!requestNow) return;
+    if (
+      viewRef.current &&
+      viewRequestRef.current === requestNow &&
+      fittedFrame.current.w === frame.width &&
+      fittedFrame.current.h === frame.height
+    ) {
+      return;
+    }
+    fittedFrame.current = { w: frame.width, h: frame.height };
     const next = initialCropView(natural.w, natural.h, frame.width, frame.height);
+    viewRequestRef.current = requestNow;
     viewRef.current = next;
     setView(next);
   }, [natural, frame.width, frame.height]);
+
+  const pumpRef = useRef<() => void>(() => undefined);
+  pumpRef.current = () => {
+    if (bakingRef.current) return;
+    const job = latestJobRef.current;
+    if (!job || job.session !== sessionRef.current) return;
+    bakingRef.current = true;
+    setTimeout(() => {
+      void (async () => {
+        try {
+          if (job.session !== sessionRef.current || !aliveRef.current) return;
+          const preview = renderFramePreview(job.base64, job.view, job.frameW, job.frameH, PixelRatio.get());
+          if (job.session !== sessionRef.current || !aliveRef.current) return;
+          setFrameUri(`data:image/jpeg;base64,${preview.base64}`);
+        } catch (err) {
+          if (job.session === sessionRef.current && aliveRef.current) {
+            setError(err instanceof Error ? err.message : "Could not open that photo.");
+          }
+        } finally {
+          bakingRef.current = false;
+          const latest = latestJobRef.current;
+          if (latest && latest.session === sessionRef.current && latest !== job && aliveRef.current) {
+            pumpRef.current();
+          }
+        }
+      })();
+    }, 0);
+  };
+
+  useEffect(() => {
+    if (!request?.base64 || !view || !natural || viewRequestRef.current !== request) return;
+    latestJobRef.current = {
+      session: sessionRef.current,
+      base64: request.base64,
+      view,
+      frameW: frame.width,
+      frameH: frame.height,
+    };
+    pumpRef.current();
+  }, [request, view, natural, frame.width, frame.height]);
+
+  useEffect(() => {
+    if (!frameUri || !webReadyRef.current) return;
+    webRef.current?.injectJavaScript(`window.__setCrop(${JSON.stringify(frameUri)});true;`);
+  }, [frameUri]);
+
+  const previewHtml = useMemo(
+    () => cropPreviewDocument(request?.shape === "rect" ? "rect" : "circle"),
+    [request?.shape]
+  );
 
   const publish = (next: CropView) => {
     viewRef.current = next;
@@ -188,10 +305,14 @@ function ImageCropModal({
     }, 40);
   };
 
-  const scale =
-    natural && view ? Math.max(frame.width / natural.w, frame.height / natural.h) * view.zoom : 0;
-
   if (!request) return null;
+
+  const radius = request.shape === "circle" ? Math.min(frame.width, frame.height) / 2 : 16;
+  const CropWebView = loadCropWebView();
+  const showPreview = (uri: string | null) => {
+    if (!uri || !webReadyRef.current) return;
+    webRef.current?.injectJavaScript(`window.__setCrop(${JSON.stringify(uri)});true;`);
+  };
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={() => onDone({ ok: false, cancelled: true })}>
@@ -199,37 +320,40 @@ function ImageCropModal({
         <Text style={styles.title}>Choose the crop</Text>
         <Text style={styles.hint}>Drag to move the photo. Pinch or use + and − to zoom.</Text>
         <View
-          style={[
-            styles.frame,
-            request?.shape === "circle" ? styles.circle : styles.rect,
-            { width: frame.width, height: frame.height },
-          ]}
+          collapsable={false}
+          style={[styles.frame, { width: frame.width, height: frame.height }]}
           {...dragResponder.panHandlers}
         >
-          <Image
-              source={{ uri: request.uri }}
-              onLoad={(event) => {
-                const width = event.nativeEvent.source?.width;
-                const height = event.nativeEvent.source?.height;
-                if (width > 0 && height > 0) {
-                  setNatural((current) =>
-                    current && current.w === width && current.h === height ? current : { w: width, h: height }
-                  );
-                }
-              }}
-              resizeMode="contain"
-              style={
-                natural && view
-                  ? {
-                      position: "absolute",
-                      width: natural.w * scale,
-                      height: natural.h * scale,
-                      left: view.tx,
-                      top: view.ty,
-                    }
-                  : styles.hiddenImage
-              }
-            />
+          {CropWebView ? (
+            <View pointerEvents="none" style={{ width: frame.width, height: frame.height, backgroundColor: "#000" }}>
+              <CropWebView
+                ref={webRef}
+                source={{ html: previewHtml }}
+                style={{ width: frame.width, height: frame.height, backgroundColor: "#000" }}
+                originWhitelist={["*"]}
+                javaScriptEnabled
+                scrollEnabled={false}
+                bounces={false}
+                showsHorizontalScrollIndicator={false}
+                showsVerticalScrollIndicator={false}
+                setSupportMultipleWindows={false}
+                androidLayerType="hardware"
+                onLoadEnd={() => {
+                  webReadyRef.current = true;
+                  showPreview(frameUri);
+                }}
+              />
+            </View>
+          ) : null}
+          {frameUri ? null : (
+            <View pointerEvents="none" style={[styles.spinner, { borderRadius: radius }]}>
+              <ActivityIndicator color="#FFDC00" />
+            </View>
+          )}
+          <View
+            pointerEvents="none"
+            style={[styles.ring, { width: frame.width, height: frame.height, borderRadius: radius }]}
+          />
         </View>
         <View style={styles.zoomRow}>
           <Pressable style={styles.zoomButton} onPress={() => zoomBy(1 / 1.2)} disabled={!view || busy}>
@@ -254,6 +378,20 @@ function ImageCropModal({
   );
 }
 
+function cropPreviewDocument(shape: "circle" | "rect"): string {
+  const radius = shape === "circle" ? "50%" : "16px";
+  return `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}img{width:100%;height:100%;object-fit:fill;display:block;background:#000;border-radius:${radius}}</style></head><body><img id="p" alt=""><script>window.__setCrop=function(src){document.getElementById("p").src=src}</script></body></html>`;
+}
+
+function loadCropWebView(): import("react").ComponentType<Record<string, unknown>> | null {
+  if (!nativeBinaryHasWebView()) return null;
+  try {
+    return require("react-native-webview").WebView as import("react").ComponentType<Record<string, unknown>>;
+  } catch {
+    return null;
+  }
+}
+
 function touchDistance(touches: readonly { pageX: number; pageY: number }[]): number {
   const first = touches[0];
   const second = touches[1];
@@ -273,14 +411,25 @@ const styles = StyleSheet.create({
   title: { color: "#fff", fontSize: 16, fontWeight: "700" },
   hint: { color: "rgba(255,255,255,0.45)", fontSize: 12, textAlign: "center", lineHeight: 18 },
   frame: {
-    overflow: "hidden",
     backgroundColor: "#000",
+  },
+  spinner: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#000",
+  },
+  ring: {
+    position: "absolute",
+    left: 0,
+    top: 0,
     borderWidth: 2,
     borderColor: "#FFDC00",
   },
-  circle: { borderRadius: 999 },
-  rect: { borderRadius: 16 },
-  hiddenImage: { width: 1, height: 1, opacity: 0 },
   zoomRow: { flexDirection: "row", alignItems: "center", gap: 16 },
   zoomButton: {
     width: 44,

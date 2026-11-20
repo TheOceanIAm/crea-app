@@ -106,6 +106,23 @@ export function sourceCrop(
   return { sx, sy, sw, sh };
 }
 
+/** Pixel edge of a preview bitmap that matches the crop frame on this screen. */
+export function previewPixelEdge(
+  imgW: number,
+  imgH: number,
+  frameW: number,
+  frameH: number,
+  zoom: number,
+  pixelRatio: number
+): number {
+  const ratio = Number.isFinite(pixelRatio) && pixelRatio > 0 ? pixelRatio : 1;
+  const scale = viewScale(imgW, imgH, frameW, frameH, zoom);
+  const displayEdge = Math.max(imgW, imgH) * scale * ratio;
+  const sourceEdge = Math.max(imgW, imgH);
+  if (!Number.isFinite(displayEdge) || displayEdge <= 0) return Math.max(1, Math.round(sourceEdge) || 1);
+  return Math.max(1, Math.min(sourceEdge, Math.ceil(displayEdge)));
+}
+
 export function outputPixelSize(
   sw: number,
   sh: number,

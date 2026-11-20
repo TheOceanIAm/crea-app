@@ -1,7 +1,14 @@
 import { Buffer } from "buffer";
 import * as jpeg from "jpeg-js";
 import { decode as decodePng, toRGBA8 } from "upng-js";
-import { outputPixelSize, sourceCrop, type CropView, type SourceCrop } from "@/lib/imageCropGeometry";
+import {
+  CROP_ZOOM_MAX,
+  outputPixelSize,
+  previewPixelEdge,
+  sourceCrop,
+  type CropView,
+  type SourceCrop,
+} from "@/lib/imageCropGeometry";
 
 const globalWithBuffer = globalThis as typeof globalThis & { Buffer?: typeof Buffer };
 if (!globalWithBuffer.Buffer) globalWithBuffer.Buffer = Buffer;
@@ -18,8 +25,7 @@ export function cropImageBase64(options: {
   maxEdge: number;
   maxBytes: number;
 }): string {
-  const bytes = new Uint8Array(Buffer.from(options.base64, "base64"));
-  const decoded = decodeToRgba(bytes);
+  const decoded = decodeCached(options.base64);
   const rect = sourceCrop(options.view, options.width, options.height, options.frameWidth, options.frameHeight);
   const mapped = {
     sx: rect.sx * (decoded.width / options.width),
@@ -37,6 +43,110 @@ export function cropImageBase64(options: {
     encoded = jpeg.encode({ data: pixels, width: size.width, height: size.height }, quality).data;
   }
   return Buffer.from(encoded).toString("base64");
+}
+
+let decodedCache: { key: string; image: RgbaImage } | null = null;
+let workCache: { key: string; edge: number; image: RgbaImage } | null = null;
+
+export function releaseDecodedImageCache() {
+  decodedCache = null;
+  workCache = null;
+}
+
+function decodeCached(base64: string): RgbaImage {
+  if (decodedCache?.key === base64) return decodedCache.image;
+  const bytes = new Uint8Array(Buffer.from(base64, "base64"));
+  const image = decodeToRgba(bytes);
+  decodedCache = { key: base64, image };
+  return image;
+}
+
+export type FramePreview = {
+  base64: string;
+  width: number;
+  height: number;
+  sourceWidth: number;
+  sourceHeight: number;
+};
+
+export function imagePixelSize(base64: string): { width: number; height: number } {
+  const image = decodeCached(base64);
+  return { width: image.width, height: image.height };
+}
+
+/**
+ * JPEG of only the pixels inside the crop frame, at the frame's device-pixel size.
+ * The native image view decodes to its layout size and will not ask again for the same
+ * file, so a larger photo (or the camera file) gets stuck as a tiny bitmap and looks blurred.
+ */
+export function renderFramePreview(
+  base64: string,
+  view: CropView,
+  frameWidth: number,
+  frameHeight: number,
+  pixelRatio: number
+): FramePreview {
+  const decoded = decodeCached(base64);
+  const ratio = Number.isFinite(pixelRatio) && pixelRatio > 0 ? pixelRatio : 1;
+  let outW = Math.max(1, Math.round(frameWidth * ratio));
+  let outH = Math.max(1, Math.round(frameHeight * ratio));
+  const cap = 2048;
+  const longest = Math.max(outW, outH);
+  if (longest > cap) {
+    const shrink = cap / longest;
+    outW = Math.max(1, Math.round(outW * shrink));
+    outH = Math.max(1, Math.round(outH * shrink));
+  }
+  const work = workingImage(base64, decoded, frameWidth, frameHeight, view.zoom, ratio);
+  const rect = sourceCrop(view, decoded.width, decoded.height, frameWidth, frameHeight);
+  const mapped = {
+    sx: rect.sx * (work.width / decoded.width),
+    sy: rect.sy * (work.height / decoded.height),
+    sw: rect.sw * (work.width / decoded.width),
+    sh: rect.sh * (work.height / decoded.height),
+  };
+  const pixels = sampleFrame(work, mapped, outW, outH);
+  flattenOntoBackground(pixels);
+  const encoded = jpeg.encode({ data: pixels, width: outW, height: outH }, 82).data;
+  return {
+    base64: Buffer.from(encoded).toString("base64"),
+    width: outW,
+    height: outH,
+    sourceWidth: decoded.width,
+    sourceHeight: decoded.height,
+  };
+}
+
+function workingImage(
+  key: string,
+  decoded: RgbaImage,
+  frameWidth: number,
+  frameHeight: number,
+  zoom: number,
+  pixelRatio: number
+): RgbaImage {
+  const needed = previewPixelEdge(decoded.width, decoded.height, frameWidth, frameHeight, zoom, pixelRatio);
+  if (workCache?.key === key && workCache.edge + 1 >= needed) return workCache.image;
+  const coverZoom = Math.min(CROP_ZOOM_MAX, zoom <= 1 ? zoom : zoom * 1.4);
+  const edge = Math.max(
+    needed,
+    previewPixelEdge(decoded.width, decoded.height, frameWidth, frameHeight, coverZoom, pixelRatio)
+  );
+  const sourceEdge = Math.max(decoded.width, decoded.height);
+  if (edge >= sourceEdge * 0.98) {
+    workCache = { key, edge: sourceEdge, image: decoded };
+    return decoded;
+  }
+  const scale = edge / sourceEdge;
+  const width = Math.max(1, Math.round(decoded.width * scale));
+  const height = Math.max(1, Math.round(decoded.height * scale));
+  const image = {
+    width,
+    height,
+    data: resample(decoded, { sx: 0, sy: 0, sw: decoded.width, sh: decoded.height }, width, height),
+  };
+  workCache = { key, edge, image };
+  return image;
 }
 
 function decodeToRgba(bytes: Uint8Array): RgbaImage {
@@ -57,6 +167,27 @@ function decodeToRgba(bytes: Uint8Array): RgbaImage {
     return { width: png.width, height: png.height, data: new Uint8Array(frame) };
   }
   throw new Error("Use a JPEG or PNG photo.");
+}
+
+function sampleFrame(src: RgbaImage, rect: SourceCrop, outW: number, outH: number): Uint8Array {
+  const sx0 = clamp(rect.sx, 0, Math.max(0, src.width - 1));
+  const sy0 = clamp(rect.sy, 0, Math.max(0, src.height - 1));
+  const sw = clamp(rect.sw, 1, src.width - sx0);
+  const sh = clamp(rect.sh, 1, src.height - sy0);
+  if (Math.abs(sw - outW) < 0.75 && Math.abs(sh - outH) < 0.75) {
+    const out = new Uint8Array(outW * outH * 4);
+    const x0 = clamp(Math.round(sx0), 0, src.width - 1);
+    const y0 = clamp(Math.round(sy0), 0, src.height - 1);
+    const copyW = Math.min(outW, src.width - x0);
+    const copyH = Math.min(outH, src.height - y0);
+    const rowBytes = copyW * 4;
+    for (let y = 0; y < copyH; y++) {
+      const start = ((y0 + y) * src.width + x0) * 4;
+      out.set(src.data.subarray(start, start + rowBytes), y * outW * 4);
+    }
+    return out;
+  }
+  return resample(src, { sx: sx0, sy: sy0, sw, sh }, outW, outH);
 }
 
 function resample(src: RgbaImage, rect: SourceCrop, outW: number, outH: number): Uint8Array {
