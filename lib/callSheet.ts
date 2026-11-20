@@ -33,6 +33,20 @@ export type CallSheetPlaces = {
   hospital: string
 }
 
+/** Shared by the project call sheet and the public generator. */
+export type CallSheetAddress = {
+  name: string
+  address: string
+  notes?: string
+}
+
+/** 24-hour clock, HH:MM. Empty string means no time. */
+export type CallSheetClock = string
+
+export type CallSheetLocation = CallSheetAddress & {
+  id: string
+}
+
 export type CallSheetDepartments = {
   camera: string
   sound: string
@@ -55,6 +69,8 @@ export type CallSheetSceneRow = {
   cast: string
   location: string
   move: string
+  time?: CallSheetClock
+  location_id?: string
 }
 
 export type CallSheetBackgroundRow = {
@@ -74,7 +90,18 @@ export type CallSheetDocument = {
   background: CallSheetBackgroundRow[]
   contacts: CallSheetContacts
   scenes: CallSheetSceneRow[]
+  locations: CallSheetLocation[]
 }
+
+export const CALL_SHEET_LOCATION_LIMIT = 30
+export const CALL_SHEET_SCENE_LIMIT = 500
+export const CALL_SHEET_LOCATION_NAME_LIMIT = 120
+export const CALL_SHEET_LOCATION_ADDRESS_LIMIT = 300
+export const CALL_SHEET_LOCATION_NOTES_LIMIT = 2000
+
+export const CALL_SHEET_CLOCK_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+export const CALL_SHEET_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const EMPTY_CALL_SHEET_DAY: CallSheetDayTimes = {
   general_call: '',
@@ -114,6 +141,8 @@ export const EMPTY_CALL_SHEET_SCENE: CallSheetSceneRow = {
   cast: '',
   location: '',
   move: '',
+  time: '',
+  location_id: '',
 }
 
 export const CALL_SHEET_PLACE_ORDER: Array<{ key: keyof CallSheetPlaces; label: string }> = [
@@ -138,6 +167,7 @@ export function emptyCallSheet(): CallSheetDocument {
     background: [],
     contacts: { ...EMPTY_CALL_SHEET_CONTACTS },
     scenes: [],
+    locations: [],
   }
 }
 
@@ -148,6 +178,15 @@ function asRecord(raw: unknown): Record<string, unknown> | null {
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v)
+}
+
+function hasOwn(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+function clockOrEmpty(value: unknown): CallSheetClock {
+  const text = str(value).trim()
+  return CALL_SHEET_CLOCK_RE.test(text) ? text : ''
 }
 
 function parsePersonCell(raw: unknown): CallSheetPersonCell {
@@ -247,13 +286,48 @@ function parseScenes(raw: unknown): CallSheetSceneRow[] {
         cast: str(obj.cast).trim(),
         location: str(obj.location).trim(),
         move: str(obj.move).trim(),
+        time: hasOwn(obj, 'time') ? clockOrEmpty(obj.time) : '',
+        location_id:
+          hasOwn(obj, 'location_id') && CALL_SHEET_UUID_RE.test(str(obj.location_id).trim())
+            ? str(obj.location_id).trim()
+            : '',
       }
-      if (!next.scene && !next.int_ext && !next.description && !next.cast && !next.location && !next.move) {
+      if (
+        !next.scene &&
+        !next.int_ext &&
+        !next.description &&
+        !next.cast &&
+        !next.location &&
+        !next.move &&
+        !next.time &&
+        !next.location_id
+      ) {
         return null
       }
       return next
     })
     .filter((row): row is CallSheetSceneRow => row != null)
+}
+
+function parseLocations(raw: unknown): CallSheetLocation[] {
+  if (!Array.isArray(raw)) return []
+  const out: CallSheetLocation[] = []
+  for (const item of raw) {
+    const obj = asRecord(item)
+    if (!obj) continue
+    const id = str(obj.id).trim()
+    if (!CALL_SHEET_UUID_RE.test(id)) continue
+    const notes = str(obj.notes).trim().slice(0, CALL_SHEET_LOCATION_NOTES_LIMIT)
+    const next: CallSheetLocation = {
+      id,
+      name: str(obj.name).trim().slice(0, CALL_SHEET_LOCATION_NAME_LIMIT),
+      address: str(obj.address).trim().slice(0, CALL_SHEET_LOCATION_ADDRESS_LIMIT),
+    }
+    if (notes) next.notes = notes
+    out.push(next)
+    if (out.length >= CALL_SHEET_LOCATION_LIMIT) break
+  }
+  return out
 }
 
 function parseBackground(raw: unknown): CallSheetBackgroundRow[] {
@@ -276,32 +350,80 @@ function parseBackground(raw: unknown): CallSheetBackgroundRow[] {
     .filter((row): row is CallSheetBackgroundRow => row != null)
 }
 
-export function isCallSheetV2(raw: unknown): boolean {
-  const obj = asRecord(raw)
-  return Boolean(obj && obj.v === 2 && asRecord(obj.people))
+function versionOf(obj: Record<string, unknown>): number | null {
+  if (obj.v === 3 || obj.v === '3') return 3
+  if (obj.v === 2 || obj.v === '2') return 2
+  return null
 }
 
-export function parseCallSheet(raw: unknown): CallSheetDocument {
+function documentFrom(obj: Record<string, unknown>): CallSheetDocument {
+  return {
+    v: 2,
+    people: parsePeople(obj.people),
+    day: parseDay(obj.day),
+    places: parsePlaces(obj.places),
+    special: str(obj.special).trim(),
+    departments: parseDepartments(obj.departments),
+    background: parseBackground(obj.background),
+    contacts: parseContacts(obj.contacts),
+    scenes: parseScenes(obj.scenes),
+    locations: hasOwn(obj, 'locations') ? parseLocations(obj.locations) : [],
+  }
+}
+
+export function isCallSheetV2(raw: unknown): boolean {
+  const obj = asRecord(raw)
+  const version = obj ? versionOf(obj) : null
+  return Boolean(obj && (version === 2 || version === 3) && asRecord(obj.people))
+}
+
+/**
+ * Reads a stored call sheet and always returns version 2.
+ * Locations, scene time, and location_id are kept when those keys are present.
+ */
+export function normalizeCallSheet(raw: unknown): CallSheetDocument {
   const empty = emptyCallSheet()
   const obj = asRecord(raw)
   if (!obj) return empty
-  if (isCallSheetV2(obj)) {
-    return {
-      v: 2,
-      people: parsePeople(obj.people),
-      day: parseDay(obj.day),
-      places: parsePlaces(obj.places),
-      special: str(obj.special).trim(),
-      departments: parseDepartments(obj.departments),
-      background: parseBackground(obj.background),
-      contacts: parseContacts(obj.contacts),
-      scenes: parseScenes(obj.scenes),
-    }
+  const version = versionOf(obj)
+  if (version === 2 || version === 3 || hasOwn(obj, 'locations') || hasOwn(obj, 'scenes') || asRecord(obj.people)) {
+    return documentFrom(obj)
   }
   return { ...empty, people: parsePeople(obj) }
 }
 
+export function parseCallSheet(raw: unknown): CallSheetDocument {
+  return normalizeCallSheet(raw)
+}
+
+function serializeScene(row: CallSheetSceneRow): CallSheetSceneRow | null {
+  const next: CallSheetSceneRow = {
+    scene: row.scene.trim(),
+    int_ext: row.int_ext.trim(),
+    description: row.description.trim(),
+    cast: row.cast.trim(),
+    location: row.location.trim(),
+    move: row.move.trim(),
+    time: clockOrEmpty(row.time),
+    location_id: CALL_SHEET_UUID_RE.test((row.location_id ?? '').trim()) ? (row.location_id ?? '').trim() : '',
+  }
+  if (
+    !next.scene &&
+    !next.int_ext &&
+    !next.description &&
+    !next.cast &&
+    !next.location &&
+    !next.move &&
+    !next.time &&
+    !next.location_id
+  ) {
+    return null
+  }
+  return next
+}
+
 export function serializeCallSheet(doc: CallSheetDocument): CallSheetDocument {
+  const ids = new Set(doc.locations.map((loc) => loc.id))
   return {
     v: 2,
     people: { ...doc.people },
@@ -311,15 +433,66 @@ export function serializeCallSheet(doc: CallSheetDocument): CallSheetDocument {
     departments: { ...EMPTY_CALL_SHEET_DEPARTMENTS, ...doc.departments },
     background: Array.isArray(doc.background) ? doc.background : [],
     contacts: { ...EMPTY_CALL_SHEET_CONTACTS, ...doc.contacts },
-    scenes: parseScenes(doc.scenes),
+    locations: doc.locations.slice(0, CALL_SHEET_LOCATION_LIMIT).map((loc) => {
+      const notes = (loc.notes ?? '').trim().slice(0, CALL_SHEET_LOCATION_NOTES_LIMIT)
+      const next: CallSheetLocation = {
+        id: loc.id,
+        name: loc.name.trim().slice(0, CALL_SHEET_LOCATION_NAME_LIMIT),
+        address: loc.address.trim().slice(0, CALL_SHEET_LOCATION_ADDRESS_LIMIT),
+      }
+      if (notes) next.notes = notes
+      return next
+    }),
+    scenes: (Array.isArray(doc.scenes) ? doc.scenes : [])
+      .slice(0, CALL_SHEET_SCENE_LIMIT)
+      .map((row) => {
+        const next = serializeScene(row)
+        if (!next) return null
+        if (next.location_id && !ids.has(next.location_id)) next.location_id = ''
+        return next
+      })
+      .filter((row): row is CallSheetSceneRow => row != null),
   }
+}
+
+/**
+ * Old clients omit locations, scene time, and location_id.
+ * Keep those values from the stored document when the incoming object has no such key.
+ * A present key, including an empty list or an empty time, is kept.
+ * Scene time is copied only when the scene label at the same index matches.
+ * Keep this in sync with production_days_preserve_call_sheet_v3.
+ */
+export function retainMissingCallSheetFields(previous: unknown, incoming: unknown): unknown {
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming
+  const prev = asRecord(previous) ?? {}
+  const next: Record<string, unknown> = { ...(incoming as Record<string, unknown>) }
+
+  if (!hasOwn(next, 'locations') && hasOwn(prev, 'locations')) {
+    next.locations = prev.locations
+  }
+
+  if (Array.isArray(next.scenes) && Array.isArray(prev.scenes)) {
+    next.scenes = next.scenes.map((scene, index) => {
+      if (!scene || typeof scene !== 'object' || Array.isArray(scene)) return scene
+      const row: Record<string, unknown> = { ...(scene as Record<string, unknown>) }
+      const old = prev.scenes && Array.isArray(prev.scenes) ? asRecord(prev.scenes[index]) : null
+      if (!old) return row
+      if (str(row.scene) !== str(old.scene)) return row
+      if (!hasOwn(row, 'time') && hasOwn(old, 'time')) row.time = old.time
+      if (!hasOwn(row, 'location_id') && hasOwn(old, 'location_id')) row.location_id = old.location_id
+      return row
+    })
+  }
+
+  if (next.v === 3 || next.v === '3') next.v = 2
+  return next
 }
 
 export function mergeCallSheetPeople(
   prevRaw: unknown,
   nextPeople: Record<string, CallSheetPersonCell>
 ): CallSheetDocument {
-  const prev = parseCallSheet(prevRaw)
+  const prev = normalizeCallSheet(prevRaw)
   const people = { ...prev.people }
   for (const [key, patch] of Object.entries(nextPeople)) {
     people[key] = { ...(people[key] ?? {}), ...patch }

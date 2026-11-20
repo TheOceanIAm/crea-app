@@ -56,7 +56,8 @@ import { CallSheetDayHeader } from '@/components/project/CallSheetDayHeader'
 import { CallSheetScheduleCards, type CallSheetAdvanceCard } from '@/components/project/CallSheetScheduleCards'
 import {
   emptyCallSheet,
-  parseCallSheet,
+  normalizeCallSheet,
+  retainMissingCallSheetFields,
   callSheetDayLabel,
   formatCallSheetDate,
   personCallTime,
@@ -67,6 +68,7 @@ import {
   type CallSheetDayTimes,
   type CallSheetDepartments,
   type CallSheetDocument,
+  type CallSheetLocation,
   type CallSheetPersonCell,
   type CallSheetPlaces,
   type CallSheetSceneRow,
@@ -472,6 +474,7 @@ export function ProductionTab({
   const [contactsDraft, setContactsDraft] = useState<CallSheetContacts>({ ...EMPTY_CALL_SHEET_CONTACTS })
   const [backgroundDraft, setBackgroundDraft] = useState<CallSheetBackgroundRow[]>([])
   const [scenesDraft, setScenesDraft] = useState<CallSheetSceneRow[]>([])
+  const [locationsDraft, setLocationsDraft] = useState<CallSheetLocation[]>([])
   const [advance, setAdvance] = useState<CallSheetAdvanceCard | null>(null)
   const [wrapDraft, setWrapDraft] = useState('')
   const [notesDraft, setNotesDraft] = useState('')
@@ -641,7 +644,7 @@ export function ProductionTab({
       setProdDay(null)
     } else if (dayRes.data) {
       const row = dayRes.data as Record<string, unknown>
-      const parsedSheet = parseCallSheet(row.call_sheet)
+      const parsedSheet = normalizeCallSheet(row.call_sheet)
       callSheet = parsedSheet.people
       setProdDay({
         id: row.id as string,
@@ -705,6 +708,7 @@ export function ProductionTab({
     setContactsDraft(doc.contacts)
     setBackgroundDraft(doc.background)
     setScenesDraft(doc.scenes)
+    setLocationsDraft(doc.locations)
   }, [])
 
   const currentCallSheetDoc = useCallback((): CallSheetDocument => {
@@ -718,6 +722,7 @@ export function ProductionTab({
       background: backgroundDraft,
       contacts: contactsDraft,
       scenes: scenesDraft,
+      locations: locationsDraft,
     })
   }, [
     callDraft,
@@ -728,6 +733,7 @@ export function ProductionTab({
     backgroundDraft,
     contactsDraft,
     scenesDraft,
+    locationsDraft,
   ])
 
   const markCallSheetDirty = useCallback(() => {
@@ -739,7 +745,7 @@ export function ProductionTab({
     (row: ProductionDayRow) => {
       setProdDay(row)
       if (callSheetDirtyRef.current) return
-      applyCallSheetDocToDrafts(parseCallSheet(row.call_sheet))
+      applyCallSheetDocToDrafts(normalizeCallSheet(row.call_sheet))
       setWrapDraft(row.wrap_time ?? '')
       setNotesDraft(row.notes ?? '')
     },
@@ -756,7 +762,7 @@ export function ProductionTab({
       date: String(raw.date ?? '').slice(0, 10),
       wrap_time: (raw.wrap_time as string | null) ?? null,
       notes: (raw.notes as string | null) ?? null,
-      call_sheet: parseCallSheet(raw.call_sheet),
+      call_sheet: normalizeCallSheet(raw.call_sheet),
     }
   }
 
@@ -781,7 +787,7 @@ export function ProductionTab({
     const sameDay = appliedCallDayRef.current === shootDay
     if (callSheetDirty && sameDay) return
     appliedCallDayRef.current = shootDay
-    applyCallSheetDocToDrafts(parseCallSheet(prodDay.call_sheet))
+    applyCallSheetDocToDrafts(normalizeCallSheet(prodDay.call_sheet))
     setWrapDraft(prodDay.wrap_time ?? '')
     setNotesDraft(prodDay.notes ?? '')
     if (!sameDay) {
@@ -822,7 +828,7 @@ export function ProductionTab({
         .eq('date', nextShootDay)
         .maybeSingle()
       if (cancelled) return
-      const doc = parseCallSheet(data?.call_sheet)
+      const doc = normalizeCallSheet(data?.call_sheet)
       const notesLine = String(data?.notes ?? '')
         .trim()
         .split('\n')[0]
@@ -1116,7 +1122,9 @@ export function ProductionTab({
     if (!requireOnlineEdits()) return
     setSavingCallSheet(true)
     const wrap_time = wrapDraft.trim() || null
-    const call_sheet = currentCallSheetDoc()
+    const call_sheet = serializeCallSheet(
+      normalizeCallSheet(retainMissingCallSheetFields(prodDay.call_sheet, currentCallSheetDoc()))
+    )
     const { error } = await supabase
       .from('production_days')
       .update({

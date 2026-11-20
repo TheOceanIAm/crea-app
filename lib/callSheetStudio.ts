@@ -10,16 +10,18 @@ function madeWithCreaHtml(_kind: "callsheet"): string {
  * Copy of the web template (crea-services lib/call-sheet-studio.ts). Keep both in sync.
  */
 
+import type { CallSheetAddress, CallSheetClock } from "@/lib/callSheet";
+
 export type StudioKeyContact = { role: string; name: string; phone?: string };
 export type StudioLocation = {
-  set: { name: string; address: string; phone?: string; note?: string };
-  parking?: { name: string; address: string; note?: string };
-  hospital?: { name: string; address: string; phone?: string };
+  set: CallSheetAddress & { phone?: string; note?: string };
+  parking?: CallSheetAddress & { note?: string };
+  hospital?: CallSheetAddress & { phone?: string };
 };
 export type StudioScheduleRow =
   | {
       kind: "scene";
-      start: string;
+      start: CallSheetClock;
       scene: string;
       intExt: string;
       description: string;
@@ -29,7 +31,7 @@ export type StudioScheduleRow =
       pages: string;
       est: string;
     }
-  | { kind: "break"; start: string; label: string; description: string; est: string };
+  | { kind: "break"; start: CallSheetClock; label: string; description: string; est: string };
 export type StudioCastRow = {
   /** Cast number as used in the schedule's cast column. */
   no: string;

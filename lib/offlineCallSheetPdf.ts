@@ -95,20 +95,43 @@ export function buildCallSheetHtml(opts: {
   ]
     .filter(Boolean)
     .join(' · ')
-  const locations: StudioLocation[] =
-    setLabel || doc.places.parking.trim() || doc.places.hospital.trim()
+  const parking = doc.places.parking.trim() ? { name: 'Crew parking', address: doc.places.parking.trim() } : undefined
+  const hospital = doc.places.hospital.trim() ? { name: 'Nearest hospital', address: doc.places.hospital.trim() } : undefined
+  const namedLocations = doc.locations.filter((loc) => loc.name.trim() || loc.address.trim() || (loc.notes ?? '').trim())
+  const locations: StudioLocation[] = namedLocations.length
+    ? namedLocations.map((loc, index) => {
+        const note = [index === 0 ? setNote : '', (loc.notes ?? '').trim()].filter(Boolean).join(' · ')
+        return {
+          set: { name: loc.name.trim() || 'Location', address: loc.address.trim(), note: note || undefined },
+          parking: index === 0 ? parking : undefined,
+          hospital: index === 0 ? hospital : undefined,
+        }
+      })
+    : setLabel || parking || hospital
       ? [
           {
             set: { name: doc.places.basecamp.trim() ? 'Basecamp' : 'Set', address: setLabel, note: setNote || undefined },
-            parking: doc.places.parking.trim() ? { name: 'Crew parking', address: doc.places.parking.trim() } : undefined,
-            hospital: doc.places.hospital.trim() ? { name: 'Nearest hospital', address: doc.places.hospital.trim() } : undefined,
+            parking,
+            hospital,
           },
         ]
       : []
 
   const schedule: StudioScheduleRow[] = []
   for (const row of doc.scenes) {
-    schedule.push({ kind: 'scene', start: '', scene: row.scene, intExt: row.int_ext, description: row.description, dayNight: '', cast: row.cast, location: row.location, pages: '', est: '' })
+    const linked = row.location_id ? doc.locations.find((loc) => loc.id === row.location_id) : undefined
+    schedule.push({
+      kind: 'scene',
+      start: (row.time ?? '').trim(),
+      scene: row.scene,
+      intExt: row.int_ext,
+      description: row.description,
+      dayNight: '',
+      cast: row.cast,
+      location: linked?.name.trim() || row.location,
+      pages: '',
+      est: '',
+    })
     if (row.move.trim()) schedule.push({ kind: 'break', start: '', label: 'Move', description: row.move.trim(), est: '' })
   }
 

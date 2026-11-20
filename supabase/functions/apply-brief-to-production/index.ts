@@ -217,7 +217,8 @@ function mergeCallSheetPeopleRaw(
     prevRaw && typeof prevRaw === 'object' && !Array.isArray(prevRaw)
       ? (prevRaw as Record<string, unknown>)
       : {}
-  if (obj.v === 2 && obj.people && typeof obj.people === 'object' && !Array.isArray(obj.people)) {
+  const structured = obj.v === 2 || obj.v === '2' || obj.v === 3 || obj.v === '3'
+  if (structured && obj.people && typeof obj.people === 'object' && !Array.isArray(obj.people)) {
     const people = { ...(obj.people as Record<string, unknown>) }
     for (const [pid, patch] of Object.entries(nextPeople)) {
       const prev =
