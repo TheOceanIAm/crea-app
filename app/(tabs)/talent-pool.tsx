@@ -291,7 +291,18 @@ async function loadTalentPoolFavorites(
               : [],
           }))
         if (remoteFolders.length > 0 || localFolders.length === 0) {
-          localFolders = remoteFolders
+          const localById = new Map(localFolders.map((folder) => [folder.id, folder]))
+          const merged = remoteFolders.map((remote) => {
+            const local = localById.get(remote.id)
+            if (remote.profileIds.length === 0 && local && local.profileIds.length > 0) {
+              return { ...remote, profileIds: local.profileIds }
+            }
+            return remote
+          })
+          for (const local of localFolders) {
+            if (!merged.some((folder) => folder.id === local.id)) merged.push(local)
+          }
+          localFolders = merged
         }
       }
     } catch {
@@ -542,11 +553,11 @@ export default function TalentPoolScreen() {
     if (listFilter === 'favorites' && showFavoriteUi) {
       const set = new Set(favoriteProfileIds)
       out = out.filter((r) => set.has(r.id))
-      if (activeFolderId) {
-        const folder = folders.find((f) => f.id === activeFolderId)
-        const folderSet = new Set(folder?.profileIds ?? [])
-        out = out.filter((r) => folderSet.has(r.id))
-      }
+    }
+    if (activeFolderId && showFavoriteUi) {
+      const folder = folders.find((f) => f.id === activeFolderId)
+      const folderSet = new Set((folder?.profileIds ?? []).map((id) => id.trim()))
+      out = out.filter((r) => folderSet.has(r.id))
     }
     return out
   }, [rows, remoteRows, skillsTokens, proOnly, listFilter, favoriteProfileIds, showFavoriteUi, activeFolderId, folders])
@@ -763,7 +774,7 @@ export default function TalentPoolScreen() {
                   <TouchableOpacity
                     key={f.id}
                     style={[styles.chip, activeFolderId === f.id && styles.chipOn]}
-                    onPress={() => setActiveFolderId((prev) => (prev === f.id ? null : f.id))}
+                    onPress={() => setActiveFolderId(f.id)}
                   >
                     <Text style={[styles.chipText, activeFolderId === f.id && styles.chipTextOn]}>
                       {f.name} ({f.profileIds.length})
@@ -811,9 +822,16 @@ export default function TalentPoolScreen() {
                         </>
                       ) : (
                         <>
-                          <Text style={[styles.chipText, { flex: 1 }]} numberOfLines={1}>
-                            {f.name}
-                          </Text>
+                          <TouchableOpacity
+                            style={{ flex: 1 }}
+                            onPress={() => setActiveFolderId(f.id)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open folder ${f.name}`}
+                          >
+                            <Text style={[styles.chipText, activeFolderId === f.id && styles.chipTextOn]} numberOfLines={1}>
+                              {f.name}
+                            </Text>
+                          </TouchableOpacity>
                           <TouchableOpacity style={styles.chip} onPress={() => moveFolder(f.id, -1)} disabled={i === 0}>
                             <Text style={styles.chipText}>↑</Text>
                           </TouchableOpacity>
@@ -847,8 +865,7 @@ export default function TalentPoolScreen() {
         <View style={styles.banner}>
           <Text style={styles.bannerText}>{loadError}</Text>
           <Text style={styles.bannerHint}>
-            If this persists, run the SQL in <Text style={styles.mono}>supabase/sql/talent_pool_select_policies.sql</Text>{' '}
-            and <Text style={styles.mono}>talent_pool_favorites.sql</Text> on your project.
+            Try again in a moment.
           </Text>
         </View>
       ) : null}
@@ -869,6 +886,8 @@ export default function TalentPoolScreen() {
             <Text style={styles.empty}>
               {remoteSearchPending && skillsTokens.length > 0
                 ? 'Searching…'
+                : activeFolderId
+                  ? 'No freelancers in this folder.'
                 : rows.length === 0
                 ? 'No freelancers found yet.'
                 : listFilter === 'favorites'
