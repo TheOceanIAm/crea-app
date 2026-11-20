@@ -1,14 +1,17 @@
 import { useState, type ReactNode } from 'react'
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker'
 import { ChevronDown } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import {
   EMPTY_CALL_SHEET_SCENE,
   personIsCast,
   type CallSheetBackgroundRow,
+  type CallSheetLocation,
   type CallSheetPersonCell,
   type CallSheetSceneRow,
 } from '@/lib/callSheet'
+import { callSheetSceneDisplayOrder, callSheetSceneLocationLabel, callSheetShootLocationsEnabled } from '@/lib/callSheetLocations'
 
 export type CallSheetAdvanceCard = {
   dateLabel: string
@@ -27,6 +30,7 @@ type Props = {
   cells: Record<string, CallSheetPersonCell>
   onChangePerson: (key: string, patch: Partial<CallSheetPersonCell>) => void
   scenes: CallSheetSceneRow[]
+  locations: CallSheetLocation[]
   onChangeScenes: (rows: CallSheetSceneRow[]) => void
   background: CallSheetBackgroundRow[]
   onChangeBackground: (rows: CallSheetBackgroundRow[]) => void
@@ -95,8 +99,29 @@ function Line({
   )
 }
 
-function sceneLine(row: CallSheetSceneRow) {
-  return [row.scene || 'Scene', row.int_ext, row.description, row.cast && `Cast ${row.cast}`].filter(Boolean).join(' · ')
+function sceneLine(row: CallSheetSceneRow, locations: CallSheetLocation[], showSchedule: boolean) {
+  const place = showSchedule ? callSheetSceneLocationLabel(row, locations) : ''
+  return [
+    showSchedule && (row.time ?? '').trim() ? (row.time ?? '').trim() : null,
+    row.scene || 'Scene',
+    row.int_ext,
+    row.description,
+    row.cast && `Cast ${row.cast}`,
+    showSchedule && place ? place : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+function clockFromDate(value: Date) {
+  return `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`
+}
+
+function dateFromClock(value: string) {
+  const date = new Date()
+  const match = /^(\d{2}):(\d{2})$/.exec(value)
+  if (match) date.setHours(Number(match[1]), Number(match[2]), 0, 0)
+  return date
 }
 
 export function CallSheetScheduleCards({
@@ -105,6 +130,7 @@ export function CallSheetScheduleCards({
   cells,
   onChangePerson,
   scenes,
+  locations,
   onChangeScenes,
   background,
   onChangeBackground,
@@ -122,6 +148,8 @@ export function CallSheetScheduleCards({
     ? [advance.dateLabel, advance.generalCall && `Call ${advance.generalCall}`].filter(Boolean).join(' · ')
     : 'Last shoot day'
 
+  const showSchedule = callSheetShootLocationsEnabled()
+  const sceneOrder = showSchedule ? callSheetSceneDisplayOrder(scenes) : scenes.map((_, index) => index)
   const patchScene = (index: number, patch: Partial<CallSheetSceneRow>) => {
     onChangeScenes(scenes.map((row, i) => (i === index ? { ...row, ...patch } : row)))
   }
@@ -132,15 +160,21 @@ export function CallSheetScheduleCards({
   return (
     <View style={styles.wrap}>
       <Fold title="Today's scenes" preview={scenePreviewText}>
-        {scenes.map((row, index) => (
+        {sceneOrder.map((index) => {
+          const row = scenes[index]
+          if (!row) return null
+          return (
           <SceneCard
             key={`scene-${index}`}
             row={row}
+            locations={locations}
+            showSchedule={showSchedule}
             editable={editable}
             onChange={(patch) => patchScene(index, patch)}
             onRemove={() => onChangeScenes(scenes.filter((_, i) => i !== index))}
           />
-        ))}
+          )
+        })}
         {scenes.length === 0 ? (
           <Text style={styles.muted}>Scene, interior or exterior, cast numbers, location, and a move.</Text>
         ) : null}
@@ -243,21 +277,34 @@ export function CallSheetScheduleCards({
 
 function SceneCard({
   row,
+  locations,
+  showSchedule,
   editable,
   onChange,
   onRemove,
 }: {
   row: CallSheetSceneRow
+  locations: CallSheetLocation[]
+  showSchedule: boolean
   editable: boolean
   onChange: (patch: Partial<CallSheetSceneRow>) => void
   onRemove: () => void
 }) {
   const [open, setOpen] = useState(!row.scene && !row.description)
+  const [pickingTime, setPickingTime] = useState(false)
+  const onTime = (event: DateTimePickerEvent, value?: Date) => {
+    if (event.type === 'dismissed') {
+      setPickingTime(false)
+      return
+    }
+    if (value) onChange({ time: clockFromDate(value) })
+    if (Platform.OS === 'android') setPickingTime(false)
+  }
   return (
     <View style={styles.card}>
       <TouchableOpacity style={styles.rowHead} onPress={() => setOpen((v) => !v)}>
         <Text style={styles.rowTitle} numberOfLines={1}>
-          {sceneLine(row) || 'Empty scene'}
+          {sceneLine(row, locations, showSchedule) || 'Empty scene'}
         </Text>
         <ChevronDown size={16} color="rgba(255,255,255,0.35)" style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }} />
       </TouchableOpacity>
@@ -282,9 +329,68 @@ function SceneCard({
             </View>
           </View>
           <Line label="What happens" value={row.description} placeholder="Jennie leaves for work" editable={editable} onChange={(v) => onChange({ description: v })} />
+          {showSchedule ? (
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Time</Text>
+              {editable ? (
+                <TouchableOpacity onPress={() => setPickingTime((open) => !open)}>
+                  <Text style={styles.input}>{(row.time ?? '').trim() || 'Add time'}</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.input}>{(row.time ?? '').trim() || 'No time'}</Text>
+              )}
+              {pickingTime && editable ? (
+                <DateTimePicker
+                  mode="time"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  is24Hour
+                  value={dateFromClock((row.time ?? '').trim())}
+                  onChange={onTime}
+                />
+              ) : null}
+              {editable && (row.time ?? '').trim() ? (
+                <TouchableOpacity onPress={() => onChange({ time: '' })}>
+                  <Text style={styles.remove}>Clear time</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
           <View style={styles.grid}>
             <Line label="Cast" value={row.cast} placeholder="3, 7" editable={editable} onChange={(v) => onChange({ cast: v })} />
-            <Line label="Location" value={row.location} placeholder="Stage / address" editable={editable} onChange={(v) => onChange({ location: v })} />
+            {showSchedule && locations.length > 0 ? (
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Location</Text>
+                {editable ? (
+                  <View style={styles.chips}>
+                    <TouchableOpacity style={styles.chip} onPress={() => onChange({ location_id: '' })}>
+                      <Text style={styles.chipText}>Not linked</Text>
+                    </TouchableOpacity>
+                    {locations.map((loc, index) => (
+                      <TouchableOpacity
+                        key={loc.id}
+                        style={[styles.chip, row.location_id === loc.id && styles.chipOn]}
+                        onPress={() =>
+                          onChange({
+                            location_id: loc.id,
+                            location: row.location.trim() || loc.name.trim() || row.location,
+                          })
+                        }
+                      >
+                        <Text style={[styles.chipText, row.location_id === loc.id && styles.chipTextOn]}>
+                          {index === 0 ? 'Main location' : loc.name.trim() || 'Untitled'}
+                          {index === 0 && loc.name.trim() ? `: ${loc.name.trim()}` : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.input}>{callSheetSceneLocationLabel(row, locations) || 'No location'}</Text>
+                )}
+                {!row.location_id && row.location.trim() ? <Text style={styles.muted}>{row.location.trim()}</Text> : null}
+              </View>
+            ) : (
+              <Line label="Location" value={row.location} placeholder="Stage / address" editable={editable} onChange={(v) => onChange({ location: v })} />
+            )}
           </View>
           <Line label="Move after" value={row.move} placeholder="Company move · 15 min" editable={editable} onChange={(v) => onChange({ move: v })} />
           {editable ? (
@@ -411,6 +517,8 @@ const styles = StyleSheet.create({
   muted: { color: 'rgba(255,255,255,0.4)', fontSize: 13, lineHeight: 18 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  chipOn: { backgroundColor: '#FFDC00', borderColor: '#FFDC00' },
   chipText: { color: 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: '700' },
+  chipTextOn: { color: '#0a0a0a' },
   advanceTitle: { color: '#fff', fontSize: 15, fontWeight: '800' },
 })

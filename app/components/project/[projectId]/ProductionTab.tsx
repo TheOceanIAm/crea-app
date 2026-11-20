@@ -1584,6 +1584,8 @@ export function ProductionTab({
           special={specialDraft}
           departments={departmentsDraft}
           contacts={contactsDraft}
+          locations={locationsDraft}
+          scenes={scenesDraft}
           editable={isCompany && !!prodDay && !usingOfflinePack}
           weatherEnabled={canUseProductionWeather}
           onChangeDay={(patch) => {
@@ -1620,6 +1622,16 @@ export function ProductionTab({
             if (!isCompany) return
             markCallSheetDirty()
             setNotesDraft(value)
+          }}
+          onChangeLocations={(rows) => {
+            if (!isCompany) return
+            markCallSheetDirty()
+            setLocationsDraft(rows)
+          }}
+          onChangeScenes={(rows) => {
+            if (!isCompany) return
+            markCallSheetDirty()
+            setScenesDraft(rows)
           }}
           you={youHighlight}
         >
@@ -1720,6 +1732,7 @@ export function ProductionTab({
           }))
         }}
         scenes={scenesDraft}
+        locations={locationsDraft}
         onChangeScenes={(rows) => {
           if (!isCompany) return
           markCallSheetDirty()

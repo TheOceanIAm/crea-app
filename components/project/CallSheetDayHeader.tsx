@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { ChevronDown, Clock, Cloud, MapPin, Shield } from 'lucide-react-native'
 import { ICON_STROKE } from '@/lib/iconTheme'
+import { CallSheetShootLocations, shootLocationsPreview } from '@/components/project/CallSheetShootLocations'
 import {
   CALL_SHEET_PLACE_ORDER,
   DEFAULT_CALL_SHEET_SAFETY,
@@ -10,8 +11,11 @@ import {
   type CallSheetContacts,
   type CallSheetDayTimes,
   type CallSheetDepartments,
+  type CallSheetLocation,
   type CallSheetPlaces,
+  type CallSheetSceneRow,
 } from '@/lib/callSheet'
+import { callSheetShootLocationsEnabled } from '@/lib/callSheetLocations'
 import { fetchCallSheetAtmosphere, type CallSheetAtmosphere } from '@/lib/openMeteoWeather'
 
 type Props = {
@@ -27,6 +31,8 @@ type Props = {
   special: string
   departments: CallSheetDepartments
   contacts: CallSheetContacts
+  locations: CallSheetLocation[]
+  scenes: CallSheetSceneRow[]
   editable: boolean
   weatherEnabled: boolean
   onChangeDay: (patch: Partial<CallSheetDayTimes>) => void
@@ -36,6 +42,8 @@ type Props = {
   onChangeContacts: (patch: Partial<CallSheetContacts>) => void
   onChangeWrap: (value: string) => void
   onChangeNotes: (value: string) => void
+  onChangeLocations: (rows: CallSheetLocation[]) => void
+  onChangeScenes: (rows: CallSheetSceneRow[]) => void
   you?: { name: string; roleLabel: string; call: string; location: string } | null
   children?: ReactNode
 }
@@ -128,6 +136,8 @@ export function CallSheetDayHeader({
   special,
   departments,
   contacts,
+  locations,
+  scenes,
   editable,
   weatherEnabled,
   onChangeDay,
@@ -137,6 +147,8 @@ export function CallSheetDayHeader({
   onChangeContacts,
   onChangeWrap,
   onChangeNotes,
+  onChangeLocations,
+  onChangeScenes,
   you,
   children,
 }: Props) {
@@ -266,6 +278,18 @@ export function CallSheetDayHeader({
           textAlignVertical="top"
         />
       </Fold>
+
+      {callSheetShootLocationsEnabled() ? (
+        <Fold title="Shoot locations" preview={shootLocationsPreview(locations)} defaultOpen={locations.length > 0}>
+          <CallSheetShootLocations
+            locations={locations}
+            scenes={scenes}
+            editable={editable}
+            onChangeLocations={onChangeLocations}
+            onChangeScenes={onChangeScenes}
+          />
+        </Fold>
+      ) : null}
 
       <Fold title="Key locations" preview={placesPreview} warn={hospitalEmpty} defaultOpen={hospitalEmpty}>
         <View style={styles.placesHead}>
