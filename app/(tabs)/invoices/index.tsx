@@ -532,9 +532,7 @@ export default function InvoicesListScreen() {
               <View style={styles.errorBox}>
                 <Text style={styles.errorTitle}>Couldn’t load invoices</Text>
                 <Text style={styles.errorText}>{error}</Text>
-                <Text style={styles.errorHint}>
-                  In Supabase, ensure the invoices table has company_id and freelancer_id columns (depending on role).
-                </Text>
+                <Text style={styles.errorHint}>Try again in a moment.</Text>
               </View>
             ) : null}
           </>
@@ -580,7 +578,7 @@ export default function InvoicesListScreen() {
               <Text style={styles.emptySub}>
                 {perspective === 'freelancer' && readyToInvoice.length > 0
                   ? 'Sent invoices will appear here.'
-                  : 'When rows exist in Supabase, they’ll show up here.'}
+                  : 'Invoices you send or receive will show up here.'}
               </Text>
             </View>
           ) : null

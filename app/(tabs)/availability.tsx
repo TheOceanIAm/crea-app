@@ -371,10 +371,7 @@ export default function AvailabilityScreen() {
             <View style={styles.errorBox}>
               <Text style={styles.errorTitle}>Couldn’t load data</Text>
               <Text style={styles.errorText}>{loadError}</Text>
-              <Text style={styles.errorHint}>
-                Run <Text style={styles.errorMono}>supabase/sql/add_profile_availability.sql</Text> in the Supabase SQL
-                editor.
-              </Text>
+              <Text style={styles.errorHint}>Try again in a moment.</Text>
             </View>
           ) : null}
 

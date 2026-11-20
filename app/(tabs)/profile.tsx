@@ -1532,18 +1532,13 @@ export default function ProfileScreen() {
                 loadError
               ) ? (
                 <Text style={styles.errorHint}>
-                  The database is busy right now (connection pool). Wait a few seconds, leave this tab and
-                  come back — or tap Retry. No SQL migrations needed for this error.
+                  This is taking longer than usual. Wait a few seconds, leave this tab and come back, or tap
+                  Retry.
                 </Text>
               ) : /column|schema|does not exist|PGRST/i.test(loadError) ? (
                 <Text style={styles.errorHint}>
-                  In Supabase → SQL Editor, run scripts from{' '}
-                  <Text style={styles.errorMono}>supabase/sql</Text>:{' '}
-                  <Text style={styles.errorMono}>extend_profile_identity.sql</Text>,{' '}
-                  <Text style={styles.errorMono}>extend_profile_settings_pages.sql</Text>, and{' '}
-                  <Text style={styles.errorMono}>extend_profile_rates.sql</Text> (adds day rates). For jobs,
-                  applications, and projects, also run{' '}
-                  <Text style={styles.errorMono}>crea_app_features.sql</Text>.
+                  We couldn’t read your profile. Try again in a moment. If it keeps failing, sign out and back
+                  in.
                 </Text>
               ) : (
                 <Text style={styles.errorHint}>Try again in a moment. If it keeps failing, sign out and back in.</Text>
@@ -1640,8 +1635,7 @@ export default function ProfileScreen() {
                   </TouchableOpacity>
                   <View style={styles.photoMeta}>
                     <Text style={styles.photoHint}>
-                      Tap the image to choose a new photo. It is stored in your Supabase bucket{' '}
-                      <Text style={styles.photoHintMono}>avatars</Text> (see SQL in repo).
+                      Tap the photo to choose a new one. It shows on your public profile.
                     </Text>
                     <TouchableOpacity
                       style={styles.photoUploadBtn}
@@ -3067,7 +3061,6 @@ const styles = StyleSheet.create({
   photoLetter: { fontSize: 28, fontWeight: '900', color: '#0a0a0a' },
   photoMeta: { flex: 1 },
   photoHint: { fontSize: 11, color: 'rgba(255,255,255,0.32)', lineHeight: 16, marginBottom: 8 },
-  photoHintMono: { fontFamily: 'Courier', color: 'rgba(255,220,0,0.65)' },
   photoUploadBtn: {
     alignSelf: 'flex-start',
     paddingVertical: 10,

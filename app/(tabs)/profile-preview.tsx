@@ -125,7 +125,7 @@ export default function ProfilePreviewScreen() {
         <View style={styles.center}>
           <Text style={styles.emptyTitle}>Profile not loaded</Text>
           <Text style={styles.emptySub}>
-            Check settings or run <Text style={styles.mono}>public_share_rpcs.sql</Text> in Supabase.
+            This preview isn’t available right now. Go back and try again.
           </Text>
         </View>
       </SafeAreaView>

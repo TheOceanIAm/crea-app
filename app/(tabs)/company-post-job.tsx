@@ -225,7 +225,7 @@ export default function CompanyPostJobScreen() {
     if (error) {
       Alert.alert(
         'Could not publish',
-        `${error.message}\n\nIf this mentions RLS or permission, run supabase/sql/company_jobs_write.sql in the Supabase SQL editor.`
+        'Could not publish this project. Try again in a moment.'
       )
       return
     }

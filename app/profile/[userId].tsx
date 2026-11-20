@@ -109,11 +109,7 @@ export default function PublicProfileShareScreen() {
         <ScrollView contentContainerStyle={styles.scrollPad}>
           <Text style={styles.brand}>Crea</Text>
           <Text style={styles.title}>Couldn’t load this profile</Text>
-          <Text style={styles.body}>
-            Run <Text style={styles.mono}>supabase/sql/public_share_rpcs.sql</Text> in the Supabase SQL Editor,
-            then reload.
-          </Text>
-          <Text style={styles.muted}>{error}</Text>
+          <Text style={styles.body}>This profile isn’t available right now. Try again in a moment.</Text>
         </ScrollView>
       </SafeAreaView>
     )
