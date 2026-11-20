@@ -3,6 +3,7 @@ import { Linking, Text, TouchableOpacity, StyleSheet, View } from 'react-native'
 import { useFocusEffect, useRouter, type Href } from 'expo-router'
 
 import { SetUpNextShootCard } from '@/components/SetUpNextShootCard'
+import { getCreaWebBaseUrl } from '@/lib/creaWeb'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { prefetchProjectShell } from '@/lib/projectShellCache'
 import {
@@ -44,6 +45,7 @@ export function OwnProjectsSection() {
   const [ready, setReady] = useState(false)
   const [listings, setListings] = useState<ProjectListing[]>([])
   const [canCreate, setCanCreate] = useState(false)
+  const [viewerRole, setViewerRole] = useState<'freelancer' | 'company' | null>(null)
 
   const load = useCallback(async () => {
     const user = await getAuthUser()
@@ -53,6 +55,7 @@ export function OwnProjectsSection() {
       setHidden(false)
       setListings(cached.listings)
       setCanCreate(cached.canCreatePrivate)
+      setViewerRole(cached.viewerRole === 'company' ? 'company' : 'freelancer')
       setReady(true)
     } else {
       await hydrateWorkspaceProjectsFromDisk(user.id)
@@ -61,6 +64,7 @@ export function OwnProjectsSection() {
         setHidden(false)
         setListings(disk.listings)
         setCanCreate(disk.canCreatePrivate)
+        setViewerRole(disk.viewerRole === 'company' ? 'company' : 'freelancer')
         setReady(true)
       }
     }
@@ -75,6 +79,7 @@ export function OwnProjectsSection() {
     setHidden(false)
     setListings(loaded.listings)
     setCanCreate(loaded.canCreatePrivate)
+    setViewerRole(loaded.viewerRole === 'company' ? 'company' : 'freelancer')
     setReady(true)
   }, [])
 
@@ -87,20 +92,30 @@ export function OwnProjectsSection() {
   if (!ready || hidden) return null
 
   const openDemo = () => {
-    const base = process.env.EXPO_PUBLIC_CREA_WEB_URL || 'https://www.creaservices.de'
-    void Linking.openURL(`${base.replace(/\/$/, '')}/demo/overview`).catch(() => {})
+    const base = getCreaWebBaseUrl() || 'https://www.creaservices.de'
+    void Linking.openURL(`${base}/demo/overview`).catch(() => {})
   }
 
-  const current = pickCurrentProject(listings)
+  const current = pickCurrentProject(listings) ?? listings[0] ?? null
 
   if (!current) {
+    const isCompany = viewerRole === 'company'
+    const browseJobs = !isCompany && !canCreate
     return (
       <SetUpNextShootCard
         canCreate={canCreate}
         onCreate={() =>
           router.push({ pathname: '/(tabs)/workspace-projects', params: { create: '1' } } as Href)
         }
-        onExploreDemo={openDemo}
+        lockedHint={
+          isCompany
+            ? 'An admin on this company account can set up the next project.'
+            : undefined
+        }
+        secondaryLabel={browseJobs ? 'Browse jobs' : 'Explore demo project'}
+        onSecondary={
+          browseJobs ? () => router.push('/(tabs)/jobs' as Href) : openDemo
+        }
       />
     )
   }

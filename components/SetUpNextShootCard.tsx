@@ -1,14 +1,18 @@
 import { Text, TouchableOpacity, StyleSheet, View } from 'react-native'
 
-/** Empty dashboard when the account does not own a project yet. */
+/** Empty dashboard when the account does not own a project yet. Same card as the web home. */
 export function SetUpNextShootCard({
   canCreate,
   onCreate,
-  onExploreDemo,
+  onSecondary,
+  secondaryLabel,
+  lockedHint = 'Upgrade to Pro or Workspace to create a private project. You can still open work a company books you on.',
 }: {
   canCreate: boolean
   onCreate: () => void
-  onExploreDemo: () => void
+  onSecondary: () => void
+  secondaryLabel: string
+  lockedHint?: string
 }) {
   return (
     <View style={styles.card}>
@@ -21,10 +25,10 @@ export function SetUpNextShootCard({
           <Text style={styles.buttonText}>Set up your next shoot</Text>
         </TouchableOpacity>
       ) : (
-        <Text style={styles.hint}>Upgrade to Pro or Workspace on the web to create a private project.</Text>
+        <Text style={styles.hint}>{lockedHint}</Text>
       )}
-      <TouchableOpacity onPress={onExploreDemo} accessibilityRole="button">
-        <Text style={styles.demo}>Explore demo project</Text>
+      <TouchableOpacity onPress={onSecondary} accessibilityRole="link">
+        <Text style={styles.demo}>{secondaryLabel}</Text>
       </TouchableOpacity>
     </View>
   )
