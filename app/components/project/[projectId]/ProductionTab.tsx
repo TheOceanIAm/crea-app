@@ -34,6 +34,8 @@ import { ICON_STROKE } from '@/lib/iconTheme'
 import { ProductionSunPlannerSection } from '@/components/project/ProductionSunPlannerSection'
 import { ProductionEquipmentSection, ProductionTasksSection } from '@/components/project/ProductionManualLists'
 import { FlexibleShotList } from '@/components/project/FlexibleShotList'
+import { CallSheetImport } from '@/components/project/CallSheetImport'
+import { callSheetShootLocationsEnabled } from '@/lib/callSheetLocations'
 import { ShotPhotos } from '@/components/project/ShotPhotos'
 import type { ProductionEquipmentItem, ProductionTask } from '@/lib/productionLists'
 import { OfflinePackBanner } from '@/components/project/OfflinePackBanner'
@@ -1766,6 +1768,24 @@ export function ProductionTab({
       >
         <Text style={styles.outlineBtnText}>{exportingPdf ? 'PDF…' : 'Export call sheet as PDF'}</Text>
       </TouchableOpacity>
+
+      {prodDay && isCompany && !usingOfflinePack && callSheetShootLocationsEnabled() ? (
+        <CallSheetImport
+          projectId={projectId}
+          userId={userId}
+          shootDay={shootDay}
+          dayId={prodDay.id}
+          getCurrent={() => ({ document: currentCallSheetDoc(), wrapTime: wrapDraft, notes: notesDraft })}
+          onSaved={(callSheet, wrap, notes) => {
+            const doc = normalizeCallSheet(callSheet)
+            applyCallSheetDocToDrafts(doc)
+            setWrapDraft(wrap)
+            setNotesDraft(notes)
+            setCallSheetDirty(false)
+            void load()
+          }}
+        />
+      ) : null}
 
       {prodDay && isCompany ? (
         <>
