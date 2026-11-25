@@ -48,6 +48,11 @@ function hasOnboardingPhoto(url: string | null | undefined): boolean {
   return typeof url === 'string' && /^https?:\/\//i.test(url.trim())
 }
 
+function optionalCompanyLogoUrl(url: string | null | undefined): string | null {
+  const value = url?.trim() ?? ''
+  return /^https?:\/\//i.test(value) ? value : null
+}
+
 function parsePositiveDayRate(raw: string): number | null {
   const n = Number.parseFloat(raw.replace(',', '.').trim())
   if (!Number.isFinite(n) || n <= 0) return null
@@ -165,13 +170,8 @@ export default function OnboardingScreen() {
       return
     }
     if (step === 3) {
-      if (!hasOnboardingPhoto(avatarPublicUrl)) {
-        Alert.alert(
-          roleChoice === 'company' ? 'Company logo' : 'Profile photo',
-          roleChoice === 'company'
-            ? 'Upload a company logo to continue.'
-            : 'Upload a profile photo to continue.'
-        )
+      if (roleChoice !== 'company' && !hasOnboardingPhoto(avatarPublicUrl)) {
+        Alert.alert('Profile photo', 'Upload a profile photo to continue.')
         return
       }
       if (roleChoice === 'freelancer' && parsePositiveDayRate(dayRate) == null) {
@@ -192,15 +192,11 @@ export default function OnboardingScreen() {
       Alert.alert('Name', `Please enter at least ${PROFILE_DISPLAY_NAME_MIN} characters.`)
       return
     }
-    if (!hasOnboardingPhoto(avatarPublicUrl)) {
-      Alert.alert(
-        roleChoice === 'company' ? 'Company logo' : 'Profile photo',
-        roleChoice === 'company'
-          ? 'Upload a company logo to continue.'
-          : 'Upload a profile photo to continue.'
-      )
+    if (roleChoice !== 'company' && !hasOnboardingPhoto(avatarPublicUrl)) {
+      Alert.alert('Profile photo', 'Upload a profile photo to continue.')
       return
     }
+    const companyLogo = roleChoice === 'company' ? optionalCompanyLogoUrl(avatarPublicUrl) : null
     const parsedDayRate = roleChoice === 'freelancer' ? parsePositiveDayRate(dayRate) : null
     if (roleChoice === 'freelancer' && parsedDayRate == null) {
       Alert.alert('Day rate', 'Enter your day rate so productions know what you charge.')
@@ -236,7 +232,7 @@ export default function OnboardingScreen() {
         name,
         role: roleChoice,
         headline: headline.trim() || null,
-        avatar_url: avatarPublicUrl,
+        avatar_url: roleChoice === 'company' ? companyLogo : avatarPublicUrl,
         ...(parsedDayRate != null ? { day_rate_amount: parsedDayRate, rates_currency: 'EUR' } : {}),
         onboarding_completed: true,
         terms_accepted_at: acceptedAt,
@@ -247,7 +243,12 @@ export default function OnboardingScreen() {
     if (error) {
       setSaving(false)
       const em = error.message.toLowerCase()
-      if (em.includes('terms_accepted_at') || em.includes('column')) {
+      if (roleChoice === 'company' && /profile photo are required/i.test(error.message)) {
+        Alert.alert(
+          'Company logo',
+          'A logo is still required to finish until the latest profile update is applied. Upload one to continue.'
+        )
+      } else if (em.includes('terms_accepted_at') || em.includes('column')) {
         Alert.alert('Could not save', 'Try Finish again in a moment.')
       } else {
         Alert.alert('Could not save', error.message)
@@ -267,7 +268,7 @@ export default function OnboardingScreen() {
         {
           id: user.id,
           company_name: name,
-          logo_url: avatarPublicUrl,
+          logo_url: companyLogo,
         },
         { onConflict: 'id' }
       )
@@ -328,7 +329,7 @@ export default function OnboardingScreen() {
           ? 'Tell us about you'
           : roleChoice === 'freelancer'
             ? 'Photo, rate & agreements'
-            : 'Photo & agreements'
+            : 'Logo & agreements'
 
   const sub =
     step === 0
@@ -341,9 +342,10 @@ export default function OnboardingScreen() {
             : 'This is how you appear on your public profile.'
           : roleChoice === 'freelancer'
             ? 'A profile photo and day rate are required. You must also accept our policies to finish.'
-            : 'A logo or profile photo is required. You must accept our policies to finish.'
+            : 'A logo can wait until Settings. You must accept our policies to finish.'
 
-  const photoRequired = !hasOnboardingPhoto(avatarPublicUrl)
+  const photoRequired = roleChoice !== 'company' && !hasOnboardingPhoto(avatarPublicUrl)
+  const companyInitial = displayName.trim().charAt(0).toUpperCase()
   const dayRateRequired = roleChoice === 'freelancer' && parsePositiveDayRate(dayRate) == null
   const finishBlocked =
     step === 3 &&
@@ -488,9 +490,18 @@ export default function OnboardingScreen() {
                 disabled={uploadingAvatar}
                 activeOpacity={0.85}
               >
-                <View style={styles.avatarCircle}>
+                <View
+                  style={[
+                    styles.avatarCircle,
+                    roleChoice === 'company' && !showAvatarImage && companyInitial
+                      ? styles.avatarCircleInitial
+                      : null,
+                  ]}
+                >
                   {showAvatarImage ? (
                     <Image source={{ uri: avatarPublicUrl!.trim() }} style={styles.avatarImage} />
+                  ) : roleChoice === 'company' && companyInitial ? (
+                    <Text style={styles.avatarLetter}>{companyInitial}</Text>
                   ) : (
                     <Camera size={28} color="rgba(255,220,0,0.5)" strokeWidth={ICON_STROKE} />
                   )}
@@ -508,7 +519,9 @@ export default function OnboardingScreen() {
                           : 'Add photo'}
                   </Text>
                   <Text style={styles.avatarHint}>
-                    Required · square crop · shown on your profile
+                    {roleChoice === 'company'
+                      ? 'Optional · add it later in Settings'
+                      : 'Required · square crop · shown on your profile'}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -725,6 +738,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  avatarCircleInitial: {
+    backgroundColor: '#FFDC00',
+    borderColor: '#FFDC00',
+  },
+  avatarLetter: { fontSize: 28, fontWeight: '800', color: '#0a0a0a' },
   avatarImage: { width: 72, height: 72, borderRadius: 36 },
   avatarMeta: { flex: 1 },
   avatarCta: { fontSize: 16, fontWeight: '700', color: '#FFDC00', marginBottom: 4 },
