@@ -170,10 +170,6 @@ export default function OnboardingScreen() {
       return
     }
     if (step === 3) {
-      if (roleChoice !== 'company' && !hasOnboardingPhoto(avatarPublicUrl)) {
-        Alert.alert('Profile photo', 'Upload a profile photo to continue.')
-        return
-      }
       if (roleChoice === 'freelancer' && parsePositiveDayRate(dayRate) == null) {
         Alert.alert('Day rate', 'Enter your day rate so productions know what you charge.')
         return
@@ -192,11 +188,7 @@ export default function OnboardingScreen() {
       Alert.alert('Name', `Please enter at least ${PROFILE_DISPLAY_NAME_MIN} characters.`)
       return
     }
-    if (roleChoice !== 'company' && !hasOnboardingPhoto(avatarPublicUrl)) {
-      Alert.alert('Profile photo', 'Upload a profile photo to continue.')
-      return
-    }
-    const companyLogo = roleChoice === 'company' ? optionalCompanyLogoUrl(avatarPublicUrl) : null
+    const profilePhoto = optionalCompanyLogoUrl(avatarPublicUrl)
     const parsedDayRate = roleChoice === 'freelancer' ? parsePositiveDayRate(dayRate) : null
     if (roleChoice === 'freelancer' && parsedDayRate == null) {
       Alert.alert('Day rate', 'Enter your day rate so productions know what you charge.')
@@ -232,7 +224,7 @@ export default function OnboardingScreen() {
         name,
         role: roleChoice,
         headline: headline.trim() || null,
-        avatar_url: roleChoice === 'company' ? companyLogo : avatarPublicUrl,
+        avatar_url: profilePhoto,
         ...(parsedDayRate != null ? { day_rate_amount: parsedDayRate, rates_currency: 'EUR' } : {}),
         onboarding_completed: true,
         terms_accepted_at: acceptedAt,
@@ -243,10 +235,10 @@ export default function OnboardingScreen() {
     if (error) {
       setSaving(false)
       const em = error.message.toLowerCase()
-      if (roleChoice === 'company' && /profile photo are required/i.test(error.message)) {
+      if (/profile photo are required/i.test(error.message)) {
         Alert.alert(
-          'Company logo',
-          'A logo is still required to finish until the latest profile update is applied. Upload one to continue.'
+          'Profile photo',
+          'A profile photo is still required to finish until the latest profile update is applied. Upload one to continue.'
         )
       } else if (em.includes('terms_accepted_at') || em.includes('column')) {
         Alert.alert(
@@ -271,7 +263,7 @@ export default function OnboardingScreen() {
         {
           id: user.id,
           company_name: name,
-          logo_url: companyLogo,
+          logo_url: profilePhoto,
         },
         { onConflict: 'id' }
       )
@@ -344,15 +336,14 @@ export default function OnboardingScreen() {
             ? 'This is how you appear when you hire crew.'
             : 'This is how you appear on your public profile.'
           : roleChoice === 'freelancer'
-            ? 'A profile photo and day rate are required. You must also accept our policies to finish.'
+            ? 'A day rate is required. A photo can wait until Settings. You must also accept our policies to finish.'
             : 'A logo can wait until Settings. You must accept our policies to finish.'
 
-  const photoRequired = roleChoice !== 'company' && !hasOnboardingPhoto(avatarPublicUrl)
-  const companyInitial = displayName.trim().charAt(0).toUpperCase()
+  const profileInitial = displayName.trim().charAt(0).toUpperCase()
   const dayRateRequired = roleChoice === 'freelancer' && parsePositiveDayRate(dayRate) == null
   const finishBlocked =
     step === 3 &&
-    (photoRequired || dayRateRequired || !termsAccepted || saving || uploadingAvatar)
+    (dayRateRequired || !termsAccepted || saving || uploadingAvatar)
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -496,15 +487,13 @@ export default function OnboardingScreen() {
                 <View
                   style={[
                     styles.avatarCircle,
-                    roleChoice === 'company' && !showAvatarImage && companyInitial
-                      ? styles.avatarCircleInitial
-                      : null,
+                    !showAvatarImage && profileInitial ? styles.avatarCircleInitial : null,
                   ]}
                 >
                   {showAvatarImage ? (
                     <Image source={{ uri: avatarPublicUrl!.trim() }} style={styles.avatarImage} />
-                  ) : roleChoice === 'company' && companyInitial ? (
-                    <Text style={styles.avatarLetter}>{companyInitial}</Text>
+                  ) : profileInitial ? (
+                    <Text style={styles.avatarLetter}>{profileInitial}</Text>
                   ) : (
                     <Camera size={28} color="rgba(255,220,0,0.5)" strokeWidth={ICON_STROKE} />
                   )}
@@ -522,9 +511,7 @@ export default function OnboardingScreen() {
                           : 'Add photo'}
                   </Text>
                   <Text style={styles.avatarHint}>
-                    {roleChoice === 'company'
-                      ? 'Optional · add it later in Settings'
-                      : 'Required · square crop · shown on your profile'}
+                    Optional · add it later in Settings
                   </Text>
                 </View>
               </TouchableOpacity>
