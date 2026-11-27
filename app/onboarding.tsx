@@ -170,10 +170,6 @@ export default function OnboardingScreen() {
       return
     }
     if (step === 3) {
-      if (roleChoice === 'freelancer' && parsePositiveDayRate(dayRate) == null) {
-        Alert.alert('Day rate', 'Enter your day rate so productions know what you charge.')
-        return
-      }
       void completeOnboarding()
     }
   }
@@ -190,10 +186,6 @@ export default function OnboardingScreen() {
     }
     const profilePhoto = optionalCompanyLogoUrl(avatarPublicUrl)
     const parsedDayRate = roleChoice === 'freelancer' ? parsePositiveDayRate(dayRate) : null
-    if (roleChoice === 'freelancer' && parsedDayRate == null) {
-      Alert.alert('Day rate', 'Enter your day rate so productions know what you charge.')
-      return
-    }
     if (!termsAccepted) {
       Alert.alert('Terms', 'Please accept the Terms of Service and Privacy Policy to continue.')
       return
@@ -333,14 +325,13 @@ export default function OnboardingScreen() {
             ? 'This is how you appear when you hire crew.'
             : 'This is how you appear on your public profile.'
           : roleChoice === 'freelancer'
-            ? 'A day rate is required. A photo can wait until Settings. You must also accept our policies to finish.'
+            ? 'A photo and day rate can wait until Settings. You must accept our policies to finish.'
             : 'A logo can wait until Settings. You must accept our policies to finish.'
 
   const profileInitial = displayName.trim().charAt(0).toUpperCase()
-  const dayRateRequired = roleChoice === 'freelancer' && parsePositiveDayRate(dayRate) == null
   const finishBlocked =
     step === 3 &&
-    (dayRateRequired || !termsAccepted || saving || uploadingAvatar)
+    (!termsAccepted || saving || uploadingAvatar)
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -423,8 +414,8 @@ export default function OnboardingScreen() {
               </View>
               <Text style={styles.trialFootnote}>
                 {roleChoice === 'company'
-                  ? `During the ${PLATFORM_TRIAL_DAYS}-day platform trial, both options include full Pro features. After the trial you move to Free automatically; subscribe to Pro when you need unlimited listings and hiring tools.`
-                  : `During the ${PLATFORM_TRIAL_DAYS}-day platform trial, both options include full Pro features. After the trial you move to Free automatically; subscribe to Pro to keep applying to jobs and using Pro tools.`}
+                  ? `Both include Pro tools for ${PLATFORM_TRIAL_DAYS} days. Free needs no card — after that, upgrade to keep them. Pro adds a payment method now and bills when the ${PLATFORM_TRIAL_DAYS} days end. Switch to Free before then and nothing is charged.`
+                  : `Both include Pro tools for ${PLATFORM_TRIAL_DAYS} days. Free needs no card. Pro adds a payment method now and bills when those days end. Switch to Free before then and nothing is charged.`}
               </Text>
             </>
           ) : null}
@@ -515,7 +506,7 @@ export default function OnboardingScreen() {
 
               {roleChoice === 'freelancer' ? (
                 <>
-                  <Text style={styles.fieldLabel}>Day rate (€)</Text>
+                  <Text style={styles.fieldLabel}>Day rate (€, optional)</Text>
                   <TextInput
                     style={styles.input}
                     value={dayRate}

@@ -24,7 +24,8 @@ import type { FreelancerPublicProfilePayload } from '@/lib/freelancerPublicProfi
 import { money } from '@/lib/invoiceFormatting'
 import { buildProfileSocialLinks } from '@/lib/profileSocialLinks'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
-import { canFreelancerCreatePrivateProjects, isFreelancerProPlanTier, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { canFreelancerCreatePrivateProjects, isFreelancerProPlanTier } from '@/lib/freelancerPlan'
+import { loadProToolsPlan } from '@/lib/proEntitlement'
 import { enrichPortfolioProjectsThumbnails } from '@/lib/freelancerPortfolioTable'
 import { nativeBinaryHasWebView } from '@/lib/nativeWebView'
 import { portfolioVideoEmbed, type PortfolioVideoEmbed } from '@/lib/portfolioVideoEmbed'
@@ -144,7 +145,7 @@ export function FreelancerPublicProfileContent({
       const { data: p } = await supabase.from('profiles').select('role').eq('id', authUserId).maybeSingle()
       if (cancelled) return
       const role = resolveAppRole(p?.role, user)
-      const plan = resolveFreelancerPlanFromUser(user)
+      const plan = user ? await loadProToolsPlan(user.id) : 'free'
       const freelancerCanCreatePrivate = canFreelancerCreatePrivateProjects(plan)
       setViewerCanUseAvailabilityInvite(
         Boolean(user) &&

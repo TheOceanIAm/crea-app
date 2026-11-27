@@ -29,8 +29,7 @@ import {
   companyJobListingMonthStartUtc,
   companyJobListingPostCap,
 } from '@/lib/company-plan'
-import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
-import { isWithinPlatformTrialPeriod } from '@/lib/platformTrial'
+import { proToolsUnlocked } from '@/lib/proEntitlement'
 
 const BUDGET_TYPES = [
   { id: 'negotiable', label: 'Negotiable' },
@@ -150,21 +149,15 @@ export default function CompanyPostJobScreen() {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('subscription_tier, trial_ends_at, beta_invite')
+      .select('trial_ends_at, billing_status, stripe_sub_id')
       .eq('id', user.id)
       .maybeSingle()
-    const { data: cp } = await supabase
-      .from('company_profiles')
-      .select('subscription_plan')
-      .eq('id', user.id)
-      .maybeSingle()
-    const plan = resolveCompanySubscriptionPlanFromSources(
-      user,
-      profile?.subscription_tier,
-      cp?.subscription_plan
-    )
-    const inPlatformTrial = isWithinPlatformTrialPeriod(profile?.trial_ends_at, user.created_at)
-    const cap = companyJobListingPostCap(plan, inPlatformTrial)
+    const unlocked = proToolsUnlocked({
+      trialEndsAt: profile?.trial_ends_at,
+      billingStatus: profile?.billing_status,
+      stripeSubId: profile?.stripe_sub_id,
+    })
+    const cap = companyJobListingPostCap(unlocked ? 'pro' : 'free', false)
     if (Number.isFinite(cap)) {
       const monthStart = companyJobListingMonthStartUtc()
       const { count, error: countErr } = await supabase

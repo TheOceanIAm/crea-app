@@ -22,7 +22,8 @@ import { getCreaWebBaseUrl, openCreaWebPath } from '@/lib/creaWeb'
 import { jobShareUrl } from '@/lib/shareLinks'
 import { formatBudgetDisplay } from '@/lib/budgetFormatting'
 import { formatJobListingMeta } from '@/lib/jobListingMeta'
-import { freelancerCanApplyToJobs, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
+import { freelancerCanApplyToJobs } from '@/lib/freelancerPlan'
+import { proToolsUnlocked } from '@/lib/proEntitlement'
 import {
   findBookingReplyStatus,
   bookingOpenDeepLinkMatchesJob,
@@ -148,12 +149,18 @@ export default function JobDetailScreen() {
     if (user) {
       const { data: prof } = await supabase
         .from('profiles')
-        .select('role, subscription_tier')
+        .select('role, trial_ends_at, billing_status, stripe_sub_id')
         .eq('id', user.id)
         .single()
       resolvedRole = resolveAppRole(prof?.role, user)
       setRole(prof?.role ?? null)
-      const plan = resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier)
+      const plan = proToolsUnlocked({
+        trialEndsAt: prof?.trial_ends_at,
+        billingStatus: prof?.billing_status,
+        stripeSubId: prof?.stripe_sub_id,
+      })
+        ? 'pro'
+        : 'free'
       setFreelancerPlan(plan)
     } else {
       setRole(null)

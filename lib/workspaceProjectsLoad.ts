@@ -2,10 +2,8 @@ import type { User } from '@supabase/supabase-js'
 import { getCache, setCache } from '@/lib/appCache'
 import { freelancerCustomerJobVisibleToFreelancer } from '@/lib/freelancerCustomerJobVisibility'
 import { formatBudgetDisplay, resolveListingBudgetFields } from '@/lib/budgetFormatting'
-import {
-  canFreelancerCreatePrivateProjects,
-  resolveFreelancerPlanFromUserAndProfileTier,
-} from '@/lib/freelancerPlan'
+import { canFreelancerCreatePrivateProjects } from '@/lib/freelancerPlan'
+import { loadProToolsPlan } from '@/lib/proEntitlement'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
@@ -306,7 +304,7 @@ async function loadWorkspaceProjectsLocal(user: User): Promise<WorkspaceProjects
     }
   }
 
-  const plan = resolveFreelancerPlanFromUserAndProfileTier(user, p?.subscription_tier)
+  const plan = await loadProToolsPlan(user.id)
   const nextCanPrivate = canFreelancerCreatePrivateProjects(plan)
 
   const displayName = (p?.name && String(p.name).trim()) || 'You'

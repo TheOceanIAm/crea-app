@@ -16,7 +16,8 @@ import { supabase } from '@/lib/supabase'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { notifyExpoEvent } from '@/lib/notifyExpoEvent'
-import { freelancerHasInvoicing, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { freelancerHasInvoicing } from '@/lib/freelancerPlan'
+import { loadProToolsPlan } from '@/lib/proEntitlement'
 import { ACCOUNT_ROLE_COPY } from '@/lib/accountRoleCopy'
 import { loadInvoiceBookedFeeForJob } from '@/lib/invoiceBookedFee'
 
@@ -61,7 +62,7 @@ export default function NewInvoiceScreen() {
 
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
     const role = resolveAppRole(profile?.role, user)
-    const plan = resolveFreelancerPlanFromUser(user)
+    const plan = await loadProToolsPlan(user.id)
     if (!isFreelancerProfile(role)) {
       setAllowed(false)
       setNeedsProPlan(false)

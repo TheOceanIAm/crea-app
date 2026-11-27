@@ -1,6 +1,7 @@
 import type { User } from '@supabase/supabase-js'
 import { getCache, setCache } from '@/lib/appCache'
-import { freelancerHasInvoicing, resolveFreelancerPlanFromUser } from '@/lib/freelancerPlan'
+import { freelancerHasInvoicing } from '@/lib/freelancerPlan'
+import { loadProToolsPlan } from '@/lib/proEntitlement'
 import { getAuthUser } from '@/lib/getAuthUser'
 import { isCompanyProfile, resolveAppRole } from '@/lib/profileRole'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
@@ -190,7 +191,7 @@ export async function loadInvoicesListCache(user: User): Promise<InvoicesListCac
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
   const resolvedRole = resolveAppRole(profile?.role, user)
   const role = isCompanyProfile(resolvedRole) ? 'company' : 'freelancer'
-  const freelancerPlan = resolveFreelancerPlanFromUser(user)
+  const freelancerPlan = await loadProToolsPlan(user.id)
   const budgetAllowed = role === 'company' || freelancerHasInvoicing(freelancerPlan)
   const canUseInvoicing = role === 'company' || freelancerHasInvoicing(freelancerPlan)
 

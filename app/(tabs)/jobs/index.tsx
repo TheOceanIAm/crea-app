@@ -31,10 +31,8 @@ import { isCeoUserId } from '@/lib/ceo'
 import { isMarketplaceExcludedCompanyId } from '@/lib/marketplaceExcludedCompanies'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import { ICON_STROKE } from '@/lib/iconTheme'
-import {
-  freelancerCanApplyToJobs,
-  resolveFreelancerPlanFromUserAndProfileTier,
-} from '@/lib/freelancerPlan'
+import { freelancerCanApplyToJobs } from '@/lib/freelancerPlan'
+import { proToolsUnlocked } from '@/lib/proEntitlement'
 import { publishCeoExternalJob, type ExternalJobEngagement } from '@/lib/ceoExternalJobsApi'
 import { instagramUrl, linkedinUrl, normalizeExternalUrl } from '@/lib/profilePublicLinks'
 import {
@@ -269,11 +267,17 @@ export default function JobsListScreen() {
       if (!role || plan == null) {
         const { data: prof } = await supabase
           .from('profiles')
-          .select('role, subscription_tier')
+          .select('role, trial_ends_at, billing_status, stripe_sub_id')
           .eq('id', user.id)
           .maybeSingle()
         role = resolveAppRole(prof?.role, user)
-        plan = resolveFreelancerPlanFromUserAndProfileTier(user, prof?.subscription_tier)
+        plan = proToolsUnlocked({
+          trialEndsAt: prof?.trial_ends_at,
+          billingStatus: prof?.billing_status,
+          stripeSubId: prof?.stripe_sub_id,
+        })
+          ? 'pro'
+          : 'free'
       }
 
       setIsFreeFreelancer(isFreelancerProfile(role) && !freelancerCanApplyToJobs(plan))

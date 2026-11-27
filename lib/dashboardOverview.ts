@@ -21,9 +21,9 @@ import {
   freelancerHasInvoicing,
   isFreelancerPro,
   isFreelancerTalentPoolPlan,
-  resolveFreelancerPlanFromUser,
   type FreelancerPlan,
 } from '@/lib/freelancerPlan'
+import { proToolsUnlocked } from '@/lib/proEntitlement'
 import { isCompanyPro } from '@/lib/company-plan'
 import { getCache, setCache } from '@/lib/appCache'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
@@ -249,7 +249,7 @@ async function loadDashboardOverviewLocal(userId: string): Promise<DashboardOver
   const [{ data: profile }, { data: { user } }] = await Promise.all([
     supabase
       .from('profiles')
-      .select('name, role, avatar_url, trial_ends_at, created_at, subscription_tier')
+      .select('name, role, avatar_url, trial_ends_at, created_at, subscription_tier, billing_status, stripe_sub_id')
       .eq('id', userId)
       .single(),
     supabase.auth.getUser(),
@@ -259,7 +259,14 @@ async function loadDashboardOverviewLocal(userId: string): Promise<DashboardOver
   const resolvedName = await ensureOwnProfileName(user)
   const resolvedRole = resolveAppRole(profile?.role, user)
   const resolvedFreelancerPlan = isFreelancerProfile(resolvedRole)
-    ? resolveFreelancerPlanFromUser(user)
+    ? proToolsUnlocked({
+        userId,
+        trialEndsAt: profile?.trial_ends_at,
+        billingStatus: profile?.billing_status,
+        stripeSubId: profile?.stripe_sub_id,
+      })
+      ? 'pro'
+      : 'free'
     : 'free'
   const av = (profile?.avatar_url as string | undefined)?.trim()
   const avatarUrl = av && /^https?:\/\//i.test(av) ? av : null

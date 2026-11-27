@@ -25,7 +25,8 @@ import { getCache, setCache } from '@/lib/appCache'
 import { hydrateTalentPoolFromDisk, talentPoolCacheKey } from '@/lib/talentPoolPrefetch'
 import { peekWarmedOverview } from '@/lib/warmAppCaches'
 import { isCeoProfile, isCompanyProfile, isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
-import { isFreelancerTalentPoolPlan, resolveFreelancerPlanFromUserAndProfileTier } from '@/lib/freelancerPlan'
+import { isFreelancerTalentPoolPlan } from '@/lib/freelancerPlan'
+import { loadProToolsPlan } from '@/lib/proEntitlement'
 import { ICON_STROKE } from '@/lib/iconTheme'
 import { ResponsiveScreen } from '@/components/ResponsiveScreen'
 import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
@@ -389,9 +390,9 @@ export default function TalentPoolScreen() {
       }
     }
 
-    const { data: p } = await supabase.from('profiles').select('role, subscription_tier').eq('id', user.id).single()
+    const { data: p } = await supabase.from('profiles').select('role').eq('id', user.id).single()
     const role = resolveAppRole(p?.role, user)
-    const plan = resolveFreelancerPlanFromUserAndProfileTier(user, p?.subscription_tier)
+    const plan = await loadProToolsPlan(user.id)
     const canViewTalentPool =
       isCompanyProfile(role) ||
       isCeoProfile(role) ||

@@ -40,13 +40,11 @@ import {
   projectStatusDisplayLabel,
   projectStatusVariant,
 } from '@/lib/projectStatusDisplay'
-import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
-import { isCompanyPro } from '@/lib/company-plan'
 import {
   isFreelancerStarterPlan,
   isFreelancerWorkspaceOnlyPlan,
-  resolveFreelancerPlanFromUser,
 } from '@/lib/freelancerPlan'
+import { loadProToolsPlan } from '@/lib/proEntitlement'
 import { isFreelancerProfile, resolveAppRole } from '@/lib/profileRole'
 import {
   freelancerProductionSunAllowed,
@@ -316,7 +314,7 @@ export default function ProjectWorkspaceScreen() {
     const [profileRes, projectRes] = await Promise.all([
       supabase
         .from('profiles')
-        .select('role, subscription_tier')
+        .select('role')
         .eq('id', user.id)
         .maybeSingle(),
       supabase
@@ -329,7 +327,7 @@ export default function ProjectWorkspaceScreen() {
     ])
     const profile = profileRes.data
     const role = resolveAppRole(profile?.role, user)
-    const freelancerPlan = resolveFreelancerPlanFromUser(user)
+    const freelancerPlan = await loadProToolsPlan(user.id)
     const isStarterFreelancer = isFreelancerProfile(role) && isFreelancerStarterPlan(freelancerPlan)
     setStarterFreelancerPlan(isStarterFreelancer)
 
@@ -342,20 +340,7 @@ export default function ProjectWorkspaceScreen() {
       sunTrialIso = typeof trialData === 'string' ? trialData : null
     }
 
-    let companyPlan: 'free' | 'pro' = 'free'
-    if (role === 'company') {
-      const { data: cp } = await supabase
-        .from('company_profiles')
-        .select('subscription_plan')
-        .eq('id', user.id)
-        .maybeSingle()
-      companyPlan = resolveCompanySubscriptionPlanFromSources(
-        user,
-        (profile as { subscription_tier?: string | null } | null)?.subscription_tier,
-        (cp as { subscription_plan?: string } | null)?.subscription_plan
-      )
-    }
-    const companySunAccess = role === 'company' && isCompanyPro(companyPlan)
+    const companySunAccess = role === 'company' && (await loadProToolsPlan(user.id)) === 'pro'
 
     setWorkspaceOnlyPlan(
       isFreelancerProfile(role) && isFreelancerWorkspaceOnlyPlan(freelancerPlan)
@@ -390,7 +375,7 @@ export default function ProjectWorkspaceScreen() {
       const shellOnly = await aggregatePromise
       if (shellOnly?.project) {
         const ap = shellOnly.project
-        const freelancerPlanAgg = resolveFreelancerPlanFromUser(user)
+        const freelancerPlanAgg = await loadProToolsPlan(user.id)
         const roleHint = shellOnly.isOwner ? 'company' : 'freelancer'
         setStarterFreelancerPlan(roleHint !== 'company' && isFreelancerStarterPlan(freelancerPlanAgg))
         setWorkspaceOnlyPlan(
@@ -568,7 +553,7 @@ export default function ProjectWorkspaceScreen() {
     const shell = await aggregatePromise
     if (shell?.project) {
       const ap = shell.project
-      const freelancerPlanAgg = resolveFreelancerPlanFromUser(user)
+      const freelancerPlanAgg = await loadProToolsPlan(user.id)
       const roleHint = shell.isOwner ? 'company' : 'freelancer'
       const isStarterFreelancerAgg =
         roleHint !== 'company' && isFreelancerStarterPlan(freelancerPlanAgg)

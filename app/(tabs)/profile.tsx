@@ -78,8 +78,8 @@ import {
 import { registerForExpoPushTokenAsync } from '@/lib/pushNotifications'
 import { CreaProfileTabSkeleton } from '@/components/CreaLoading'
 import { useUnreadDmCount } from '@/hooks/useUnreadDmCount'
-import { resolveCompanySubscriptionPlanFromSources } from '@/lib/companyPlanFromSession'
-import { resolveFreelancerPlanFromUser, isFreelancerPro } from '@/lib/freelancerPlan'
+import { isFreelancerPro } from '@/lib/freelancerPlan'
+import { loadProToolsPlan } from '@/lib/proEntitlement'
 import {
   freelancerPlanDescription,
   freelancerPlanLabel,
@@ -747,26 +747,17 @@ export default function ProfileScreen() {
       setTaxNumber(String(data?.tax_number ?? fp?.steuer_id ?? ''))
       setVatRegistered(Boolean(data?.vat_registered ?? fp?.vat_registered))
       setNotif(parseNotificationSettings(data?.notification_settings))
-      const dbTier = String((data?.subscription_tier as string) || '')
-        .trim()
-        .toLowerCase()
-      const authTier = resolveFreelancerPlanFromUser(user)
-      // Freelancers: JWT `freelancer_plan` (same as web). Companies: JWT `company_plan` → company_profiles → profiles (crea-services webhook order).
       let effectiveTier: 'free' | 'pro'
       if (appRole === 'freelancer') {
         setCompanyCpExtras(null)
-        effectiveTier = authTier
+        effectiveTier = await loadProToolsPlan(user.id)
       } else if (appRole === 'company') {
         const cp = companyProfileResult.data
         setCompanyCpExtras(cp && typeof cp === 'object' ? (cp as CompanyProfileCompletionRow) : null)
-        effectiveTier = resolveCompanySubscriptionPlanFromSources(
-          user,
-          data?.subscription_tier,
-          (cp as { subscription_plan?: string } | null)?.subscription_plan
-        )
+        effectiveTier = await loadProToolsPlan(user.id)
       } else {
         setCompanyCpExtras(null)
-        effectiveTier = normalizeFreelancerPlanKey(dbTier)
+        effectiveTier = 'free'
       }
       setSubscriptionTier(effectiveTier)
       const dayRateCanonical =

@@ -27,10 +27,8 @@ import {
 import { deleteCompanyJob } from '@/lib/deleteCompanyJob'
 import { deletePrivateWorkspaceProject } from '@/lib/deletePrivateWorkspaceProject'
 import { supabase } from '@/lib/supabase'
-import {
-  canFreelancerCreatePrivateProjects,
-  resolveFreelancerPlanFromUserAndProfileTier,
-} from '@/lib/freelancerPlan'
+import { canFreelancerCreatePrivateProjects } from '@/lib/freelancerPlan'
+import { loadProToolsPlan } from '@/lib/proEntitlement'
 import {
   cacheWorkspaceProjects,
   hydrateWorkspaceProjectsFromDisk,
@@ -287,12 +285,7 @@ export default function WorkspaceProjectsScreen() {
     }
     const isCompany = viewerRole === 'company'
     if (!isCompany) {
-      const { data: selfProfile } = await supabase
-        .from('profiles')
-        .select('subscription_tier')
-        .eq('id', u.id)
-        .maybeSingle()
-      if (!canFreelancerCreatePrivateProjects(resolveFreelancerPlanFromUserAndProfileTier(u, selfProfile?.subscription_tier))) {
+      if (!canFreelancerCreatePrivateProjects(await loadProToolsPlan(u.id))) {
         Alert.alert('Projects', 'Creating lead-owned private workspaces requires Pro or Workspace. Upgrade on the web.')
         return
       }

@@ -7,10 +7,8 @@ import {
   isFreelancerProfile,
   resolveAppRole,
 } from '@/lib/profileRole'
-import {
-  isFreelancerTalentPoolPlan,
-  resolveFreelancerPlanFromUserAndProfileTier,
-} from '@/lib/freelancerPlan'
+import { isFreelancerTalentPoolPlan } from '@/lib/freelancerPlan'
+import { loadProToolsPlan } from '@/lib/proEntitlement'
 import { readPersistedCache, writePersistedCache } from '@/lib/persistedCache'
 import { supabase } from '@/lib/supabase'
 import { resolveProfileDisplayName } from '@/lib/resolveProfileDisplayName'
@@ -206,11 +204,11 @@ export async function prefetchTalentPoolData(userId: string): Promise<void> {
 
     const { data: p } = await supabase
       .from('profiles')
-      .select('role, subscription_tier')
+      .select('role')
       .eq('id', user.id)
       .single()
     const role = resolveAppRole(p?.role, user)
-    const plan = resolveFreelancerPlanFromUserAndProfileTier(user, p?.subscription_tier)
+    const plan = await loadProToolsPlan(user.id)
     const canView =
       isCompanyProfile(role) ||
       isCeoProfile(role) ||
